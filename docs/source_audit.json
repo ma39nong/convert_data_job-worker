@@ -1,0 +1,344 @@
+[
+  {
+    "path": "/home/user/franka_teleop_data/bags/gello_sharpa/episode0/episode0_0.db3",
+    "arms": {
+      "left": {
+        "count": 1937,
+        "names": [
+          "left_fr3_joint1",
+          "left_fr3_joint3",
+          "left_fr3_joint5",
+          "left_fr3_joint2",
+          "left_fr3_joint6",
+          "left_fr3_joint7",
+          "left_fr3_joint4"
+        ],
+        "median_record_dt_ms": 4.999773,
+        "record_dt_ms_p99": 5.243998500000001,
+        "median_header_dt_ms": 4.999933,
+        "header_record_offset_ms_p50": -0.050805,
+        "joint_step_rad_percentiles": [
+          7.152557373046875e-07,
+          2.1457672119140625e-06,
+          2.7418136596679688e-06,
+          3.4570693969726562e-06,
+          4.172325134277344e-06,
+          6.67572021484375e-06,
+          8.940696716308594e-06
+        ],
+        "fraction_below_1e-4": 1.0
+      },
+      "right": {
+        "count": 1937,
+        "names": [
+          "right_fr3_joint3",
+          "right_fr3_joint4",
+          "right_fr3_joint5",
+          "right_fr3_joint7",
+          "right_fr3_joint2",
+          "right_fr3_joint1",
+          "right_fr3_joint6"
+        ],
+        "median_record_dt_ms": 4.999988,
+        "record_dt_ms_p99": 5.1856122000000004,
+        "median_header_dt_ms": 5.000494,
+        "header_record_offset_ms_p50": -0.04774,
+        "joint_step_rad_percentiles": [
+          9.5367431640625e-07,
+          2.6226043701171875e-06,
+          3.3080577850341797e-06,
+          3.993511199951172e-06,
+          4.798173904418945e-06,
+          8.010864257812505e-06,
+          9.715557098388672e-06
+        ],
+        "fraction_below_1e-4": 1.0
+      }
+    }
+  },
+  {
+    "path": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode0/episode0_0.db3",
+    "arms": {
+      "left": {
+        "count": 14724,
+        "names": [
+          "left_fr3_joint1",
+          "left_fr3_joint3",
+          "left_fr3_joint5",
+          "left_fr3_joint2",
+          "left_fr3_joint6",
+          "left_fr3_joint7",
+          "left_fr3_joint4"
+        ],
+        "median_record_dt_ms": 4.999862,
+        "record_dt_ms_p99": 5.32549864,
+        "median_header_dt_ms": 4.999796,
+        "header_record_offset_ms_p50": -0.061012,
+        "joint_step_rad_percentiles": [
+          4.76837158203125e-07,
+          2.5033950805664062e-06,
+          3.0994415283203125e-06,
+          4.0531158447265625e-06,
+          5.245208740234375e-06,
+          3.5881996154785156e-05,
+          9.012222290039062e-05
+        ],
+        "fraction_below_1e-4": 1.0
+      },
+      "right": {
+        "count": 14697,
+        "names": [
+          "right_fr3_joint3",
+          "right_fr3_joint4",
+          "right_fr3_joint5",
+          "right_fr3_joint7",
+          "right_fr3_joint2",
+          "right_fr3_joint1",
+          "right_fr3_joint6"
+        ],
+        "median_record_dt_ms": 4.9998095,
+        "record_dt_ms_p99": 5.3467158999999995,
+        "median_header_dt_ms": 4.999858,
+        "header_record_offset_ms_p50": -0.06001,
+        "joint_step_rad_percentiles": [
+          7.152557373046875e-07,
+          2.8349459171295166e-06,
+          3.5762786865234375e-06,
+          4.887580871582031e-06,
+          0.00011947378516197205,
+          0.0011613607406616207,
+          0.001809835433959961
+        ],
+        "fraction_below_1e-4": 0.7329205225911812
+      }
+    }
+  },
+  {
+    "path": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode284/episode284_0.db3",
+    "arms": {
+      "left": {
+        "count": 10382,
+        "names": [
+          "left_fr3_joint1",
+          "left_fr3_joint3",
+          "left_fr3_joint5",
+          "left_fr3_joint2",
+          "left_fr3_joint6",
+          "left_fr3_joint7",
+          "left_fr3_joint4"
+        ],
+        "median_record_dt_ms": 5.000061,
+        "record_dt_ms_p99": 5.2436372,
+        "median_header_dt_ms": 5.000171,
+        "header_record_offset_ms_p50": -0.051437,
+        "joint_step_rad_percentiles": [
+          7.450580596923828e-07,
+          3.4570693969726562e-06,
+          4.76837158203125e-06,
+          1.6808509826660156e-05,
+          0.00024449825286865234,
+          0.002075862884521517,
+          0.0036706924438476562
+        ],
+        "fraction_below_1e-4": 0.6150659859358444
+      },
+      "right": {
+        "count": 10406,
+        "names": [
+          "right_fr3_joint3",
+          "right_fr3_joint4",
+          "right_fr3_joint5",
+          "right_fr3_joint7",
+          "right_fr3_joint2",
+          "right_fr3_joint1",
+          "right_fr3_joint6"
+        ],
+        "median_record_dt_ms": 5.000341,
+        "record_dt_ms_p99": 5.269555,
+        "median_header_dt_ms": 5.000041,
+        "header_record_offset_ms_p50": -0.068499,
+        "joint_step_rad_percentiles": [
+          7.152557373046875e-07,
+          3.4570693969726562e-06,
+          4.76837158203125e-06,
+          8.821487426757812e-06,
+          8.344650268554688e-05,
+          0.0011357736587524377,
+          0.0025826692581176758
+        ],
+        "fraction_below_1e-4": 0.7629024507448342
+      }
+    }
+  },
+  {
+    "path": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode34/episode34_0.db3",
+    "arms": {
+      "left": {
+        "count": 6989,
+        "names": [
+          "left_fr3_joint1",
+          "left_fr3_joint3",
+          "left_fr3_joint5",
+          "left_fr3_joint2",
+          "left_fr3_joint6",
+          "left_fr3_joint7",
+          "left_fr3_joint4"
+        ],
+        "median_record_dt_ms": 4.999622,
+        "record_dt_ms_p99": 5.3084200599999996,
+        "median_header_dt_ms": 5.000715,
+        "header_record_offset_ms_p50": -0.073134,
+        "joint_step_rad_percentiles": [
+          7.152557373046875e-07,
+          2.86102294921875e-06,
+          4.172325134277344e-06,
+          9.775161743164062e-06,
+          0.00018453598022460938,
+          0.0010973215103149414,
+          0.001305699348449707
+        ],
+        "fraction_below_1e-4": 0.6961934745277619
+      },
+      "right": {
+        "count": 6990,
+        "names": [
+          "right_fr3_joint3",
+          "right_fr3_joint4",
+          "right_fr3_joint5",
+          "right_fr3_joint7",
+          "right_fr3_joint2",
+          "right_fr3_joint1",
+          "right_fr3_joint6"
+        ],
+        "median_record_dt_ms": 5.000336,
+        "record_dt_ms_p99": 5.3064624,
+        "median_header_dt_ms": 5.000425,
+        "header_record_offset_ms_p50": -0.058946,
+        "joint_step_rad_percentiles": [
+          1.0132789611816406e-06,
+          3.337860107421875e-06,
+          4.291534423828125e-06,
+          8.046627044677734e-06,
+          0.0003364086151123047,
+          0.0013297986984252927,
+          0.001812577247619629
+        ],
+        "fraction_below_1e-4": 0.648447560452139
+      }
+    }
+  },
+  {
+    "path": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode35/episode35_0.db3",
+    "arms": {
+      "left": {
+        "count": 8680,
+        "names": [
+          "left_fr3_joint1",
+          "left_fr3_joint3",
+          "left_fr3_joint5",
+          "left_fr3_joint2",
+          "left_fr3_joint6",
+          "left_fr3_joint7",
+          "left_fr3_joint4"
+        ],
+        "median_record_dt_ms": 5.000024,
+        "record_dt_ms_p99": 5.313348059999999,
+        "median_header_dt_ms": 5.000433,
+        "header_record_offset_ms_p50": -0.072798,
+        "joint_step_rad_percentiles": [
+          7.152557373046875e-07,
+          3.285706043243408e-06,
+          4.351139068603516e-06,
+          8.821487426757812e-06,
+          0.0001787245273590088,
+          0.0010970425605773923,
+          0.0014541149139404297
+        ],
+        "fraction_below_1e-4": 0.6875216038714138
+      },
+      "right": {
+        "count": 8681,
+        "names": [
+          "right_fr3_joint3",
+          "right_fr3_joint4",
+          "right_fr3_joint5",
+          "right_fr3_joint7",
+          "right_fr3_joint2",
+          "right_fr3_joint1",
+          "right_fr3_joint6"
+        ],
+        "median_record_dt_ms": 5.0003595,
+        "record_dt_ms_p99": 5.28743389,
+        "median_header_dt_ms": 5.0003795,
+        "header_record_offset_ms_p50": -0.059978,
+        "joint_step_rad_percentiles": [
+          6.258487701416016e-07,
+          3.337860107421875e-06,
+          4.410743713378906e-06,
+          8.225440979003906e-06,
+          0.00023458898067474365,
+          0.0011081820726394653,
+          0.0014355331659317017
+        ],
+        "fraction_below_1e-4": 0.6580645161290323
+      }
+    }
+  },
+  {
+    "path": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode36/episode36_0.db3",
+    "arms": {
+      "left": {
+        "count": 6668,
+        "names": [
+          "left_fr3_joint1",
+          "left_fr3_joint3",
+          "left_fr3_joint5",
+          "left_fr3_joint2",
+          "left_fr3_joint6",
+          "left_fr3_joint7",
+          "left_fr3_joint4"
+        ],
+        "median_record_dt_ms": 4.999167,
+        "record_dt_ms_p99": 5.31510196,
+        "median_header_dt_ms": 5.000489,
+        "header_record_offset_ms_p50": -0.071205,
+        "joint_step_rad_percentiles": [
+          8.940696716308594e-07,
+          3.5762786865234375e-06,
+          4.76837158203125e-06,
+          1.3697892427444458e-05,
+          0.00046879053115844727,
+          0.0015572452545166027,
+          0.0019578933715820312
+        ],
+        "fraction_below_1e-4": 0.615569221538923
+      },
+      "right": {
+        "count": 6667,
+        "names": [
+          "right_fr3_joint3",
+          "right_fr3_joint4",
+          "right_fr3_joint5",
+          "right_fr3_joint7",
+          "right_fr3_joint2",
+          "right_fr3_joint1",
+          "right_fr3_joint6"
+        ],
+        "median_record_dt_ms": 4.9998385,
+        "record_dt_ms_p99": 5.302368750000001,
+        "median_header_dt_ms": 5.0005595,
+        "header_record_offset_ms_p50": -0.060439,
+        "joint_step_rad_percentiles": [
+          9.5367431640625e-07,
+          3.293156623840332e-06,
+          4.291534423828125e-06,
+          7.62939453125e-06,
+          0.00018540024757385254,
+          0.0010167457163333894,
+          0.0013017505407333374
+        ],
+        "fraction_below_1e-4": 0.7077707770777077
+      }
+    }
+  }
+]

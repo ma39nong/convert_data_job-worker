@@ -1,0 +1,65 @@
+[
+  {
+    "path": "/home/user/franka_teleop_data/bags/gello_sharpa/episode0",
+    "duration": 9.644,
+    "runs": 0,
+    "removed_s": 0.0,
+    "invalid": 0,
+    "frames": 1937,
+    "algorithm": "windowed_motion_causal_state"
+  },
+  {
+    "path": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode0",
+    "duration": 73.343,
+    "runs": 8,
+    "removed_s": 11.275112958,
+    "invalid": 31,
+    "frames": 14724,
+    "algorithm": "windowed_motion_causal_state"
+  },
+  {
+    "path": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode284",
+    "duration": 51.824,
+    "runs": 1,
+    "removed_s": 0.034997388,
+    "invalid": 25,
+    "frames": 10406,
+    "algorithm": "windowed_motion_causal_state"
+  },
+  {
+    "path": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode34",
+    "duration": 34.819,
+    "runs": 3,
+    "removed_s": 5.665938982,
+    "invalid": 1,
+    "frames": 6990,
+    "algorithm": "windowed_motion_causal_state"
+  },
+  {
+    "path": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode35",
+    "duration": 43.239,
+    "runs": 6,
+    "removed_s": 5.805741843,
+    "invalid": 1,
+    "frames": 8681,
+    "algorithm": "windowed_motion_causal_state"
+  },
+  {
+    "path": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode36",
+    "duration": 33.211,
+    "runs": 2,
+    "removed_s": 4.935757577,
+    "invalid": 0,
+    "frames": 6667,
+    "algorithm": "windowed_motion_causal_state"
+  },
+  {
+    "path": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode41",
+    "duration": 35.919,
+    "runs": 7,
+    "removed_s": 5.623356216,
+    "invalid": 1,
+    "frames": 7216,
+    "algorithm": "windowed_motion_causal_state"
+  }
+]

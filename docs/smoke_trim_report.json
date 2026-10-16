@@ -1,0 +1,338 @@
+{
+  "source": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode36",
+  "output": "/home/user/convert_data_job-worker/outputs/smoke/episode36",
+  "time_basis": "bag_record_timestamp",
+  "interval_semantics": "[start,end)",
+  "source_start_ns": "1792129664999340372",
+  "timestamps": "compact_shared_time_mapping",
+  "time_fields_updated": 35924,
+  "time_fields_clamped_inside_removed_ranges": 18,
+  "unmodified_payload_types": {
+    "teleop_interfaces/msg/ArmCommandStatus": 2766
+  },
+  "payload_policy": "Only typed builtin_interfaces/Time bytes change; other payload bytes remain identical. Unknown types keep payloads unchanged.",
+  "ranges": [
+    [
+      4.26196657,
+      4.27690189
+    ],
+    [
+      12.446107999,
+      17.366930256
+    ]
+  ],
+  "deleted_seconds": 4.935757577,
+  "deleted": 7869,
+  "kept": 45066,
+  "topics": [
+    {
+      "name": "/cam0/color/camera_info",
+      "before": 663,
+      "deleted": 99,
+      "kept": 564
+    },
+    {
+      "name": "/cam0/color/image_raw",
+      "before": 664,
+      "deleted": 99,
+      "kept": 565
+    },
+    {
+      "name": "/cam0/depth/camera_info",
+      "before": 663,
+      "deleted": 99,
+      "kept": 564
+    },
+    {
+      "name": "/cam0/depth/image_raw",
+      "before": 664,
+      "deleted": 99,
+      "kept": 565
+    },
+    {
+      "name": "/cam1/color/camera_info",
+      "before": 997,
+      "deleted": 148,
+      "kept": 849
+    },
+    {
+      "name": "/cam1/color/image_raw",
+      "before": 997,
+      "deleted": 148,
+      "kept": 849
+    },
+    {
+      "name": "/cam2/color/camera_info",
+      "before": 997,
+      "deleted": 148,
+      "kept": 849
+    },
+    {
+      "name": "/cam2/color/image_raw",
+      "before": 997,
+      "deleted": 148,
+      "kept": 849
+    },
+    {
+      "name": "/left/franka/joint_states",
+      "before": 6668,
+      "deleted": 991,
+      "kept": 5677
+    },
+    {
+      "name": "/right/franka/joint_states",
+      "before": 6667,
+      "deleted": 991,
+      "kept": 5676
+    },
+    {
+      "name": "/sharpa/left/command",
+      "before": 1989,
+      "deleted": 297,
+      "kept": 1692
+    },
+    {
+      "name": "/sharpa/left/joint_states",
+      "before": 997,
+      "deleted": 148,
+      "kept": 849
+    },
+    {
+      "name": "/sharpa/left/tactile/index/deformation",
+      "before": 1026,
+      "deleted": 153,
+      "kept": 873
+    },
+    {
+      "name": "/sharpa/left/tactile/index/wrench",
+      "before": 1027,
+      "deleted": 153,
+      "kept": 874
+    },
+    {
+      "name": "/sharpa/left/tactile/middle/deformation",
+      "before": 1027,
+      "deleted": 153,
+      "kept": 874
+    },
+    {
+      "name": "/sharpa/left/tactile/middle/wrench",
+      "before": 1027,
+      "deleted": 153,
+      "kept": 874
+    },
+    {
+      "name": "/sharpa/left/tactile/pinky/deformation",
+      "before": 1026,
+      "deleted": 152,
+      "kept": 874
+    },
+    {
+      "name": "/sharpa/left/tactile/pinky/wrench",
+      "before": 1027,
+      "deleted": 152,
+      "kept": 875
+    },
+    {
+      "name": "/sharpa/left/tactile/ring/deformation",
+      "before": 1026,
+      "deleted": 152,
+      "kept": 874
+    },
+    {
+      "name": "/sharpa/left/tactile/ring/wrench",
+      "before": 1026,
+      "deleted": 152,
+      "kept": 874
+    },
+    {
+      "name": "/sharpa/left/tactile/thumb/deformation",
+      "before": 1027,
+      "deleted": 153,
+      "kept": 874
+    },
+    {
+      "name": "/sharpa/left/tactile/thumb/wrench",
+      "before": 1027,
+      "deleted": 153,
+      "kept": 874
+    },
+    {
+      "name": "/sharpa/right/command",
+      "before": 1969,
+      "deleted": 294,
+      "kept": 1675
+    },
+    {
+      "name": "/sharpa/right/joint_states",
+      "before": 997,
+      "deleted": 148,
+      "kept": 849
+    },
+    {
+      "name": "/sharpa/right/tactile/index/deformation",
+      "before": 1024,
+      "deleted": 152,
+      "kept": 872
+    },
+    {
+      "name": "/sharpa/right/tactile/index/wrench",
+      "before": 1024,
+      "deleted": 152,
+      "kept": 872
+    },
+    {
+      "name": "/sharpa/right/tactile/middle/deformation",
+      "before": 1024,
+      "deleted": 153,
+      "kept": 871
+    },
+    {
+      "name": "/sharpa/right/tactile/middle/wrench",
+      "before": 1024,
+      "deleted": 153,
+      "kept": 871
+    },
+    {
+      "name": "/sharpa/right/tactile/pinky/deformation",
+      "before": 1022,
+      "deleted": 152,
+      "kept": 870
+    },
+    {
+      "name": "/sharpa/right/tactile/pinky/wrench",
+      "before": 1022,
+      "deleted": 152,
+      "kept": 870
+    },
+    {
+      "name": "/sharpa/right/tactile/ring/deformation",
+      "before": 1026,
+      "deleted": 153,
+      "kept": 873
+    },
+    {
+      "name": "/sharpa/right/tactile/ring/wrench",
+      "before": 1026,
+      "deleted": 153,
+      "kept": 873
+    },
+    {
+      "name": "/sharpa/right/tactile/thumb/deformation",
+      "before": 1026,
+      "deleted": 151,
+      "kept": 875
+    },
+    {
+      "name": "/sharpa/right/tactile/thumb/wrench",
+      "before": 1026,
+      "deleted": 151,
+      "kept": 875
+    },
+    {
+      "name": "/teleop/arm_command_status",
+      "before": 3248,
+      "deleted": 482,
+      "kept": 2766
+    },
+    {
+      "name": "/teleop/validated_arm_commands",
+      "before": 3248,
+      "deleted": 482,
+      "kept": 2766
+    }
+  ],
+  "compact": true,
+  "unknown_types": [
+    "teleop_interfaces/msg/ArmCommandStatus"
+  ],
+  "mapping": [
+    {
+      "source_start_ns": "1792129669261306942",
+      "source_end_ns": "1792129669276242262",
+      "removed_ns": "14935320"
+    },
+    {
+      "source_start_ns": "1792129677445448371",
+      "source_end_ns": "1792129682366270628",
+      "removed_ns": "4920822257"
+    }
+  ],
+  "auto_idle_detection": {
+    "version": 2,
+    "algorithm": "windowed_motion_causal_state",
+    "config": {
+      "left_topic": "/left/franka/joint_states",
+      "right_topic": "/right/franka/joint_states",
+      "position_tolerance_rad": 0.0001,
+      "motion_window_s": 0.1,
+      "stationary_frames": 3,
+      "max_gap_factor": 3.0,
+      "max_pair_skew_ms": null
+    },
+    "frame_basis": "native_measured_arm_state",
+    "reference_topic": "/right/franka/joint_states",
+    "time_basis": "bag_record_timestamp",
+    "pairing": "causal_past_state",
+    "max_pair_skew_ns": 7499757,
+    "motion_window_s": 0.1,
+    "frames": 6667,
+    "invalid_frames": 0,
+    "edge_policy": "only_motion_bounded_internal_runs_keep_first_and_last",
+    "arms": {
+      "/left/franka/joint_states": {
+        "frames": 6668,
+        "joint_names": [
+          "left_fr3_joint1",
+          "left_fr3_joint2",
+          "left_fr3_joint3",
+          "left_fr3_joint4",
+          "left_fr3_joint5",
+          "left_fr3_joint6",
+          "left_fr3_joint7"
+        ],
+        "median_period_ns": 4999167,
+        "median_hz": 200.03332555203696,
+        "p99_period_ns": 5315101
+      },
+      "/right/franka/joint_states": {
+        "frames": 6667,
+        "joint_names": [
+          "right_fr3_joint1",
+          "right_fr3_joint2",
+          "right_fr3_joint3",
+          "right_fr3_joint4",
+          "right_fr3_joint5",
+          "right_fr3_joint6",
+          "right_fr3_joint7"
+        ],
+        "median_period_ns": 4999838,
+        "median_hz": 200.0064802099588,
+        "p99_period_ns": 5302368
+      }
+    },
+    "runs": [
+      {
+        "start_ns": "1792129669261306942",
+        "end_ns": "1792129669276242262",
+        "stationary_frames": 5
+      },
+      {
+        "start_ns": "1792129677445448371",
+        "end_ns": "1792129682366270628",
+        "stationary_frames": 990
+      }
+    ],
+    "ranges_seconds": [
+      [
+        "4.26196657",
+        "4.27690189"
+      ],
+      [
+        "12.446107999",
+        "17.366930256"
+      ]
+    ],
+    "deleted_seconds": 4.935757577
+  }
+}

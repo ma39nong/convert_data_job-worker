@@ -1,0 +1,10 @@
+left_topic: /left/franka/joint_states
+right_topic: /right/franka/joint_states
+# 每个 100 ms 滑动窗口内的最大关节变化范围；容纳静止噪声和微小伺服漂移。
+position_tolerance_rad: 0.0001
+motion_window_s: 0.1
+# 原生实测状态帧严格超过 3 帧，不改变 bag 采样频率。
+stationary_frames: 3
+max_gap_factor: 3.0
+# null：因果匹配过去的另一臂状态，最大年龄为较慢周期的 1.5 倍。
+max_pair_skew_ms: null

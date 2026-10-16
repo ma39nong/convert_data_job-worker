@@ -1,0 +1,45 @@
+{
+  "date": "2026-10-17",
+  "status": "passed",
+  "tests_passed": 88,
+  "groups": [
+    {
+      "robot": "wuji",
+      "episodes": 3,
+      "frames": 2763,
+      "preflight_ready": 3,
+      "preflight_not_ready": 0,
+      "independent_alignment": true,
+      "sensor_rows_compared": 2763,
+      "quality_report": "/home/user/convert_data_job-worker/outputs/jobs/wuji_stage2/quality_report.json"
+    },
+    {
+      "robot": "sharpa",
+      "episodes": 6,
+      "frames": 7094,
+      "preflight_ready": 6,
+      "preflight_not_ready": 0,
+      "independent_alignment": true,
+      "sensor_rows_compared": 148974,
+      "quality_report": "/home/user/convert_data_job-worker/outputs/jobs/sharpa_stage2/quality_report.json"
+    }
+  ],
+  "unchanged_training_files": 36,
+  "scope": [
+    "read-only source and list preflight",
+    "source-free structural verification",
+    "independent row-wise alignment audit",
+    "per-episode failure isolation",
+    "whole-chain and dataset quality reports"
+  ],
+  "data_semantics_changed": false,
+  "source_loss_rate_inferred": false,
+  "fault_tests": [
+    "wrong conversion action detected independently",
+    "corrupt episode isolated from good episodes",
+    "moved dataset checked without source or contract",
+    "python -O retains all checks",
+    "same-element-count wrong sensor shape rejected",
+    "unsupported depth encoding rejected before trimming"
+  ]
+}

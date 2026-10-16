@@ -54,7 +54,7 @@ def select_episodes(candidates, list_path, skip_ineligible=False):
     if skipped and not skip_ineligible:
         details = "\n".join(f"{s['episode']}: {s['reason']}" for s in skipped)
         raise ValueError("Listed bags failed collection validation:\n" + details
-                         + "\nFix the list, or explicitly use --skip-ineligible to omit these bags. Freshness rules stay unchanged.")
+                         + "\nFix the list or wait for eligible capture data; use check-list to inspect the selection. Freshness rules stay unchanged.")
     selected.sort(key=lambda item: int(Path(item["path"]).name.removeprefix("episode")))
     selection.update(selected_episodes=[Path(item["path"]).name for item in selected],
                      skipped=skipped, skip_ineligible=skip_ineligible)

@@ -243,9 +243,14 @@ def prepare_bag(item, config, contract, stage):
                                           global_index, config, contract, spec)
             episodes.append(result)
             global_index += result["length"]
+    trim_path = Path(item['path'])/'trim_report.json'
+    cleaning = None
+    if trim_path.exists():
+        trimmed = json.loads(trim_path.read_text())
+        cleaning = {k: trimmed[k] for k in ('source','deleted_seconds','deleted','kept','mapping','source_start_ns','unmodified_payload_types') if k in trimmed}
     if source.snapshot(item["path"]) != before:
         raise ValueError("Source changed during conversion; recording may still be active")
-    return {"source": item["path"], "source_snapshot": before, "alignment": aligned.report,
+    return {"source": item["path"], "source_snapshot": before, "alignment": aligned.report, "cleaning": cleaning,
             "episodes": episodes, "elapsed_seconds": round(time.monotonic() - started, 3)}
 
 

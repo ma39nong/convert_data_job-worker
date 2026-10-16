@@ -54,6 +54,33 @@ cp configs/wuji.yaml configs/my_wuji.yaml
 
 相对路径以项目根目录为基准解析。转换输出必须位于项目内；job 输出必须位于 `outputs/` 下。Wuji 和 Sharpa 应分别配置、分别输出，避免混入同一数据集。
 
+## 转换前体检与清单
+
+可以先检查输入，不生成清洗 bag 或数据集：
+
+```bash
+convert-worker inspect --config configs/my_wuji.yaml \
+  --report outputs/reports/input_check.json
+
+# 只检查清单中的来源；存在未就绪项时返回码为 2。
+convert-worker check-list lists/my_dataset.txt --config configs/my_wuji.yaml \
+  --report outputs/reports/list_check.json
+```
+
+体检检查采集状态、分卷、SQLite、消息计数、SHA-256、必需话题、自定义消息及命名关节。报告给出每路时间索引去重后的样本数、中位频率、时间间隔中位数/P99/最大值，以及 RGB、深度、触觉图的端点编码与尺寸。体检会读取源文件计算哈希；图像检查覆盖首尾样本，不替代正式转换中的全部选中帧解码和连续性校验。
+
+`--report` 可省略；指定时必须是项目 `outputs/` 下的新文件，不能位于输入目录内，也不覆盖已有报告。原始包尚未传输完成或缺少 metadata 的 episode 目录会列为未就绪，不会静默漏掉。
+
+TXT 清单支持数字、`episode1`、连续范围 `1-3`、空白或中英文逗号分隔以及 `#` 注释。重复、反向范围和缺失来源会报错：
+
+```text
+# 手动选择的同一机器人、同一任务数据
+1-3
+8
+```
+
+体检面向原始采集目录；已有清洗包在独立转换时通过保留的采集状态和裁剪报告校验。体检与 job 都支持 `--episode-list`；`--episode` 与 `--episode-list` 互斥。清单只是人工选择，不代表自动判断任务成功或数据质量等级。
+
 ## 完整工作流
 
 ```bash
@@ -65,6 +92,10 @@ convert-worker run --config configs/my_wuji.yaml \
 convert-worker run --config configs/my_wuji.yaml \
   --run-root outputs/jobs/my_dataset --resume
 
+# 按清单执行完整链路；后续追加清单后用同一路径和 --resume。
+convert-worker run --config configs/my_wuji.yaml \
+  --run-root outputs/jobs/selected_dataset --episode-list lists/my_dataset.txt
+
 # 仅处理指定包；--episode 可重复传入。
 convert-worker run --config configs/my_wuji.yaml \
   --run-root outputs/jobs/subset --episode episode1
@@ -74,7 +105,7 @@ convert-worker run --config configs/my_wuji.yaml \
 
 `--resume` 校验配置与来源，复用已完成的裁剪、跳过已提交转换，并重新执行校验。它不会删除历史已提交数据。更换任务、契约或转换参数时应使用新的输出目录。
 
-任务状态和失败原因保存在 `jobs/` 与 `summary.json`。当前提供本地执行，不包含远程任务队列、常驻监控或传输完成通知协议。
+任务状态和失败原因保存在 `jobs/` 与 `summary.json`。已提交转换若验证失败，记录为 `verification_failed` 并保留 `conversion_committed: true`；其他通过验证的来源仍可标记完成。数据集级验证失败会返回非零，不会把部分通过误报为整批通过。当前提供本地执行，不包含远程任务队列、常驻监控或传输完成通知协议。
 
 ## 独立运行
 
@@ -93,7 +124,10 @@ python scripts/preview_batch.py outputs/cleaned_batch
 convert-worker convert --config configs/my_wuji.yaml \
   --source-root outputs/cleaned_batch --output outputs/lerobot/my_dataset
 
-# 校验索引、时间、数值和完整视频；另与来源 bag 逐帧比对。
+# 仅校验数据集自身，可在没有原始包、原配置路径的机器上运行。
+convert-worker verify outputs/lerobot/my_dataset
+
+# 另外启用独立来源审计，需要来源 bag、契约及消息定义可访问。
 convert-worker verify outputs/lerobot/my_dataset --compare-source
 ```
 
@@ -208,7 +242,9 @@ min_segment_frames: 2
 
 ## 怎样查看缺帧及保持情况
 
-程序记录对齐网格上的无效点、各流未匹配点和有限保持情况，**目前没有独立的源相机丢帧率或网络丢包率统计**。应区分以下口径：
+`inspect` 的报告描述转换前的来源时间索引；完整 job 的总报告位于 job 根目录的 `quality_report.json`，包含原始时长与消息数、删除时长/消息数及其比例，并关联输入频率、转换和验证指标。独立转换的数据集报告位于 `dataset/conversion/quality_report.json`。其中汇总对齐无效点、实际导出帧数、各流最大接受年龄、重复采样比例、采样年龄 P50/P99/最大值、有限保持、质量排除和验证失败。重复比例只读取小尺寸审计列，不加载整批深度或触觉数组。停用命令允许保持历史目标，其采样年龄应结合接管状态理解。
+
+新转换来源记录还保存 `cleaning`，包含删除时长、删除消息数及时间映射；已有记录缺少该项时显示为未记录，不把缺失值当作零。程序记录对齐网格上的无效点、各流未匹配点和有限保持情况，**目前没有独立的源相机丢帧率或网络丢包率统计**。应区分以下口径：
 
 | 指标 | 含义与限制 |
 | --- | --- |
@@ -305,6 +341,26 @@ Wuji 的 `observation.engaged` 为左臂、右臂、左手、右手四个实际�
 输出按 episode 独立保存，不把不同录制拼成一条时间序列。附带的 loader 检查使用 50 步 action 窗口，并检查 episode 尾部重复最后一个动作及 `action_is_pad` 标记。实际训练的窗口长度和 padding loss/mask 处理由训练端决定，不由转换器修改。
 
 30 Hz 下，50 个动作采样点从第一个到最后一个相隔约 1.63 秒。将 `min_segment_frames` 设为 50 不能消除 episode 最后若干起点的 padding；训练侧仍需明确处理。训练/验证划分应按 `source_recording_id` 分组，避免同一来源的衍生版本进入不同集合。
+
+## 校验范围与失败定位
+
+默认 `verify` 只依赖本工具输出目录中的数据、metadata 和提交记录，不检查原始包或原机器上的契约路径，可用于搬迁后的离线结构校验。它检查每条 episode 的字段、嵌套数组形状、dtype、NaN/inf、索引、30 Hz 时间网格、统计、完整视频解码及逐帧 PTS。RGB 有损编码，不做源像素逐位相等断言。
+
+`--compare-source` 额外启用逐时刻的独立采样审计：复用只读消息解析和关节契约，但不调用转换阶段的 `align` / `prepare`。重新推导状态、动作、接管保持、RGB 短缺口及深度接缝条件，再逐行对比关节、无损传感器数组和审计时间。该检查既能发现写出错误，也能检出转换对齐函数输出与约定不符的情况。
+
+验证中每条 episode 单独记录结果，一条损坏不会阻止检查其余 episode：
+
+| 文件 | 内容 |
+| --- | --- |
+| `conversion/verification.json` | 数据集总结果；运行中为 `running`，完成后为 `passed` 或 `failed`，包含逐 episode 结果 |
+| `conversion/verification/episode_*.json` | 每条已提交 episode 的验证结果与错误 |
+| job 根目录 `quality_report.json` | 整条链路的输入、裁剪比例、转换及验证汇总 |
+| `conversion/quality_report.json` | 数据集质量指标、排除原因和验证错误；使用对应验证的完成时间标识 |
+| `conversion/rejections.json` | 因内部缺口或最短长度条件而排除的来源 |
+| `conversion/errors.json` | 转换程序错误 |
+| `jobs/*.json`、job 根目录 `summary.json` | 裁剪/转换/验证状态及原始数据完整性结果 |
+
+`convert-worker verify` 的关键验证使用显式异常检查，使用 `python -O` 也不会关闭校验。验证和转换共用数据集文件锁；验证报告需要输出目录可写。`--resume` 可重新校验已提交文件，但不自动覆盖或修复损坏的训练文件，数据内容损坏应定位后重新生成。
 
 ## 测试与读取检查
 

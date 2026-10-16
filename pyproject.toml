@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "convert-data-job-worker"
-version = "0.2.0"
+version = "0.2.1"
 description = "Resumable ROS2 bag cleaning and multimodal LeRobot v2.1 conversion"
 requires-python = ">=3.11"
 dependencies = ["numpy>=1.24", "PyYAML>=6.0", "rosbags>=0.11.5,<0.12"]

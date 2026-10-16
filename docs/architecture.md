@@ -21,7 +21,7 @@ main 的分层：CLI/config/selection → source（ROS2 读取、采集状态、
 
 `trim_bag(source, output, config)` 返回报告，并生成可由 ROS2 reader 打开的新 bag；`inspect_bag` 可先分析。配置与识别报告独立于机器人手型号，全话题同步裁剪，因此无需为 Wuji/Sharpa 删除或重新编码 RGB/depth/触觉。
 
-第二阶段尚未实现：job 领取与状态、并发/重试/幂等恢复、平台接入、Wuji 的 RGB+depth writer、Sharpa 的 RGB+depth+触觉 writer，以及完整 bag→LeRobot 集成验证。当前批处理只是第一阶段工具的本地多包入口，不代表 job 系统完成。
+第二阶段现已在新工程独立移植参考后端，并实现本地 job、Wuji RGB+depth 和 Sharpa RGB+depth+触觉写出。具体命令与时间/质量策略见 README 的第二阶段章节。外部平台任务领取、远程队列和常驻监控尚未接入。
 
 
 ## 当前裁剪实现

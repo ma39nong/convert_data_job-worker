@@ -1,0 +1,16 @@
+{
+  "main": "5ccb2bb60f52ae736236468c3c13869f17ebccfb",
+  "sharpa": "a468eec02c54371cf5ff575e50231a78d7156b84",
+  "source": "/home/user/convert_data",
+  "adapted": [
+    "sources/gello_rosbag2.py",
+    "align.py",
+    "pipeline.py",
+    "formats/lerobot_v21.py",
+    "config.py",
+    "selection.py",
+    "quality.py",
+    "schemas/"
+  ],
+  "note": "Independent local copy; no runtime imports from reference workspace. Sharpa contract from origin/sharpa. Message definition license in schemas/LICENSE.gello-retarget."
+}

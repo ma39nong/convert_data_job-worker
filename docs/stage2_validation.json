@@ -1,0 +1,255 @@
+{
+  "status": "passed",
+  "date": "2026-10-17",
+  "scope": "Local resumable trim-convert-verify jobs; no remote task queue or training",
+  "tests": {
+    "passed": 77,
+    "includes": [
+      "original trimming regressions",
+      "real CDR roundtrip for both robots",
+      "strict gap vs known-splice depth tolerance",
+      "two-process ordered commit",
+      "dataset locking",
+      "resume/interruption recovery",
+      "named joints and timestamp domains"
+    ]
+  },
+  "groups": [
+    {
+      "robot": "wuji",
+      "dataset": "/home/user/convert_data_job-worker/outputs/jobs/wuji_stage2/dataset",
+      "episodes": 3,
+      "frames": 2763,
+      "source_fidelity": "passed",
+      "lossless_sensor_rows_compared": 2763,
+      "loader": {
+        "status": "passed",
+        "loader": "installed LeRobot v2.1",
+        "interpreter": "/home/user/pi05/.venv/bin/python",
+        "video_backend": "pyav",
+        "episodes": 3,
+        "frames": 2763,
+        "sampled_indices": [
+          0,
+          525,
+          1050,
+          1051,
+          1493,
+          1934,
+          1935,
+          2349,
+          2762
+        ],
+        "all_sensor_features_readable": true,
+        "action_horizon": 50,
+        "tail_padding_checked": true,
+        "note": "Standard loader verified; no training or depth/tactile model integration performed."
+      },
+      "depth_splice_tolerated_frames": 0,
+      "bags": [
+        {
+          "episode": "episode1003",
+          "episode_index": 2,
+          "frames": 828,
+          "source_recording_id": "/home/user/franka_teleop_data/bags/gello_wuji/episode1003",
+          "deleted_seconds": 4.044001482,
+          "original_sha256_verified": true,
+          "original_volumes": [
+            {
+              "name": "episode1003_0.db3",
+              "bytes": 2694963200,
+              "sha256": "a1e46359cf814efd0253c17e9c2c48e7f63857d1000723033257843f731a0977"
+            }
+          ]
+        },
+        {
+          "episode": "episode995",
+          "episode_index": 0,
+          "frames": 1051,
+          "source_recording_id": "/home/user/franka_teleop_data/bags/gello_wuji/episode995",
+          "deleted_seconds": 0.0,
+          "original_sha256_verified": true,
+          "original_volumes": [
+            {
+              "name": "episode995_0.db3",
+              "bytes": 2973347840,
+              "sha256": "03b8d9d3ed75296171f5c5bfbb8a1a1d131d9ce3fde7aefef1e5bb6b3d312aa8"
+            }
+          ]
+        },
+        {
+          "episode": "episode997",
+          "episode_index": 1,
+          "frames": 884,
+          "source_recording_id": "/home/user/franka_teleop_data/bags/gello_wuji/episode997",
+          "deleted_seconds": 5.99594446,
+          "original_sha256_verified": true,
+          "original_volumes": [
+            {
+              "name": "episode997_0.db3",
+              "bytes": 3008946176,
+              "sha256": "5cc4367257bc6fa6efe9dd53715d417b1e360f8a96c6991a917ed13ee05fc3d0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "robot": "sharpa",
+      "dataset": "/home/user/convert_data_job-worker/outputs/jobs/sharpa_stage2/dataset",
+      "episodes": 6,
+      "frames": 7094,
+      "source_fidelity": "passed",
+      "lossless_sensor_rows_compared": 148974,
+      "loader": {
+        "status": "passed",
+        "loader": "installed LeRobot v2.1",
+        "interpreter": "/home/user/pi05/.venv/bin/python",
+        "video_backend": "pyav",
+        "episodes": 6,
+        "frames": 7094,
+        "sampled_indices": [
+          0,
+          403,
+          806,
+          807,
+          1224,
+          1641,
+          1642,
+          2183,
+          2724,
+          2725,
+          3157,
+          3589,
+          3590,
+          4539,
+          5487,
+          5488,
+          6291,
+          7093
+        ],
+        "all_sensor_features_readable": true,
+        "action_horizon": 50,
+        "tail_padding_checked": true,
+        "note": "Standard loader verified; no training or depth/tactile model integration performed."
+      },
+      "depth_splice_tolerated_frames": 15,
+      "bags": [
+        {
+          "episode": "episode34",
+          "episode_index": 1,
+          "frames": 835,
+          "source_recording_id": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode34",
+          "deleted_seconds": 5.665938982,
+          "original_sha256_verified": true,
+          "original_volumes": [
+            {
+              "name": "episode34_0.db3",
+              "bytes": 3462406144,
+              "sha256": "b7db78c89bf518bfb580e8bdf56c3b7f3fb34bb8f03ed78cd3f21b09d6203f16"
+            }
+          ]
+        },
+        {
+          "episode": "episode35",
+          "episode_index": 2,
+          "frames": 1083,
+          "source_recording_id": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode35",
+          "deleted_seconds": 5.805741843,
+          "original_sha256_verified": true,
+          "original_volumes": [
+            {
+              "name": "episode35_0.db3",
+              "bytes": 4298887168,
+              "sha256": "7092f5087ba7afef3e1a235502cfc7a49fcf1ec3610204ab126e9f3a0556eaac"
+            }
+          ]
+        },
+        {
+          "episode": "episode36",
+          "episode_index": 0,
+          "frames": 807,
+          "source_recording_id": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode36",
+          "deleted_seconds": 4.935757577,
+          "original_sha256_verified": true,
+          "original_volumes": [
+            {
+              "name": "episode36_0.db3",
+              "bytes": 3301900288,
+              "sha256": "cee5627065a7085e87eb7110fee353a9082ddc195dbf9bc009f760953b588e08"
+            }
+          ]
+        },
+        {
+          "episode": "episode41",
+          "episode_index": 3,
+          "frames": 865,
+          "source_recording_id": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode41",
+          "deleted_seconds": 5.623356216,
+          "original_sha256_verified": true,
+          "original_volumes": [
+            {
+              "name": "episode41_0.db3",
+              "bytes": 3560009728,
+              "sha256": "ddf28da0c7e10841d508c3b19ddfbbdd84cd4371aaea62eb5f0bdf7f0b9e236e"
+            }
+          ]
+        },
+        {
+          "episode": "episode54",
+          "episode_index": 4,
+          "frames": 1898,
+          "source_recording_id": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode54",
+          "deleted_seconds": 19.444528337,
+          "original_sha256_verified": true,
+          "original_volumes": [
+            {
+              "name": "episode54_0.db3",
+              "bytes": 8357908480,
+              "sha256": "6a656f6e947859d8d048c0ff13feec74160781cc5176e67ec3910342622585ba"
+            }
+          ]
+        },
+        {
+          "episode": "episode55",
+          "episode_index": 5,
+          "frames": 1606,
+          "source_recording_id": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode55",
+          "deleted_seconds": 18.179064967,
+          "original_sha256_verified": true,
+          "original_volumes": [
+            {
+              "name": "episode55_0.db3",
+              "bytes": 7264485376,
+              "sha256": "900f62c44a022d38ecefd13e389685e5708b8fff498c36ef961a6ea8ebc04e77"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resume": {
+    "status": "passed",
+    "training_files_sha256_and_mtime_unchanged": true,
+    "training_files": 36,
+    "runs": [
+      {
+        "robot": "wuji",
+        "returncode": 0,
+        "added_bags": 0
+      },
+      {
+        "robot": "sharpa",
+        "returncode": 0,
+        "added_bags": 0
+      }
+    ]
+  },
+  "original_and_reference_workspaces_modified": false,
+  "limitations": [
+    "Depth and deformation use raw recorded units; no inferred depth scale or tactile calibration.",
+    "Depth/tactile model integration and training normalization are separate from standard loader compatibility.",
+    "File transfer must finish before starting jobs; no external transfer-completion handshake or remote queue."
+  ],
+  "depth_splice_policy": "At most 2 grid points, age <=250ms, actual recorded cleaner seam overlaps already accepted head RGB hole, all other streams and surrounding frames valid; timestamps and values untouched."
+}

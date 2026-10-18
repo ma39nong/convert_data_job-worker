@@ -18,8 +18,8 @@ def test_default_is_original_baseline():
 @pytest.mark.skipif(not os.environ.get('BAG_WORKER_REAL_ROOT'),reason='Set BAG_WORKER_REAL_ROOT for baseline regression')
 @pytest.mark.parametrize('episode,count,seconds',[
     ('episode34',3,5.665938982),('episode35',6,5.805741843),('episode36',2,4.935757577),
-    ('episode41',7,5.623356216),('episode54',10,19.444528337),('episode55',16,18.179064967)])
-def test_default_reproduces_original_all_long_and_short_intervals(episode,count,seconds,monkeypatch):
+    ('episode41',7,5.623356216),('episode54',12,20.52045923),('episode55',16,18.179064967)])
+def test_motion_rules_with_observed_barrier_boundary_fix(episode,count,seconds,monkeypatch):
     # No hand or command reader is allowed into this default path.
     import bag_worker.idle as idle
     original=idle.read_arm
@@ -29,7 +29,7 @@ def test_default_reproduces_original_all_long_and_short_intervals(episode,count,
     monkeypatch.setattr(idle,'read_arm',arm_only)
     bag=Bag(Path(os.environ['BAG_WORKER_REAL_ROOT'])/episode)
     report=inspect_bag(bag)
-    assert report['algorithm']=='windowed_motion_causal_state' and report['version']==2
+    assert report['algorithm']=='windowed_motion_causal_state' and report['version']==3
     assert 'priority_policy' not in report and 'hold_confirmation' not in report
     assert len(report['runs'])==count
     assert abs(report['deleted_seconds']-seconds)<1e-12

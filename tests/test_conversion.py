@@ -176,7 +176,7 @@ def test_job_recovers_kill_between_cleaned_export_and_snapshot(tmp_path,monkeypa
     trim_bag(raw,clean)
     contract=yaml.safe_load(Path(cfg['contract']).read_text())
     ready=jobs.check_ready(raw,contract,cfg['schema_dir'])
-    atomic_json(root/'manifest.json',{'owner':'convert-data-job-worker','fingerprint':digest({'config':cfg,'idle':asdict(default_config()),'version':'job-1'}),'config':cfg})
+    atomic_json(root/'manifest.json',{'owner':'convert-data-job-worker','fingerprint':digest({'config':cfg,'idle':asdict(default_config()),'version':'job-2-idle-v3'}),'config':cfg})
     atomic_json(root/'jobs/episode1.json',{'state':'trimming','readiness':ready})
     assert jobs.run(cfg,root,resume=True)==0
     assert json.loads((root/'jobs/episode1.json').read_text())['state']=='completed'

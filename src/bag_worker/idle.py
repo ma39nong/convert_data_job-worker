@@ -9,6 +9,9 @@ import numpy as np
 from .bag import Bag, connect, decode_joint
 
 
+ALGORITHM_VERSION = 3
+
+
 @dataclass(frozen=True)
 class IdleConfig:
     left_topic: str = '/left/franka/joint_states'
@@ -90,29 +93,47 @@ def detect_runs(times, positions, valid, config):
             continue
         stationary[i] = np.max(np.ptp(positions[lo:hi+1], axis=0)) <= config.position_tolerance_rad
 
+    future_motion = np.logical_or.accumulate((valid & ~stationary)[::-1])[::-1]
     cuts = []
     start = None
     bounded_left = False
+    seen_motion = False
+
+    def close_run(stop):
+        # Both endpoints must lie inside this fully observed valid block. Never
+        # extend a cut into a missing/non-finite/stale frame or join across it.
+        if (bounded_left and start is not None and stop-start > config.stationary_frames
+                and stop < count and future_motion[stop]):
+            a, b = int(times[start+1]), int(times[stop-1])
+            if a < b:
+                cuts.append((a, b, stop-start))
+
     for i in range(count):
         if not valid[i]:
+            # A barrier ends the observed quiet portion. Previously this reset
+            # silently discarded the entire preceding hold (episode68).
+            close_run(i)
             start, bounded_left = None, False
             continue
         if start is None:
             start = i
-            bounded_left = not stationary[i]
+            # An internal barrier is a boundary, not evidence of motion. Once
+            # motion has established an internal hold, independently observed
+            # quiet portions after the barrier may end at the next motion or
+            # barrier. Recording-leading quiet portions remain protected.
+            bounded_left = not stationary[i] or seen_motion
+            seen_motion |= not stationary[i]
             continue
         if stationary[i]:
             continue
-        if bounded_left and i-start > config.stationary_frames:
-            a,b = int(times[start+1]),int(times[i-1])
-            if a < b:
-                cuts.append((a,b,i-start))
-        start, bounded_left = i, True
+        close_run(i)
+        start, bounded_left, seen_motion = i, True, True
+    # No final flush: preserve the recording-trailing hold as before.
     return cuts
 
 
 def default_config():
-    """Approved episode36 v2 baseline, with no duration split or hand veto."""
+    """Episode36 motion rules, with observed-block boundary preservation."""
     return IdleConfig()
 
 
@@ -139,14 +160,18 @@ def inspect_bag(bag: Bag, config=None):
                  (np.diff(other_t[indices]) > periods[1-ref]*config.max_gap_factor)]
     valid &= ~gaps
     cuts = detect_runs(times, positions, valid, config)
+    from .idle_audit import audit_windows
+    effectiveness = audit_windows(times, positions, valid, cuts, config)
     ranges = [[str(Decimal(a-bag.start)/10**9), str(Decimal(b-bag.start)/10**9)] for a,b,_ in cuts]
     report = {
-        'version': 2, 'algorithm': 'windowed_motion_causal_state', 'config': asdict(config), 'frame_basis': 'native_measured_arm_state',
+        'effectiveness_audit': effectiveness,
+        'version': ALGORITHM_VERSION, 'algorithm': 'windowed_motion_causal_state', 'config': asdict(config), 'frame_basis': 'native_measured_arm_state',
         'reference_topic': (config.left_topic, config.right_topic)[ref],
         'time_basis': 'bag_record_timestamp', 'pairing': 'causal_past_state',
         'max_pair_skew_ns': max_skew, 'motion_window_s': config.motion_window_s,
         'frames': len(times), 'invalid_frames': int((~valid).sum()),
-        'edge_policy': 'only_motion_bounded_internal_runs_keep_first_and_last',
+        'edge_policy': 'preserve_observed_internal_subruns_at_invalid_barriers_keep_first_and_last',
+        'invalid_frame_policy': 'never_bridge; preserve_independently_observed_quiet_subruns; protect_recording_edges',
         'arms': {topic: {'frames': len(a[0]), 'joint_names': a[2],
                         'median_period_ns': period, 'median_hz': 1e9/period,
                         'p99_period_ns': int(np.percentile(np.diff(a[0]), 99))}

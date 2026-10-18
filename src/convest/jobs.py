@@ -85,7 +85,7 @@ def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None):
     root.mkdir(parents=True,exist_ok=True)
     with (root/'lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        fingerprint=digest({'config':config,'idle':asdict(default_config()),'version':'job-1'})
+        fingerprint=digest({'config':config,'idle':asdict(default_config()),'version':'job-2-idle-v3'})
         marker=root/'manifest.json'
         if marker.exists():
             previous=json.loads(marker.read_text())

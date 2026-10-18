@@ -14,7 +14,7 @@ def verify(root):
     results=[]
     for item in batch:
         output=Path(item['output']);report=json.loads((output/'trim_report.json').read_text());d=report['auto_idle_detection']
-        assert d['algorithm']=='windowed_motion_causal_state' and d['version']==2
+        assert d['algorithm']=='windowed_motion_causal_state' and d['version']==3
         assert d['config'].get('priority_policy') is None and d['config'].get('command_topic') is None
         assert d['config'].get('hold_bridge_max_s',0)==0
         assert 'priority_policy' not in d and 'hold_confirmation' not in d

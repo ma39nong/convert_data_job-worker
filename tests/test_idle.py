@@ -26,11 +26,11 @@ def test_strictly_more_than_three_and_preserve_boundary_frames():
     assert detect([0, 1, 1, 1, 1, 2]) == [(20, 40, 4)]
 
 
-def test_edges_and_gaps_are_not_cut():
+def test_recording_edges_protected_and_internal_barriers_not_bridged():
     assert detect([1]*8) == []
     assert detect([0]+[1]*8) == []
     assert detect([1]*8+[2]) == []
-    assert detect([0]+[1]*8+[2], [True]*5+[False]+[True]*4) == []
+    assert detect([0]+[1]*8+[2], [True]*5+[False]+[True]*4) == [(20,40,4)]
 
 
 def test_one_arm_motion_retained():
@@ -113,7 +113,7 @@ def test_cli_inspect_and_existing_report(tmp_path,capsys):
     bag=real_fixture(tmp_path/'source')
     report=tmp_path/'inspect.json'
     assert main(['inspect',str(bag.root),'--report',str(report)])==0
-    assert json.loads(report.read_text())['version']==2
+    assert json.loads(report.read_text())['version']==3
     assert main(['inspect',str(bag.root),'--report',str(report)])==2
 
 
@@ -186,3 +186,43 @@ def test_local_window_does_not_bridge_missing_state(tmp_path):
     report=inspect_bag(motion_fixture(tmp_path/'source',invalid_at=3))
     assert report['invalid_frames']>0
     assert all(not (float(a)<3.025<float(b)) for a,b in report['ranges_seconds'])
+
+
+def test_invalid_barrier_preserves_both_observed_quiet_subruns():
+    # Long hold interrupted by one bad pairing. Keep the uncertainty interval,
+    # cut the fully observed portions on either side, and keep moving samples.
+    cuts=detect([0]+[1]*20+[2], [True]*10+[False]+[True]*11)
+    assert cuts==[(20,90,9),(130,200,9)]
+    assert all(not (a<=100<b) for a,b,_ in cuts)
+
+
+def test_gap_after_unbounded_leading_idle_does_not_invent_motion_boundary():
+    assert detect([1]*21+[2], [True]*10+[False]+[True]*11)==[]
+
+
+def test_barrier_ending_hold_keeps_only_proven_portion_and_recording_tail():
+    cuts=detect([0]+[1]*30, [True]*10+[False]+[True]*20)
+    assert cuts==[]
+
+
+def test_realistic_pairing_glitch_preserves_wait_without_threshold_changes(tmp_path):
+    bag=motion_fixture(tmp_path/'source',invalid_at=3)
+    report=inspect_bag(bag)
+    cuts=[tuple(map(float,p)) for p in report['ranges_seconds']]
+    assert len(cuts)==2
+    assert cuts[0][0]>2 and cuts[0][1]<3
+    assert cuts[1][0]>3.05 and cuts[1][1]<5
+    assert sum(b-a for a,b in cuts)>2.5
+
+
+def test_independent_coverage_audit_rejects_the_previously_dropped_hold():
+    from bag_worker.idle_audit import audit_windows
+    cfg=IdleConfig(position_tolerance_rad=0,motion_window_s=0)
+    t=np.arange(22)*10;q=np.zeros((22,14));q[:,-1]=[0]+[1]*20+[2]
+    valid=np.array([True]*10+[False]+[True]*11)
+    old=audit_windows(t,q,valid,[],cfg,raise_on_error=False)
+    assert old['status']=='failed' and len(old['missed_blocks'])==2
+    fixed=audit_windows(t,q,valid,detect_runs(t,q,valid,cfg),cfg)
+    assert fixed['status']=='passed'
+    with pytest.raises(ValueError,match='Independent cleaning audit'):
+        audit_windows(t,q,valid,[(20,200,20)],cfg)

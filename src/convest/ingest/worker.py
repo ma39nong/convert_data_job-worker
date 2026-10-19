@@ -8,7 +8,7 @@ import shutil
 import time
 from convest.config import atomic_json,digest
 from convest.jobs import run
-from .inputs import snapshot,check_input,stage_input,monitor_input,InputChanged,verify_input_content
+from .inputs import snapshot,check_input,stage_input,direct_input,monitor_input,InputChanged,verify_input_content
 from .control import maintenance_requested,progress_reporter
 from .publish import OWNER,read
 from .batches import BatchPublisher as Publisher
@@ -59,19 +59,26 @@ def process(config,queue,route,bag,proof):
     key=digest([route['id'],bag.name]);slot=Path(config['work_root'])/key
     clean_slot(slot,config['work_root']);slot.mkdir()
     job=slot/'job';identity=proof['content_identity'];old=queue.get(route['id'],bag.name);attempt=old['attempts']+1
-    queue.put(route['id'],bag.name,identity,'staging',attempts=attempt,proof=proof,error=None)
+    copy_input=config.get('copy_input',True)
+    queue.put(route['id'],bag.name,identity,'staging' if copy_input else 'processing',attempts=attempt,proof=proof,error=None)
     archive=Path(config['state_root'])/'attempts'/key/f'{attempt:04d}'
     progress=progress_reporter(config,route,bag.name)
     try:
         size=sum(f['size'] for f in proof['files']);reserve=route['conversion']['min_free_gb']*10**9
-        if shutil.disk_usage(config['work_root']).free<size*4+reserve:raise OSError('Insufficient staging disk reserve')
+        if shutil.disk_usage(config['work_root']).free<size*(4 if copy_input else 3)+reserve:raise OSError('Insufficient staging disk reserve')
         target_parent=Path(route['output']).parent
         while not target_parent.exists():target_parent=target_parent.parent
         if shutil.disk_usage(target_parent).free<size*2+reserve:raise OSError('Insufficient output disk reserve')
         with monitor_input(bag,proof['snapshot'],min(1,config['poll_seconds'])) as guard:
-            progress('staging')
-            staged=slot/'raw'/bag.name
-            receipt=stage_input(bag,staged,proof,lambda phase,**kw:progress('staging.'+phase,**kw));guard()
+            if copy_input:
+                progress('staging')
+                staged=slot/'raw'/bag.name
+                receipt=stage_input(bag,staged,proof,lambda phase,**kw:progress('staging.'+phase,**kw))
+            else:
+                progress('direct_input.readonly')
+                staged=bag
+                receipt=direct_input(bag,proof)
+            guard()
             queue.put(route['id'],bag.name,identity,'processing',proof=proof,error=None)
             cfg={**route['conversion'],'source_root':str(staged.parent)}
             run(cfg,job,episodes=[bag.name],validated_inputs={bag.name:receipt},progress=progress);guard()
@@ -82,7 +89,7 @@ def process(config,queue,route,bag,proof):
                     return
                 raise ValueError(outcome.get('error') or 'Conversion/source verification failed')
             if receipt is not None:receipt.reuse(staged,cfg)
-            # Structural readiness was proven once and the frozen copy was
+            # Structural readiness was proven once. Copied inputs were also
             # independently hashed. Keep the original's full final content
             # check, without repeating SQLite scans or required-stream parsing.
             progress('original_final_hash')

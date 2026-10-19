@@ -126,8 +126,10 @@ def test_mutation_during_staging_discards_attempt_and_retries(service,monkeypatc
         assert ready_scan(cfg,q)['counts']=={'published':1}
 
 
-def test_mutation_after_conversion_before_publication_never_exposes_candidate(service,monkeypatch):
+@pytest.mark.parametrize('copy_input',[True,False])
+def test_mutation_after_conversion_before_publication_never_exposes_candidate(service,monkeypatch,copy_input):
     cfg=service;b=bag(cfg,2);import convest.ingest.worker as worker
+    cfg['copy_input']=copy_input
     real=worker.run
     def change(*args,**kw):
         result=real(*args,**kw);p=b/'metadata.yaml';p.write_text(p.read_text()+'\n# upload continued\n');return result
@@ -137,8 +139,10 @@ def test_mutation_after_conversion_before_publication_never_exposes_candidate(se
         assert Publisher(cfg['routes'][2],cfg['fingerprint']).current() is None
 
 
-def test_mutation_in_final_precommit_guard_blocks_switch(service,monkeypatch):
+@pytest.mark.parametrize('copy_input',[True,False])
+def test_mutation_in_final_precommit_guard_blocks_switch(service,monkeypatch,copy_input):
     cfg=service;b=bag(cfg,2);import convest.ingest.publish as module
+    cfg['copy_input']=copy_input
     real=module.writer.write_metadata
     def change(*args,**kw):
         result=real(*args,**kw)
@@ -380,6 +384,60 @@ def test_json_receipt_cannot_bypass_standalone_precheck(service):
     summary=json.loads((out/'summary.json').read_text())
     assert summary['failed']==1 and 'Invalid readiness receipt' in summary['jobs'][0]['error']
     assert not (out/'dataset').exists()
+
+
+@pytest.mark.parametrize('routes',[(0,1),(2,3)])
+def test_direct_input_matches_copy_mode_and_never_writes_or_cleans_source(service,monkeypatch,routes):
+    import convest.ingest.worker as worker
+    import pyarrow.parquet as pq
+    cfg=service;first,second=routes;originals={}
+    for index in routes:
+        source=bag(cfg,index);originals[source]=(snapshot(source),{p.name:checksum(p) for p in source.iterdir()})
+    cfg['max_jobs_per_scan']=1;cfg['copy_input']=False;real=worker.stage_input
+    def forbid_copy(*args,**kw):raise AssertionError('Direct mode must not stage raw data')
+    monkeypatch.setattr(worker,'stage_input',forbid_copy)
+    with worker_context(cfg) as q:
+        report=ready_scan(cfg,q);assert report['counts'].get('published')==1
+        assert q.get(cfg['routes'][first]['id'],'episode1')['state']=='published'
+        direct=Publisher(cfg['routes'][first],cfg['fingerprint']).current()
+        # Resume the same queue in copy mode, as a baseline on identical data.
+        cfg['copy_input']=True;monkeypatch.setattr(worker,'stage_input',real)
+        assert scan(cfg,q,now_ns=time.time_ns()+4_000_000_000)['counts']=={'published':2}
+        copied=Publisher(cfg['routes'][second],cfg['fingerprint']).current()
+    af=next(direct.glob('data/**/*.parquet'));bf=copied/af.relative_to(direct)
+    assert pq.read_table(af).equals(pq.read_table(bf))
+    for p in direct.glob('videos/**/*.mp4'):assert checksum(p)==checksum(copied/p.relative_to(direct))
+    assert verify(direct,full_video=True)['status']=='passed'
+    for source,(snap,files) in originals.items():
+        assert snapshot(source)==snap and {p.name:checksum(p) for p in source.iterdir()}==files
+    assert not [p for p in Path(cfg['work_root']).iterdir() if p.is_dir()]
+
+
+@pytest.mark.parametrize('mutation',['write','delete'])
+def test_direct_source_change_during_cleaning_prevents_publication(service,monkeypatch,mutation):
+    import convest.jobs as jobs
+    cfg=service;cfg['copy_input']=False;source=bag(cfg,2);real=jobs.trim_bag
+    def change(*args,**kw):
+        result=real(*args,**kw)
+        p=next(source.glob('*.db3'))
+        if mutation=='delete':p.unlink()
+        else:
+            with p.open('ab') as stream:stream.write(b'continued upload')
+        return result
+    monkeypatch.setattr(jobs,'trim_bag',change)
+    with worker_context(cfg) as q:
+        assert ready_scan(cfg,q)['counts']=={'waiting_stable':1}
+        assert Publisher(cfg['routes'][2],cfg['fingerprint']).current() is None
+        assert (source/'metadata.yaml').is_file()
+
+
+def test_copy_input_configuration_is_explicit_boolean_and_keeps_queue_identity(service):
+    cfg=service;path=Path(cfg['state_root']).parent/'config.yaml';raw=yaml.safe_load(path.read_text())
+    assert load_service_config(path)['copy_input'] is True
+    raw['copy_input']=False;path.write_text(yaml.safe_dump(raw));direct=load_service_config(path)
+    assert direct['copy_input'] is False and direct['fingerprint']==cfg['fingerprint']
+    raw['copy_input']='false';path.write_text(yaml.safe_dump(raw))
+    with pytest.raises(ValueError,match='boolean'):load_service_config(path)
 
 
 def test_maintenance_cli_request_and_resume_do_not_delete_queue(service,monkeypatch,capsys):

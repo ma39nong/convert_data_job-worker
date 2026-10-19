@@ -1,4 +1,4 @@
-"""Process-local proof for a completely validated, hash-verified working copy.
+"""Process-local proof for validated input, with content and schema identity.
 
 Receipts are never loaded from queue JSON or accepted through the command line.
 Standalone jobs and restarted attempts still perform the full readiness check.
@@ -38,6 +38,7 @@ class ValidatedInput:
     files: list
     readiness: dict
     profile: dict
+    kind: str = 'working_copy'
 
     def reuse(self, path, config):
         if Path(path).resolve() != self.root or validation_context(config) != self.context:
@@ -47,4 +48,4 @@ class ValidatedInput:
 
     def assert_unchanged(self):
         if file_snapshot(self.root) != self.files:
-            raise ValueError('Validated working copy changed')
+            raise ValueError('Validated '+('source' if self.kind=='source' else 'working copy')+' changed')

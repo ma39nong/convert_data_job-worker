@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Run this script from OUTSIDE the active checkout, on the server itself.
-# Usage: bash upgrade_server.sh SOURCE.tar.gz EXPECTED_SHA256 [--prepare|--apply]
+# Usage: bash upgrade_server.sh SOURCE.tar.gz EXPECTED_SHA256 [--prepare|--apply] [--direct-input]
 set -euo pipefail
 project=/data/data-fruits/real/harvest-tomato/code/auto-clean-convert
 unit=auto-clean-convert.service
 archive="$(realpath -- "${1:?Provide the verified source archive}")"
 expected="${2:?Provide its expected SHA256}"
 mode="${3:---prepare}"
+input_mode="${4:---keep-input-mode}"
 [[ "$mode" == --prepare || "$mode" == --apply ]] || { echo 'Use --prepare or --apply' >&2; exit 2; }
+[[ "$input_mode" == --keep-input-mode || "$input_mode" == --direct-input ]] || { echo 'Invalid input mode' >&2; exit 2; }
 [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || { echo 'Invalid SHA256' >&2; exit 2; }
 [[ -d "$project/.venv" ]] || { echo 'Existing native installation required' >&2; exit 2; }
 [[ "$(findmnt -n -o FSTYPE -T "$project")" != fuse.sshfs ]] || { echo 'Run on the server' >&2; exit 2; }
@@ -74,6 +76,21 @@ for file in files:
 print('Source updated; rollback archive:',backup)
 PY
 cd "$project"
+if [[ "$input_mode" == --direct-input ]]; then
+  .venv/bin/python - configs/ingest.server.yaml "$stage/previous-ingest.server.yaml" <<'PY'
+from pathlib import Path
+import os,shutil,sys,yaml
+path,backup=map(Path,sys.argv[1:])
+if path.is_symlink():raise SystemExit('Refuse symlink configuration')
+shutil.copy2(path,backup)
+value=yaml.safe_load(path.read_text());value['copy_input']=False
+temporary=path.with_name(path.name+'.upgrade.tmp')
+with temporary.open('x') as stream:yaml.safe_dump(value,stream,sort_keys=False)
+os.chmod(temporary,path.stat().st_mode)
+os.replace(temporary,path)
+print('Direct read-only input enabled; previous configuration:',backup)
+PY
+fi
 .venv/bin/python -m convest.ingest.cli check-config --config configs/ingest.server.yaml
 .venv/bin/python -m pip check
 sudo systemctl start "$unit"

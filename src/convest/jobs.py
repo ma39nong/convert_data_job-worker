@@ -116,7 +116,7 @@ def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None,*
                 if receipt is not None:
                     if not isinstance(receipt,ValidatedInput):raise ValueError('Invalid readiness receipt')
                     ready,profile=receipt.reuse(source/name,config)
-                    if progress:progress('working_copy_readiness_reused')
+                    if progress:progress('source_readiness_reused' if receipt.kind=='source' else 'working_copy_readiness_reused')
                 else:
                     profile={}
                     ready=check_ready(source/name,contract,config['schema_dir'],profile,progress)
@@ -177,9 +177,10 @@ def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None,*
                                     raise ValueError('Original changed during job')
                                 receipt=(validated_inputs or {}).get(name)
                                 if receipt is not None:receipt.assert_unchanged()
-                                if progress:progress('job.working_copy_final_hash')
+                                final_prefix='job.source_final' if receipt is not None and receipt.kind=='source' else 'job.working_copy_final'
+                                if progress:progress(final_prefix+'_hash')
                                 for volume in job['readiness']['volumes']:
-                                    report=(lambda phase,**kw:progress('job.working_copy_final.'+phase,**kw)) if progress else None
+                                    report=(lambda phase,**kw:progress(final_prefix+'.'+phase,**kw)) if progress else None
                                     if checksum(Path(job['source'])/volume['name'],report)!=volume['sha256']:
                                         raise ValueError('Original content hash changed during job')
                                 job.update(state='completed',verification={'status':'passed','results':relevant,'episodes':len(relevant),'frames':sum(r['frames'] for r in relevant),'report':'dataset/conversion/verification.json'},error=None,original_sha256_verified=True)

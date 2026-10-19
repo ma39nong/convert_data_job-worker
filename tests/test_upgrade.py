@@ -72,13 +72,25 @@ def test_upgrade_prepare_leaves_service_and_source_untouched(upgrade):
     assert not Path(env['UPGRADE_LOG']).exists()
 
 
-def test_upgrade_waits_for_clean_exit_backs_up_and_only_then_starts(upgrade):
+@pytest.mark.parametrize('direct',[False,True])
+def test_upgrade_waits_for_clean_exit_backs_up_and_only_then_starts(upgrade,direct):
     script,archive,pack,env,worker=upgrade
-    p=subprocess.run(['bash',str(script),str(archive),pack(),'--apply'],env=env,capture_output=True,text=True)
+    config=worker.parents[3]/'configs/ingest.server.yaml'
+    config.parent.mkdir();config.write_text('copy_input: true\nstate_root: preserve-this\n')
+    original=config.read_bytes()
+    args=['bash',str(script),str(archive),pack(),'--apply']
+    if direct:args.append('--direct-input')
+    p=subprocess.run(args,env=env,capture_output=True,text=True)
     assert p.returncode==0,p.stdout+p.stderr
     assert worker.read_text()=='NEW = True\n'
     log=Path(env['UPGRADE_LOG']).read_text()
     assert log.index('kill ')<log.index('show auto-clean-convert.service -p Result')<log.index('start ')
+    if direct:
+        import yaml
+        assert yaml.safe_load(config.read_text())=={'copy_input':False,'state_root':'preserve-this'}
+        backup=list(worker.parents[4].glob('.auto-clean-convert-upgrade.*/previous-ingest.server.yaml'))
+        assert len(backup)==1 and backup[0].read_bytes()==original
+    else:assert config.read_bytes()==original
 
 
 @pytest.mark.parametrize('kind',['bad_hash','unsafe_archive'])

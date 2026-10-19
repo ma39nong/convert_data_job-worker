@@ -1,0 +1,65 @@
+{
+  "status": "passed",
+  "date": "2026-10-19",
+  "mode": "copy_input=false",
+  "scope": "local synthetic and actual ROS2 bags; no server runtime switch yet",
+  "tests": {
+    "total_passed": 162,
+    "failures": 0,
+    "real_cleaning_baselines_included": true
+  },
+  "real_dataset_equivalence": [
+    {
+      "robot": "sharpa",
+      "episode": "episode36",
+      "frames": 807,
+      "status": "passed",
+      "elapsed_s": 32.158,
+      "parquet_exact_match": true,
+      "rgb_files_exact_match": 3,
+      "trim_mapping_exact_match": true,
+      "full_readiness_calls": 1,
+      "working_copy_full_readiness_calls": 0,
+      "final_original_sha256_verified": true,
+      "job_source_sha256_verified": true,
+      "raw_copy_created": false,
+      "lossless_sensor_rows_compared": 16947
+    },
+    {
+      "robot": "wuji",
+      "episode": "episode995",
+      "frames": 914,
+      "status": "passed",
+      "elapsed_s": 25.067,
+      "parquet_exact_match": true,
+      "rgb_files_exact_match": 3,
+      "trim_mapping_exact_match": true,
+      "full_readiness_calls": 1,
+      "working_copy_full_readiness_calls": 0,
+      "final_original_sha256_verified": true,
+      "job_source_sha256_verified": true,
+      "raw_copy_created": false,
+      "lossless_sensor_rows_compared": 914
+    }
+  ],
+  "checks_retained": [
+    "initial full readiness and SHA256",
+    "source snapshot monitoring",
+    "job final source SHA256",
+    "final all-file original SHA256",
+    "independent cleaning effectiveness",
+    "full video decode and PTS",
+    "independent alignment and lossless depth/tactile/source comparison",
+    "publication hashes and guard"
+  ],
+  "operations_removed": [
+    "raw input copy",
+    "independent raw-copy readback SHA256"
+  ],
+  "raw_sources_read_only": true,
+  "raw_sources_automatically_deleted": false,
+  "source_mutation_or_deletion_blocks_publication": true,
+  "server_queue_and_batch_fingerprint_compatible": true,
+  "scheduling_and_cleaning_quality_thresholds_unchanged": true,
+  "performance_note": "Only local SSD/cached equivalence timings; server end-to-end speedup not yet measured."
+}

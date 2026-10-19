@@ -27,7 +27,7 @@ def main(argv=None):
                               'note':'Current job finishes publication and cleanup before draining; no process is killed.'}))
             return 0
         if args.command=='check-config':
-            print(json.dumps({'status':'valid','writes_performed':False,'initial_history':config['initial_history_by_route'],
+            print(json.dumps({'status':'valid','writes_performed':False,'copy_input':config['copy_input'],'initial_history':config['initial_history_by_route'],
                               'routes':[{k:v for k,v in r.items() if k!='conversion'} for r in config['routes']]},ensure_ascii=False,indent=2));return 0
         if args.command=='status':
             database=Path(config['state_root'])/'queue.sqlite3'
@@ -40,7 +40,7 @@ def main(argv=None):
                          for row in db.execute('SELECT * FROM initial_history ORDER BY route')] if exists else []
             batches={r['id']:BatchPublisher(r,config['fingerprint']).status() for r in config['routes']}
             state=Path(config['state_root'])
-            print(json.dumps({'jobs':rows,'initial_history':history,'batches':batches,
+            print(json.dumps({'jobs':rows,'initial_history':history,'batches':batches,'copy_input':config['copy_input'],
                 'maintenance_requested':maintenance_requested(config),
                 'last_scan':read(state/'status.json') if (state/'status.json').exists() else None,
                 'progress':read(state/'progress.json') if (state/'progress.json').exists() else None},ensure_ascii=False,indent=2));return 0

@@ -9,6 +9,9 @@ stable_scans: 3
 stable_seconds: 60
 max_jobs_per_scan: 1
 max_checks_per_scan: 4
+# Read source bags directly without making a raw copy. Sources remain read-only;
+# cleaned bags are written separately. Full source/output verification remains.
+copy_input: false
 max_attempts: 3
 retry_seconds: 60
 batch_hours: 72

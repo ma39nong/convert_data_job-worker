@@ -38,6 +38,7 @@ def load_service_config(path):
     if cfg['stable_seconds']<(cfg['stable_scans']-1)*cfg['poll_seconds']:
         raise ValueError('Stable duration must span the required independent scans')
     if cfg['max_checks_per_scan']<cfg['max_jobs_per_scan']:raise ValueError('Check budget must cover processing budget')
+    if type(cfg.setdefault('copy_input',True)) is not bool:raise ValueError('copy_input must be a boolean')
     hours=cfg.setdefault('batch_hours',72)
     if type(hours) is not int or hours<1:raise ValueError('batch_hours must be a positive integer')
     roots=[Path(cfg['state_root']),work];pairs=set();routes=[];history={}

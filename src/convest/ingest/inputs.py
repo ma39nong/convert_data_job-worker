@@ -104,6 +104,16 @@ def verify_input_content(bag,proof,progress=None):
     require_same(bag,proof['snapshot'])
 
 
+def direct_input(bag,proof):
+    """Reuse the full source preflight; never copy, move or write the bag."""
+    bag=Path(bag)
+    require_same(bag,proof['snapshot'])
+    receipt=ValidatedInput(bag.resolve(),proof['validation_context'],file_snapshot(bag),
+                           deepcopy(proof['readiness']),deepcopy(proof['input_profile']),kind='source')
+    require_same(bag,proof['snapshot'])
+    return receipt
+
+
 @contextmanager
 def monitor_input(bag,expected,interval):
     stop=threading.Event();changed=threading.Event()

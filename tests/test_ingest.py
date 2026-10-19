@@ -14,6 +14,7 @@ from convest.ingest.inputs import snapshot,check_input,stage_input,InputChanged
 from convest.ingest.batches import BatchPublisher as Publisher
 from convest.verify import verify
 from conversion_helpers import make_conversion_bag
+from convest.ingest.control import request_maintenance
 
 
 @pytest.fixture
@@ -252,6 +253,151 @@ def test_default_service_budgets_prevent_one_scan_processing_unbounded_backlog(s
         scan(cfg,q,now_ns=t)
         result=scan(cfg,q,now_ns=t+2_000_000_000);assert result['counts'].get('published')==1
         result=scan(cfg,q,now_ns=t+4_000_000_000);assert result['counts']=={'published':2}
+
+
+def test_one_full_readiness_per_input_and_output_unchanged(service,monkeypatch):
+    """The optimization removes full checks, not output checks or sensor data."""
+    import convest.ingest.inputs as inputs
+    import convest.ingest.worker as worker
+    import convest.jobs as jobs
+    import pyarrow.parquet as pq
+    cfg=service;bag(cfg,0);bag(cfg,1);calls=[]
+    real=jobs.check_ready
+    def check(*args,**kw):calls.append(str(args[0]));return real(*args,**kw)
+    monkeypatch.setattr(inputs,'check_ready',check)
+    monkeypatch.setattr(jobs,'check_ready',check)
+    # A is the optimized path; B deliberately uses the original standalone
+    # job precheck as a baseline, on identical real CDR messages.
+    stage=worker.stage_input
+    def baseline(b,target,*args,**kw):
+        receipt=stage(b,target,*args,**kw)
+        return None if '/B/' in str(b) else receipt
+    monkeypatch.setattr(worker,'stage_input',baseline)
+    with worker_context(cfg) as q:
+        assert ready_scan(cfg,q)['counts']=={'published':2}
+    assert len(calls)==3  # one for each source, one baseline working copy
+    a=Publisher(cfg['routes'][0],cfg['fingerprint']).current()
+    b=Publisher(cfg['routes'][1],cfg['fingerprint']).current()
+    ai=json.loads((a/'meta/info.json').read_text());bi=json.loads((b/'meta/info.json').read_text())
+    assert ai['features']==bi['features']
+    assert ai['total_frames']==bi['total_frames']
+    af=next(a.glob('data/**/*.parquet'));bf=next(b.glob('data/**/*.parquet'))
+    assert pq.read_table(af).equals(pq.read_table(bf))
+    for f in a.glob('videos/**/*.mp4'):assert checksum(f)==checksum(b/f.relative_to(a))
+    assert verify(a,full_video=True)['status']==verify(b,full_video=True)['status']=='passed'
+
+
+def test_final_content_check_catches_same_size_same_mtime_change(service,tmp_path):
+    import os
+    from convest.ingest.inputs import verify_input_content
+    cfg=service;b=bag(cfg,2);proof=check_input(b,cfg['routes'][2],snapshot(b))
+    p=b/'collection_state.json';st=p.stat();data=p.read_bytes()
+    p.write_bytes(data.replace(b'finalized',b'finalizeX',1));os.utime(p,ns=(st.st_atime_ns,st.st_mtime_ns))
+    # Even if a filesystem snapshot were fooled, full content hashes remain.
+    proof['snapshot']=snapshot(b)
+    with pytest.raises(InputChanged,match='content changed'):verify_input_content(b,proof)
+
+
+def test_receipt_is_bound_to_copy_and_schema_and_not_accepted_as_json(service,tmp_path):
+    from dataclasses import replace
+    cfg=service;b=bag(cfg,2);route=cfg['routes'][2]
+    proof=check_input(b,route,snapshot(b));dest=tmp_path/'copy'
+    receipt=stage_input(b,dest,proof)
+    assert receipt.reuse(dest,route['conversion'])[0]['source']==str(dest)
+    with pytest.raises(ValueError,match='path/schema'):receipt.reuse(b,route['conversion'])
+    with pytest.raises(ValueError,match='path/schema'):replace(receipt,context='wrong').reuse(dest,route['conversion'])
+    f=dest/'metadata.yaml';f.write_text(f.read_text()+'\n')
+    with pytest.raises(ValueError,match='working copy changed'):receipt.reuse(dest,route['conversion'])
+
+
+def test_corrupt_working_copy_after_conversion_blocks_publication(service,monkeypatch):
+    import convest.ingest.worker as worker
+    cfg=service;bag(cfg,2);real=worker.run
+    def corrupt(*args,**kw):
+        result=real(*args,**kw)
+        receipt=kw['validated_inputs']['episode1']
+        p=next(receipt.root.glob('*.db3'));p.write_bytes(p.read_bytes()+b'corruption')
+        return result
+    monkeypatch.setattr(worker,'run',corrupt)
+    with worker_context(cfg) as q:
+        # Post-job receipt check must also cover the gap after run returns.
+        result=ready_scan(cfg,q)
+        assert result['counts']=={'retry':1}
+        assert Publisher(cfg['routes'][2],cfg['fingerprint']).current() is None
+
+
+def test_drain_finishes_current_publication_and_cleanup_then_restart_resumes(service,monkeypatch):
+    import convest.ingest.worker as worker
+    cfg=service;bag(cfg,2,1);bag(cfg,2,2);real=worker.run;called=[]
+    def drain(*args,**kw):
+        called.append(kw['episodes'][0]);request_maintenance(cfg,True)
+        return real(*args,**kw)
+    monkeypatch.setattr(worker,'run',drain)
+    with worker_context(cfg) as q:
+        report=ready_scan(cfg,q)
+        assert report['maintenance']=='drained' and report['counts']=={'published':1,'waiting_stable':1}
+        assert len(called)==1
+        assert not [p for p in Path(cfg['work_root']).iterdir() if p.is_dir()]
+    with worker_context(cfg) as q:
+        assert scan(cfg,q)['maintenance']=='drained' and len(called)==1
+        request_maintenance(cfg,False)
+        monkeypatch.setattr(worker,'run',real)
+        assert scan(cfg,q,now_ns=time.time_ns()+4_000_000_000)['counts']=={'published':2}
+        assert verify(Publisher(cfg['routes'][2],cfg['fingerprint']).current())['episodes']==2
+
+
+def test_drain_during_readiness_does_not_start_processing(service,monkeypatch):
+    import convest.ingest.worker as worker
+    cfg=service;bag(cfg,2);real=worker.check_input
+    def drain(*args,**kw):
+        proof=real(*args,**kw);request_maintenance(cfg,True);return proof
+    monkeypatch.setattr(worker,'check_input',drain)
+    with worker_context(cfg) as q:
+        result=ready_scan(cfg,q)
+        assert result['maintenance']=='drained' and result['counts']=={'waiting_stable':1}
+        assert Publisher(cfg['routes'][2],cfg['fingerprint']).current() is None
+
+
+def test_progress_distinguishes_precheck_final_hash_and_publication(service,monkeypatch):
+    import convest.ingest.worker as worker
+    cfg=service;bag(cfg,2);real=worker.progress_reporter;phases=[]
+    def reporter(*args,**kw):
+        report=real(*args,**kw)
+        def capture(phase,**detail):phases.append(phase);return report(phase,**detail)
+        return capture
+    monkeypatch.setattr(worker,'progress_reporter',reporter)
+    with worker_context(cfg) as q:assert ready_scan(cfg,q)['counts']=={'published':1}
+    assert phases.index('working_copy_readiness_reused')<phases.index('original_final_hash')<phases.index('publishing')<phases.index('cleanup')
+    assert json.loads((Path(cfg['state_root'])/'progress.json').read_text())['phase']=='idle'
+
+
+def test_json_receipt_cannot_bypass_standalone_precheck(service):
+    from convest.jobs import run
+    cfg=service;source=bag(cfg,2)
+    out=Path(cfg['work_root'])/'invalid_receipt'
+    assert run({**cfg['routes'][2]['conversion'],'source_root':str(source.parent)},out,
+               episodes=[source.name],validated_inputs={source.name:{'status':'passed'}})==2
+    summary=json.loads((out/'summary.json').read_text())
+    assert summary['failed']==1 and 'Invalid readiness receipt' in summary['jobs'][0]['error']
+    assert not (out/'dataset').exists()
+
+
+def test_maintenance_cli_request_and_resume_do_not_delete_queue(service,monkeypatch,capsys):
+    from convest.ingest import cli
+    cfg=service;bag(cfg,2)
+    monkeypatch.setattr(cli,'load_service_config',lambda path:cfg)
+    with worker_context(cfg) as q:
+        scan(cfg,q)
+        assert cli.main(['drain','--config','unused.yaml'])==0
+        capsys.readouterr()
+        assert scan(cfg,q)['maintenance']=='drained'
+        assert q.get('wuji-A','episode1')['state']=='waiting_stable'
+        assert cli.main(['status','--config','unused.yaml'])==0
+        status=json.loads(capsys.readouterr().out)
+        assert status['maintenance_requested'] and status['last_scan']['maintenance']=='drained'
+        assert cli.main(['resume','--config','unused.yaml'])==0
+        capsys.readouterr()
+        assert scan(cfg,q,now_ns=time.time_ns()+4_000_000_000)['counts']=={'published':1}
 
 
 def test_empty_output_directories_can_initialize_without_touching_existing_data(service):

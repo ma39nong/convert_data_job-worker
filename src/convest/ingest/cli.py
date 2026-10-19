@@ -9,16 +9,23 @@ import time
 from .config import load_service_config
 from .worker import worker_context,scan
 from .batches import BatchPublisher
+from .control import request_maintenance,maintenance_requested
+from .publish import read
 
 
 def main(argv=None):
     p=argparse.ArgumentParser(description='Automatically observe, validate, clean and append incoming ROS bags')
     sub=p.add_subparsers(dest='command',required=True)
-    for cmd in ('check-config','once','run','status'):
+    for cmd in ('check-config','once','run','status','drain','resume'):
         c=sub.add_parser(cmd);c.add_argument('--config',type=Path,required=True)
     args=p.parse_args(argv)
     try:
         config=load_service_config(args.config)
+        if args.command in ('drain','resume'):
+            request_maintenance(config,args.command=='drain')
+            print(json.dumps({'maintenance_requested':args.command=='drain',
+                              'note':'Current job finishes publication and cleanup before draining; no process is killed.'}))
+            return 0
         if args.command=='check-config':
             print(json.dumps({'status':'valid','writes_performed':False,'initial_history':config['initial_history_by_route'],
                               'routes':[{k:v for k,v in r.items() if k!='conversion'} for r in config['routes']]},ensure_ascii=False,indent=2));return 0
@@ -32,7 +39,11 @@ def main(argv=None):
                 history=[{**dict(row),'policy':json.loads(row['policy']),'skipped':json.loads(row['skipped'])}
                          for row in db.execute('SELECT * FROM initial_history ORDER BY route')] if exists else []
             batches={r['id']:BatchPublisher(r,config['fingerprint']).status() for r in config['routes']}
-            print(json.dumps({'jobs':rows,'initial_history':history,'batches':batches},ensure_ascii=False,indent=2));return 0
+            state=Path(config['state_root'])
+            print(json.dumps({'jobs':rows,'initial_history':history,'batches':batches,
+                'maintenance_requested':maintenance_requested(config),
+                'last_scan':read(state/'status.json') if (state/'status.json').exists() else None,
+                'progress':read(state/'progress.json') if (state/'progress.json').exists() else None},ensure_ascii=False,indent=2));return 0
         stopping=False
         def stop(signum,frame):
             nonlocal stopping
@@ -40,7 +51,7 @@ def main(argv=None):
         if args.command=='run':signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
         with worker_context(config) as queue:
             while True:
-                print(json.dumps(scan(config,queue),ensure_ascii=False),flush=True)
+                print(json.dumps(scan(config,queue,should_stop=lambda:stopping),ensure_ascii=False),flush=True)
                 if args.command=='once' or stopping:break
                 until=time.monotonic()+config['poll_seconds']
                 while not stopping and time.monotonic()<until:time.sleep(min(.5,max(0,until-time.monotonic())))

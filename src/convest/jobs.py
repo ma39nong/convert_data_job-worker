@@ -7,6 +7,7 @@ import sqlite3
 import shutil
 import time
 import yaml
+from .readiness import ValidatedInput
 
 from bag_worker.idle import trim_bag, default_config
 from dataclasses import asdict
@@ -16,14 +17,19 @@ from convest.pipeline import convert, load_records
 from convest.sources.robot_rosbag2 import Bag, read_streams
 
 
-def checksum(path):
+def checksum(path, progress=None):
     value=hashlib.sha256()
+    size=Path(path).stat().st_size;done=0;last=time.monotonic()
     with Path(path).open('rb') as f:
-        for part in iter(lambda:f.read(8*1024*1024),b''):value.update(part)
+        for part in iter(lambda:f.read(8*1024*1024),b''):
+            value.update(part);done+=len(part)
+            if progress and time.monotonic()-last>=5:
+                progress('hashing',file=Path(path).name,bytes_done=done,bytes_total=size);last=time.monotonic()
+    if progress:progress('hashing',file=Path(path).name,bytes_done=done,bytes_total=size)
     return value.hexdigest()
 
 
-def check_ready(path,contract,schema_dir,profile=None):
+def check_ready(path,contract,schema_dir,profile=None,progress=None):
     """No writes; consistency, finalized capture, full hashes and stable snapshots."""
     path=Path(path).resolve();before=snapshot(path)
     if any(p.name.endswith(('.partial','.tmp','-wal','-shm')) for p in path.iterdir()):
@@ -40,16 +46,19 @@ def check_ready(path,contract,schema_dir,profile=None):
         if not f.is_relative_to(path) or not f.is_file():raise ValueError('Missing or unsafe bag volume')
         with sqlite3.connect(f.as_uri()+'?mode=ro',uri=True) as db:
             db.execute('PRAGMA query_only=ON')
+            if progress:progress('sqlite_check',file=relative)
             if db.execute('PRAGMA quick_check').fetchone()[0]!='ok':raise ValueError('Incomplete or corrupt SQLite file')
+            if progress:progress('message_counts',file=relative)
             names=dict(db.execute('SELECT id,name FROM topics'))
             for tid,count in db.execute('SELECT topic_id,count(*) FROM messages GROUP BY topic_id'):
                 total+=count;name=names[tid];topic_counts[name]=topic_counts.get(name,0)+count
-        files.append({'name':relative,'bytes':f.stat().st_size,'sha256':checksum(f)})
+        files.append({'name':relative,'bytes':f.stat().st_size,'sha256':checksum(f,progress)})
     if total!=meta['message_count']:raise ValueError('Bag message count differs from metadata')
     expected={v['topic_metadata']['name']:v['message_count'] for v in meta['topics_with_message_count']}
     if any(topic_counts.get(k,0)!=v for k,v in expected.items()) or set(topic_counts)-set(expected):
         raise ValueError('Topic counts differ from metadata')
     # Decode low-dimensional streams and inspect all required sensor headers before trimming.
+    if progress:progress('required_streams')
     with Bag(path,schema_dir) as bag:
         streams=read_streams(bag,contract)
         hand=22 if 'measured_left_hand' in contract['source_joint_names'] else 20
@@ -67,7 +76,7 @@ def check_ready(path,contract,schema_dir,profile=None):
             'collection_state_sha256':checksum(path/'collection_state.json')}
 
 
-def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None):
+def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None,*,validated_inputs=None,progress=None):
     from convest.verify import verify
     root=Path(run_root).resolve();source=Path(config['source_root']).resolve()
     if not root.is_relative_to(WORKSPACE/'outputs') or root==WORKSPACE/'outputs':
@@ -100,10 +109,17 @@ def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None):
             def transition(state,**extra):
                 job.update(state=state,updated_ns=time.time_ns(),**extra);atomic_json(journal,job)
                 print(f'{name}: {state}',flush=True)
+                if progress:progress('job.'+state)
             try:
                 transition('checking')
-                profile={}
-                ready=check_ready(source/name,contract,config['schema_dir'],profile)
+                receipt=(validated_inputs or {}).get(name)
+                if receipt is not None:
+                    if not isinstance(receipt,ValidatedInput):raise ValueError('Invalid readiness receipt')
+                    ready,profile=receipt.reuse(source/name,config)
+                    if progress:progress('working_copy_readiness_reused')
+                else:
+                    profile={}
+                    ready=check_ready(source/name,contract,config['schema_dir'],profile,progress)
                 job['input_profile']=profile
                 if old.get('readiness') and ready!=old['readiness']:raise ValueError('Source differs from prior job snapshot')
                 transition('ready',readiness=ready,error=None)
@@ -135,12 +151,14 @@ def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None):
             atomic_json(root/'conversion_config.json',cfg)
             for job in good:
                 job.update(state='converting',updated_ns=time.time_ns());atomic_json(root/'jobs'/f'{job["episode"]}.json',job)
+                if progress:progress('job.converting')
             try:
                 code=convert(cfg,resume=(root/'dataset/conversion/manifest.json').exists(),workers=workers,episode_list=selection)
                 records=load_records(root/'dataset');completed={Path(r['source']).name for r in records}
                 summary=json.loads((root/'dataset/conversion/summary.json').read_text())
                 rejected={Path(r['source']).name:r for r in summary['quality_rejections']}
                 errors={Path(r['source']).name:r for r in summary['errors']}
+                if progress:progress('job.output_verification')
                 checked=verify(root/'dataset',full_video=True,compare_source=True,raise_on_error=False) if records else None
                 outcomes={}
                 for outcome in (checked or {}).get('results',[]):
@@ -157,8 +175,12 @@ def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None):
                             else:
                                 if snapshot(Path(job['source']))!=job['readiness']['snapshot']:
                                     raise ValueError('Original changed during job')
+                                receipt=(validated_inputs or {}).get(name)
+                                if receipt is not None:receipt.assert_unchanged()
+                                if progress:progress('job.working_copy_final_hash')
                                 for volume in job['readiness']['volumes']:
-                                    if checksum(Path(job['source'])/volume['name'])!=volume['sha256']:
+                                    report=(lambda phase,**kw:progress('job.working_copy_final.'+phase,**kw)) if progress else None
+                                    if checksum(Path(job['source'])/volume['name'],report)!=volume['sha256']:
                                         raise ValueError('Original content hash changed during job')
                                 job.update(state='completed',verification={'status':'passed','results':relevant,'episodes':len(relevant),'frames':sum(r['frames'] for r in relevant),'report':'dataset/conversion/verification.json'},error=None,original_sha256_verified=True)
                         elif name in rejected:job.update(state='excluded',quality_rejection=rejected[name])

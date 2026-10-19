@@ -8,7 +8,8 @@ import shutil
 import time
 from convest.config import atomic_json,digest
 from convest.jobs import run
-from .inputs import snapshot,check_input,stage_input,monitor_input,InputChanged
+from .inputs import snapshot,check_input,stage_input,monitor_input,InputChanged,verify_input_content
+from .control import maintenance_requested,progress_reporter
 from .publish import OWNER,read
 from .batches import BatchPublisher as Publisher
 from .queue import Queue
@@ -60,6 +61,7 @@ def process(config,queue,route,bag,proof):
     job=slot/'job';identity=proof['content_identity'];old=queue.get(route['id'],bag.name);attempt=old['attempts']+1
     queue.put(route['id'],bag.name,identity,'staging',attempts=attempt,proof=proof,error=None)
     archive=Path(config['state_root'])/'attempts'/key/f'{attempt:04d}'
+    progress=progress_reporter(config,route,bag.name)
     try:
         size=sum(f['size'] for f in proof['files']);reserve=route['conversion']['min_free_gb']*10**9
         if shutil.disk_usage(config['work_root']).free<size*4+reserve:raise OSError('Insufficient staging disk reserve')
@@ -67,22 +69,32 @@ def process(config,queue,route,bag,proof):
         while not target_parent.exists():target_parent=target_parent.parent
         if shutil.disk_usage(target_parent).free<size*2+reserve:raise OSError('Insufficient output disk reserve')
         with monitor_input(bag,proof['snapshot'],min(1,config['poll_seconds'])) as guard:
-            staged=slot/'raw'/bag.name;stage_input(bag,staged,proof);guard()
+            progress('staging')
+            staged=slot/'raw'/bag.name
+            receipt=stage_input(bag,staged,proof,lambda phase,**kw:progress('staging.'+phase,**kw));guard()
             queue.put(route['id'],bag.name,identity,'processing',proof=proof,error=None)
             cfg={**route['conversion'],'source_root':str(staged.parent)}
-            run(cfg,job,episodes=[bag.name]);guard()
+            run(cfg,job,episodes=[bag.name],validated_inputs={bag.name:receipt},progress=progress);guard()
             summary=read(job/'summary.json');outcome=summary['jobs'][0]
             if outcome['state']!='completed':
                 if outcome['state']=='excluded':
                     queue.put(route['id'],bag.name,identity,'excluded',error=json.dumps(outcome.get('quality_rejection')))
                     return
                 raise ValueError(outcome.get('error') or 'Conversion/source verification failed')
-            # Full hashes plus structural checks again, not only a quiet-directory heuristic.
-            after=check_input(bag,route,proof['snapshot']);guard()
-            if after!={k:v for k,v in proof.items() if k!='stability'}:raise InputChanged('Input changed while processing')
+            if receipt is not None:receipt.reuse(staged,cfg)
+            # Structural readiness was proven once and the frozen copy was
+            # independently hashed. Keep the original's full final content
+            # check, without repeating SQLite scans or required-stream parsing.
+            progress('original_final_hash')
+            verify_input_content(bag,proof,lambda phase,**kw:progress('original_final.'+phase,**kw));guard()
+            progress('archiving')
             archive_reports(job,archive)
             shutil.copyfile(job/'cleaned'/bag.name/'trim_report.json',archive/'trim_report.json')
-            generation=Publisher(route,config['fingerprint']).publish(job/'dataset',proof,bag.name,archive,precommit=guard,started_ns=started_ns)
+            progress('publishing')
+            def precommit():
+                guard()
+                if receipt is not None:receipt.reuse(staged,cfg)
+            generation=Publisher(route,config['fingerprint']).publish(job/'dataset',proof,bag.name,archive,precommit=precommit,started_ns=started_ns)
             queue.put(route['id'],bag.name,identity,'published',error=None,proof={**proof,'generation':str(generation)})
     except InputChanged as exc:
         queue.put(route['id'],bag.name,None,'waiting_stable',attempts=0,proof=None,error=str(exc))
@@ -93,12 +105,22 @@ def process(config,queue,route,bag,proof):
                   error=f'{type(exc).__name__}: {exc}',next_ns=time.time_ns()+delay*10**9)
     finally:
         try:archive_reports(job,archive)
-        finally:clean_slot(slot,config['work_root'])
+        finally:
+            try:progress('cleanup')
+            finally:clean_slot(slot,config['work_root'])
+            progress('idle')
 
 
-def scan(config,queue,now_ns=None):
+def scan(config,queue,now_ns=None,should_stop=lambda:False):
     now=time.time_ns() if now_ns is None else now_ns
     counts={};route_errors={};candidates=[];batches={}
+    def draining():return should_stop() or maintenance_requested(config)
+    if draining():
+        for row in queue.rows():counts[row['state']]=counts.get(row['state'],0)+1
+        result={'updated_ns':time.time_ns(),'maintenance':'drained','counts':counts,'route_errors':{},
+                'initial_history':queue.history_rows(),'jobs':[{k:v for k,v in row.items() if k!='proof'} for row in queue.rows()]}
+        atomic_json(Path(config['state_root'])/'status.json',result)
+        return result
     for route in config['routes']:
         source=Path(route['source'])
         try:
@@ -151,20 +173,28 @@ def scan(config,queue,now_ns=None):
     candidates.sort(key=lambda x:(x[0],x[1],int(x[3].name[7:]),x[2]['id']))
     checks=0;processed=0
     for _,_,route,bag,snap,observation in candidates:
+        if draining():break
         if checks>=config['max_checks_per_scan'] or processed>=config['max_jobs_per_scan']:break
         checks+=1
         old=queue.get(route['id'],bag.name)
         queue.put(route['id'],bag.name,old['identity'],'checking',error=None)
-        try:proof=check_input(bag,route,snap)
+        progress=progress_reporter(config,route,bag.name,prefix='readiness.')
+        progress('start')
+        try:proof=check_input(bag,route,snap,progress)
         except Exception as exc:
             queue.put(route['id'],bag.name,None,'waiting_upload',proof={'signature':digest(snap)},
                 error=f'{type(exc).__name__}: {exc}',next_ns=now+config['retry_seconds']*10**9);continue
+        if draining():
+            # A maintenance request during checking must not start a new copy
+            # or conversion. Recheck normally after resuming; no stale receipt.
+            queue.put(route['id'],bag.name,None,'waiting_stable',error=None)
+            break
         proof['stability']={**observation,'required_scans':config['stable_scans'],'required_seconds':config['stable_seconds']}
         if old['identity']!=proof['content_identity']:queue.put(route['id'],bag.name,proof['content_identity'],'queued',attempts=0,proof=proof,error=None)
         process(config,queue,route,bag,proof);processed+=1
     for row in queue.rows():counts[row['state']]=counts.get(row['state'],0)+1
     for route in config['routes']:
         if route['id'] not in route_errors:batches[route['id']]=Publisher(route,config['fingerprint']).status()
-    result={'updated_ns':time.time_ns(),'counts':counts,'route_errors':route_errors,'initial_history':queue.history_rows(),'batches':batches,
+    result={'updated_ns':time.time_ns(),'maintenance':'drained' if draining() else 'running','counts':counts,'route_errors':route_errors,'initial_history':queue.history_rows(),'batches':batches,
             'jobs':[{k:v for k,v in row.items() if k!='proof'} for row in queue.rows()]}
     atomic_json(Path(config['state_root'])/'status.json',result);return result

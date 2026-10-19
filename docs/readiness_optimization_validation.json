@@ -1,0 +1,53 @@
+{
+  "status": "passed",
+  "date": "2026-10-19",
+  "scope": "local validation; active server code and process not replaced or interrupted",
+  "changes": {
+    "full_readiness_per_attempt": 1,
+    "working_copy_readiness": "process-local receipt bound to hash-verified copy and schema",
+    "final_original_check": "all-file SHA256 and strong snapshots; no repeated SQLite or stream parsing",
+    "output_verification": "unchanged full decode and independent source audit",
+    "cleaning_rules_and_quality_thresholds": "unchanged",
+    "concurrency": "unchanged, serial",
+    "maintenance": "durable drain completes active publication and cleanup; explicit resume; queue preserved"
+  },
+  "real_dataset_equivalence": [
+    {
+      "robot": "sharpa",
+      "episode": "episode36",
+      "frames": 807,
+      "status": "passed",
+      "elapsed_s": 36.768,
+      "parquet_exact_match": true,
+      "rgb_files_exact_match": 3,
+      "trim_mapping_exact_match": true,
+      "full_readiness_calls": 1,
+      "working_copy_full_readiness_calls": 0,
+      "final_original_sha256_verified": true,
+      "working_copy_sha256_verified": true,
+      "lossless_sensor_rows_compared": 16947
+    },
+    {
+      "robot": "wuji",
+      "episode": "episode995",
+      "frames": 914,
+      "status": "passed",
+      "elapsed_s": 29.453,
+      "parquet_exact_match": true,
+      "rgb_files_exact_match": 3,
+      "trim_mapping_exact_match": true,
+      "full_readiness_calls": 1,
+      "working_copy_full_readiness_calls": 0,
+      "final_original_sha256_verified": true,
+      "working_copy_sha256_verified": true,
+      "lossless_sensor_rows_compared": 914
+    }
+  ],
+  "performance_limit": "Local SSD timings are not a server speedup benchmark; full final content hashes and output checks remain required.",
+  "first_release_upgrade": "Validate a source-only archive outside the running checkout; SIGTERM and wait for normal exit before copying; preserve runtime, configuration, queue and output datasets.",
+  "tests": {
+    "all_tests_including_six_real_baselines_and_episode36_regression": 151,
+    "failures": 0,
+    "upgrade_isolated_systemd_tests": 4
+  }
+}

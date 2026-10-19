@@ -69,6 +69,8 @@ python -m convest.ingest.cli run --config configs/ingest.local.yaml
 
 本地模板仅指向项目 `outputs/`；服务和服务器配置只是模板，未自动部署。接收检查、首次历史范围、异常源变化及数据集版本发布说明见 [自动接收说明](docs/automatic_ingestion.md)。
 
+接收体检每次尝试完整执行一次，哈希校验的固定副本复用该结果；发布前保留原始包全量内容核验，不重复 SQLite/消息统计和必需流解析。输出来源对比、视频、深度和触觉校验不变。`status` 展示细分阶段及复制/哈希字节进度；`drain` 可在当前包发布并清理后进入维护，`resume` 恢复原队列。检查复用边界和旧版本安全升级见上述说明。
+
 后续服务器路径、依赖、首次启动范围和验收步骤见 [服务器部署准备](docs/server_deployment.md)。
 
 ## 转换前体检与清单

@@ -41,7 +41,7 @@ def test_production_publish_and_resume(tmp_path, monkeypatch):
         assert result['published']==2 and not result['local_cache_remaining']
         assert {str(p):checksum(p) for p in source.rglob('*') if p.is_file()}==original
         files={str(p):checksum(p) for p in target.rglob('*.parquet')}
-        assert pub.execute()==0
+        assert pub.execute(retry_only=['episode2'])==0
         assert {str(p):checksum(p) for p in target.rglob('*.parquet')}==files
         assert len(list((target/'conversion/records').glob('*.json')))==2
         monkeypatch.syspath_prepend(str(WORKSPACE/'scripts'))

@@ -250,3 +250,30 @@ def test_named_joint_mapping_and_status_timestamp_domain():
     # An already-rewritten standard image must never be mapped twice.
     assert sample_timestamp(600,800,'sensor_msgs/msg/Image',mapping)==600
     assert sample_timestamp(600,800,'example/msg/Unmodified',mapping)==400
+
+
+@pytest.mark.parametrize('seam,overlap,frames,allowed',[(True,True,2,True),(False,True,2,False),(True,False,2,False),(True,True,3,False)])
+def test_depth_rgb_partial_overlap_at_cleaner_seam(seam,overlap,frames,allowed,monkeypatch):
+    import convest.audit as oracle
+    raw=raw_streams();cfg=load_config(WORKSPACE/'configs/wuji.yaml');base=raw['cam0']
+    stop=11+frames
+    depth_keep=[i for i in range(31) if i<=6 or i>=stop]
+    rgb_keep=[i for i in range(31) if i<=7 or i>=stop] if overlap else list(range(31))
+    raw['cam0']=Series(base.times[rgb_keep],[0]*len(rgb_keep),base.times[rgb_keep])
+    raw['observation.depths.cam0']=Series(base.times[depth_keep],[0]*len(depth_keep),base.times[depth_keep])
+    original_depth_times=raw['observation.depths.cam0'].times.copy()
+    mapping=CompactTimeMap(((1_400_000_000,1_900_000_000,500_000_000),),frozenset(),'report') if seam else None
+    bag=SimpleNamespace(compact_time_map=mapping)
+    fake=SimpleNamespace(read_streams=lambda bag,contract:raw,STATUS_MESSAGE_TYPES=[],timestamp_policy=None)
+    item={'source_start_ns':1_000_000_000,'source_end_ns':2_000_000_000}
+    _,aligned=prepare(fake,bag,item,cfg,{})
+    monkeypatch.setattr(oracle,'read_streams',lambda bag,contract:raw)
+    _,independent=oracle.audit_recording(bag,{},cfg,item)
+    np.testing.assert_array_equal(aligned.valid_mask,independent.valid_mask)
+    np.testing.assert_array_equal(raw['observation.depths.cam0'].times,original_depth_times)
+    assert aligned.report['depth_splice_tolerance']['accepted_frames']==(frames if allowed else 0)
+    assert independent.continuous is allowed
+    if allowed:
+        gap=aligned.report['depth_splice_tolerance']['gaps'][0]
+        assert gap['bounds']==[11,13] and gap['head_rgb_overlap_frames']==1
+        assert max(gap['actual_depth_age_ms'])<=250

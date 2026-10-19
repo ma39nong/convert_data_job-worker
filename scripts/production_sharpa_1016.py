@@ -86,7 +86,7 @@ def archive_audits(job, destination):
         upload_file(p, destination / 'trim_report.json')
 
 
-def execute():
+def execute(retry_only=None):
     inventory = read(CONTROL / 'inventory.json')
     source = Path(inventory['source_root']).resolve()
     reference = Path(inventory['reference_root']).resolve()
@@ -99,6 +99,9 @@ def execute():
     if target.is_relative_to(source) or source.is_relative_to(target) or target == reference:
         raise ValueError('Unsafe input/output overlap')
     selected = inventory['episodes']
+    retry_names = set(retry_only) if retry_only is not None else None
+    if retry_names is not None and not retry_names.issubset(set(selected)):
+        raise ValueError('Retry episodes must belong to the original selection')
     identity = digest({'source': str(source), 'reference': str(reference), 'target': str(target), 'episodes': selected})
     marker = target / 'production/owner.json'
     if marker.exists():
@@ -139,13 +142,20 @@ def execute():
         for ordinal, name in enumerate(selected, 1):
             slot = cache / name
             if name in committed:
-                for relative, proof in committed[name]['production']['artifacts'].items():
-                    if checksum(target / relative) != proof['sha256']:
-                        raise ValueError(f'Committed server output changed: {relative}')
-                outcomes[name] = {'state': 'published', 'episodes': [e['episode_index'] for e in committed[name]['episodes']]}
+                # Targeted retry leaves committed artifacts untouched. Full
+                # dataset verification and deployment SHA-256 checks still run.
+                if retry_names is None:
+                    for relative, proof in committed[name]['production']['artifacts'].items():
+                        if checksum(target / relative) != proof['sha256']:
+                            raise ValueError(f'Committed server output changed: {relative}')
+                outcomes[name] = {**outcomes.get(name, {}), 'state': 'published', 'episodes': [e['episode_index'] for e in committed[name]['episodes']], 'frames': sum(e['length'] for e in committed[name]['episodes'])}
                 guarded_remove(slot, cache)
                 continue
-            if outcomes.get(name, {}).get('state') in ('excluded', 'not_ready'):
+            if retry_names is not None and name not in retry_names:
+                if name not in outcomes:
+                    raise ValueError('Targeted retry cannot silently skip an unprocessed source')
+                continue
+            if outcomes.get(name, {}).get('state') in ('excluded', 'not_ready') and (retry_names is None or name not in retry_names):
                 guarded_remove(slot, cache)
                 continue
             guarded_remove(slot, cache)
@@ -195,6 +205,7 @@ def execute():
                 if detection.get('version') != ALGORITHM_VERSION or effectiveness.get('status') != 'passed':
                     raise ValueError('Missing current independent cleaning effectiveness audit')
                 record['cleaning_effectiveness'] = effectiveness
+                record['conversion_implementation'] = {'depth_splice': 'depth-rgb-overlap-v2'}
                 if records and record['episodes'][0]['features'] != records[0]['episodes'][0]['features']:
                     raise ValueError('Sensor shape differs from published dataset')
                 archive_audits(job, target / 'production/jobs' / name)

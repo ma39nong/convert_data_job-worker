@@ -14,7 +14,7 @@ class Target:
 
 TARGETS = {'lerobot_v21_multimodal': Target(
     'convest.recipes.multimodal', 'convest.formats.multimodal', 'convest.verify',
-    ('data/chunk-*/episode_*.parquet', 'videos/chunk-*/*/episode_*.mp4'), 'multimodal-1')}
+    ('data/chunk-*/episode_*.parquet', 'videos/chunk-*/*/episode_*.mp4'), 'multimodal-2-depth-overlap')}
 
 def get_source(name):
     if name not in SOURCES:

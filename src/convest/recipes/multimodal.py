@@ -47,6 +47,8 @@ def prepare(source, bag, item, config, contract):
         aligned.source_indices[key]=index
     # Depth is paired with head RGB. A receive-time cut can remove its next
     # exposure even though its header predates the splice. Never re-stamp it.
+    # RGB/depth exposures need not coincide: require overlap of the two short
+    # gaps, not identical coverage of every depth grid point.
     depth='observation.depths.cam0';accepted=[]
     boundaries=bag.compact_time_map.compact_boundaries if bag.compact_time_map else ()
     other_good=aligned.valid_mask.copy()
@@ -60,15 +62,17 @@ def prepare(source, bag, item, config, contract):
         if a==0 or b==len(aligned.timeline) or b-a>config['camera_short_gap_max_frames']:continue
         nearby=[c for c in boundaries if aligned.timeline[a-1]<=c<=aligned.timeline[b]]
         age=extra_ages[depth][a:b]
-        if (not nearby or not rgb_allowed[a:b].all() or not other_good[a-1:b+1].all()
+        if (not nearby or not rgb_allowed[a:b].any() or not other_good[a-1:b+1].all()
             or (age<0).any() or (age>config['camera_short_gap_max_age_ms']*1e6).any()
             or (aligned.source_indices[depth][a:b]<0).any()):continue
         extra_good[depth][a:b]=True
         accepted.append({'bounds':[a,b],'compact_boundaries_ns':[int(c) for c in nearby],
                          'actual_depth_age_ms':(age/1e6).tolist(),
+                         'head_rgb_overlap_frames':int(rgb_allowed[a:b].sum()),
                          'sample_timestamp_ns':streams[depth].times[aligned.source_indices[depth][a:b]].tolist()})
     aligned.report['depth_splice_tolerance']={
         'policy':'only recorded cleaner seams overlapping accepted head RGB gaps; never retimestamp',
+        'implementation_version':'depth-rgb-overlap-v2',
         'max_frames':config['camera_short_gap_max_frames'],
         'max_age_ms':config['camera_short_gap_max_age_ms'],
         'accepted_frames':sum(g['bounds'][1]-g['bounds'][0] for g in accepted),'gaps':accepted}

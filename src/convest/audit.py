@@ -101,8 +101,8 @@ def audit_recording(bag, contract, config, item):
         if a == 0 or b == n or b-a > config['camera_short_gap_max_frames']:
             continue
         near = [c for c in boundaries if timeline[a-1] <= c <= timeline[b]]
-        allowed = all(any(g['bounds'][0] <= i < g['bounds'][1] and 'cam0' in g['cameras']
-                          for g in rgb_accepted) for i in range(a,b))
+        allowed = any('cam0' in g['cameras'] and max(a,g['bounds'][0]) < min(b,g['bounds'][1])
+                      for g in rgb_accepted)
         if not near or not allowed or not other_valid[a-1:b+1].all():
             continue
         ages = [int(timeline[i]-streams[depth].times[max(0,indices[depth][i])]) for i in range(a,b)]

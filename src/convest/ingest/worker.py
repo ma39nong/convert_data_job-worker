@@ -103,6 +103,9 @@ def scan(config,queue,now_ns=None):
         try:published=Publisher(route,config['fingerprint']).published()
         except Exception as exc:route_errors[route['id']]=str(exc);continue
         bags=sorted((p for p in source.iterdir() if EPISODE.fullmatch(p.name) and p.is_dir() and not p.is_symlink()),key=lambda p:(int(p.name[7:]),p.name))
+        try:skipped=queue.initialize_history(route['id'],[p.name for p in bags],config['initial_history_by_route'][route['id']],now)
+        except ValueError as exc:route_errors[route['id']]=str(exc);continue
+        bags=[p for p in bags if p.name not in skipped]
         new=[];observed=[]
         for bag in bags:
             old=queue.get(route['id'],bag.name)
@@ -156,6 +159,6 @@ def scan(config,queue,now_ns=None):
         if old['identity']!=proof['content_identity']:queue.put(route['id'],bag.name,proof['content_identity'],'queued',attempts=0,proof=proof,error=None)
         process(config,queue,route,bag,proof);processed+=1
     for row in queue.rows():counts[row['state']]=counts.get(row['state'],0)+1
-    result={'updated_ns':time.time_ns(),'counts':counts,'route_errors':route_errors,
+    result={'updated_ns':time.time_ns(),'counts':counts,'route_errors':route_errors,'initial_history':queue.history_rows(),
             'jobs':[{k:v for k,v in row.items() if k!='proof'} for row in queue.rows()]}
     atomic_json(Path(config['state_root'])/'status.json',result);return result

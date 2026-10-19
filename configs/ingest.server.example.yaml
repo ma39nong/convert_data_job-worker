@@ -11,6 +11,8 @@ max_jobs_per_scan: 1
 max_checks_per_scan: 4
 max_attempts: 3
 retry_seconds: 60
+# Review before first start. Use include + episodes to select historical bags.
+initial_history: {mode: none}
 routes:
   - {robot: sharpa, group: A}
   - {robot: sharpa, group: B}

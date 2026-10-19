@@ -5,6 +5,18 @@ from convest.config import WORKSPACE,load_config,digest
 from convest.registry import get_target
 from bag_worker.idle import ALGORITHM_VERSION,default_config
 from dataclasses import asdict
+import re
+
+
+def history_policy(value):
+    if not isinstance(value,dict) or value.get('mode') not in ('none','include','all'):
+        raise ValueError('Explicit initial_history required: mode none, include or all')
+    if set(value)-{'mode','episodes'}:raise ValueError('Unknown initial_history field')
+    names=value.get('episodes',[])
+    if not isinstance(names,list) or any(not isinstance(n,str) or not re.fullmatch(r'episode[0-9]+',n) for n in names):
+        raise ValueError('initial_history episodes must be exact episode directory names')
+    if value['mode']!='include' and names:raise ValueError('episodes only allowed with initial_history mode include')
+    return {'mode':value['mode'],'episodes':sorted(set(names))}
 
 
 def load_service_config(path):
@@ -26,14 +38,17 @@ def load_service_config(path):
     if cfg['stable_seconds']<(cfg['stable_scans']-1)*cfg['poll_seconds']:
         raise ValueError('Stable duration must span the required independent scans')
     if cfg['max_checks_per_scan']<cfg['max_jobs_per_scan']:raise ValueError('Check budget must cover processing budget')
-    roots=[Path(cfg['state_root']),work];pairs=set();routes=[]
+    roots=[Path(cfg['state_root']),work];pairs=set();routes=[];history={}
     for route in cfg['routes']:
         robot,group=route['robot'],route['group']
         if robot not in ('sharpa','wuji') or group not in ('A','B') or (robot,group) in pairs:
             raise ValueError('Invalid or duplicate route')
         pairs.add((robot,group));route=dict(route);route['id']=f'{robot}-{group}'
+        history[route['id']]=history_policy(route.pop('initial_history',cfg.get('initial_history')))
         root=Path(cfg['data_root'])
         route['source']=str(root/'origin-data'/robot/group)
+        if '.uploading' in Path(route['source']).resolve().parts:
+            raise ValueError('Formal source must not be inside .uploading')
         route['output']=str(root/'clean-data-lerobot'/robot/group)
         base=load_config(resolve(route.get('conversion_config',f'configs/{robot}.yaml')))
         if base['robot']!=robot:raise ValueError('Conversion robot mismatch')
@@ -49,6 +64,7 @@ def load_service_config(path):
             br=b.parent.resolve()/b.name
             if ar.is_relative_to(br) or br.is_relative_to(ar):raise ValueError('Input/state/work/output paths overlap')
     cfg['routes']=routes
+    cfg['initial_history_by_route']=history
     cfg['fingerprint']=digest({'routes':routes,'idle':asdict(default_config()),'idle_version':ALGORITHM_VERSION,
         'converter_version':get_target('lerobot_v21_multimodal').version,'publisher':'generations-v1','readiness':'stable-structural-v1'})
     return cfg

@@ -17,7 +17,27 @@ class Queue:
         self.db.execute('''CREATE TABLE IF NOT EXISTS observations(
             route TEXT,episode TEXT,signature TEXT,stable_since_ns INTEGER,last_scan_ns INTEGER,
             stable_count INTEGER,priority INTEGER DEFAULT 0,PRIMARY KEY(route,episode))''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS initial_history(
+            route TEXT PRIMARY KEY,policy TEXT,skipped TEXT,created_ns INTEGER)''')
         self.db.commit()
+    def initialize_history(self,route,names,policy,now):
+        found=self.db.execute('SELECT policy,skipped FROM initial_history WHERE route=?',(route,)).fetchone()
+        if found:
+            if json.loads(found[0])!=policy:raise ValueError('Initial history policy changed after initialization; keep the persisted policy')
+            return set(json.loads(found[1]))
+        # Existing jobs from an earlier receiver version always resume, even if
+        # the new startup policy excludes other historical directories.
+        existing={r[0] for r in self.db.execute('SELECT episode FROM jobs WHERE route=?',(route,))}
+        allowed=set(names) if policy['mode']=='all' else set(policy['episodes']) if policy['mode']=='include' else set()
+        skipped=set(names)-allowed-existing
+        with self.db:
+            self.db.execute('INSERT INTO initial_history VALUES(?,?,?,?)',
+                (route,json.dumps(policy),json.dumps(sorted(skipped)),now))
+        return skipped
+    def history_rows(self):
+        self.db.row_factory=sqlite3.Row
+        return [{**dict(r),'policy':json.loads(r['policy']),'skipped':json.loads(r['skipped'])}
+                for r in self.db.execute('SELECT * FROM initial_history ORDER BY route')]
     def observe(self,route,episode,signature,now,interval):
         self.db.row_factory=sqlite3.Row
         found=self.db.execute('SELECT * FROM observations WHERE route=? AND episode=?',(route,episode)).fetchone()

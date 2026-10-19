@@ -10,7 +10,7 @@ from convest.config import WORKSPACE,atomic_json
 from convest.jobs import checksum
 from convest.ingest.config import load_service_config
 from convest.ingest.worker import worker_context,scan
-from convest.ingest.inputs import snapshot,check_input,stage_input,InputChanged
+from convest.ingest.inputs import snapshot,check_input,stage_input,InputChanged,check_upload_layout
 from convest.ingest.publish import Publisher
 from convest.verify import verify
 from conversion_helpers import make_conversion_bag
@@ -28,7 +28,7 @@ def service(tmp_path,monkeypatch):
     work=WORKSPACE/'outputs'/('test_ingest_'+uuid.uuid4().hex)
     raw={'schema_version':1,'data_root':str(tmp_path/'data'),'state_root':str(tmp_path/'state'),
          'work_root':str(work),'poll_seconds':1,'stable_scans':2,'stable_seconds':1,'retry_seconds':1,'max_attempts':3,'max_jobs_per_scan':16,'max_checks_per_scan':32,
-         'routes':[{'robot':r,'group':g} for r in ('sharpa','wuji') for g in ('A','B')]}
+         'initial_history':{'mode':'all'},'routes':[{'robot':r,'group':g} for r in ('sharpa','wuji') for g in ('A','B')]}
     path=tmp_path/'config.yaml';path.write_text(yaml.safe_dump(raw));cfg=load_service_config(path)
     for route in cfg['routes']:Path(route['source']).mkdir(parents=True)
     yield cfg
@@ -275,3 +275,105 @@ def test_publication_lock_is_shared_even_with_separate_queue_state(service,tmp_p
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         with pytest.raises(BlockingIOError):pub.publish(tmp_path,{},'episode1',tmp_path/'audit')
     assert pub.current() is None
+
+
+def test_uploading_ignored_then_atomic_publish_discovers_last_and_deduplicates(service):
+    cfg=service;r=cfg['routes'][2];formal=Path(r['source'])
+    cfg['initial_history_by_route']['wuji-A']={'mode':'none','episodes':[]}
+    staging=Path(cfg['data_root'])/'.uploading/task42'
+    make_conversion_bag(staging,'wuji',frames=18)
+    make_conversion_bag(formal/'.uploading/task43/episode43','wuji',frames=18)
+    (formal/'episode99').symlink_to(staging,target_is_directory=True)
+    originals={p.name:checksum(p) for p in staging.iterdir()};t=time.time_ns()
+    with worker_context(cfg) as q:
+        assert scan(cfg,q,now_ns=t)['counts']=={}  # Includes no temporary-upload jobs.
+        layout=check_upload_layout(staging,formal)
+        assert layout['same_device'] and not layout['uploader_operation_verified']
+        staging.rename(formal/'episode42')  # Real same-filesystem rename, no copy fallback.
+        assert scan(cfg,q,now_ns=t+2_000_000_000)['counts']=={'waiting_stable':1}
+        assert scan(cfg,q,now_ns=t+4_000_000_000)['counts']=={'published':1}
+        pub=Publisher(r,cfg['fingerprint']);fixed=pub.current()
+        assert verify(fixed)['episodes']==1
+        assert scan(cfg,q,now_ns=t+6_000_000_000)['counts']=={'published':1}
+    with worker_context(cfg) as q:
+        assert scan(cfg,q)['counts']=={'published':1} and pub.current()==fixed
+        # A write after formal publication violates the uploader contract.
+        p=formal/'episode42/metadata.yaml';p.write_text(p.read_text()+'\n# unexpected write\n')
+        assert scan(cfg,q)['counts']=={'conflict':1} and pub.current()==fixed
+    assert {p.name:checksum(p) for p in (formal/'episode42').iterdir() if p.name!='metadata.yaml'}=={
+        name:sha for name,sha in originals.items() if name!='metadata.yaml'}
+
+
+def test_initial_history_include_persists_and_restart_discovers_missed_arrivals(service):
+    cfg=service;cfg['initial_history_by_route']['wuji-A']={'mode':'include','episodes':['episode1','episode3']}
+    bag(cfg,2,1);b2=bag(cfg,2,2);t=time.time_ns()
+    with worker_context(cfg) as q:
+        assert scan(cfg,q,now_ns=t)['counts']=={'waiting_stable':1}
+        assert q.get('wuji-A','episode2') is None
+    # Arrivals while stopped are new, whether or not in the initial history list.
+    bag(cfg,2,3);bag(cfg,2,4)
+    with worker_context(cfg) as q:
+        scan(cfg,q,now_ns=t+2_000_000_000)
+        result=scan(cfg,q,now_ns=t+4_000_000_000)
+        assert result['counts']=={'published':3}
+        assert q.get('wuji-A','episode2') is None
+        scope=next(r for r in result['initial_history'] if r['route']=='wuji-A')
+        assert scope['skipped']==['episode2']
+        p=b2/'metadata.yaml';p.write_text(p.read_text()+'\n# ignored history stays ignored\n')
+        assert scan(cfg,q)['counts']=={'published':3}
+        assert verify(Publisher(cfg['routes'][2],cfg['fingerprint']).current())['episodes']==3
+
+
+def test_initial_history_none_skips_existing_but_resumes_legacy_queue(service):
+    cfg=service;cfg['initial_history_by_route']['wuji-A']={'mode':'none','episodes':[]}
+    bag(cfg,2,1);bag(cfg,2,2);t=time.time_ns()
+    with worker_context(cfg) as q:
+        # Model an existing 27811d8 queue: no startup-scope row yet.
+        q.put('wuji-A','episode1',None,'waiting_stable')
+        assert scan(cfg,q,now_ns=t)['counts']=={'waiting_stable':1}
+        assert q.get('wuji-A','episode2') is None
+    bag(cfg,2,3)
+    with worker_context(cfg) as q:
+        scan(cfg,q,now_ns=t+2_000_000_000)
+        assert scan(cfg,q,now_ns=t+4_000_000_000)['counts']=={'published':2}
+        assert q.get('wuji-A','episode2') is None
+
+
+def test_initial_history_waits_for_missing_route_and_rejects_policy_change(service):
+    cfg=service;r=cfg['routes'][2];source=Path(r['source']);source.rmdir()
+    cfg['initial_history_by_route']['wuji-A']={'mode':'none','episodes':[]}
+    with worker_context(cfg) as q:
+        assert 'wuji-A' in scan(cfg,q)['route_errors']
+        assert not any(r['route']=='wuji-A' for r in q.history_rows())
+        source.mkdir();bag(cfg,2,1)
+        result=scan(cfg,q);assert result['counts']=={}  # First successful scan defines the baseline.
+        cfg['initial_history_by_route']['wuji-A']={'mode':'all','episodes':[]}
+        assert 'policy changed' in scan(cfg,q)['route_errors']['wuji-A']
+
+
+def test_initial_history_is_explicit_config_and_does_not_change_conversion_fingerprint(service):
+    cfg=service;path=Path(cfg['state_root']).parent/'config.yaml';raw=yaml.safe_load(path.read_text())
+    raw.pop('initial_history');path.write_text(yaml.safe_dump(raw))
+    with pytest.raises(ValueError,match='Explicit initial_history'):load_service_config(path)
+    raw['initial_history']={'mode':'none'}
+    raw['routes'][2]['initial_history']={'mode':'include','episodes':['episode7']}
+    path.write_text(yaml.safe_dump(raw));loaded=load_service_config(path)
+    assert loaded['fingerprint']==cfg['fingerprint']  # Existing ownership/generations stay compatible.
+    assert loaded['initial_history_by_route']['wuji-A']=={'mode':'include','episodes':['episode7']}
+    raw['initial_history']={'mode':'include','episodes':['../episode1']};path.write_text(yaml.safe_dump(raw))
+    with pytest.raises(ValueError,match='exact episode'):load_service_config(path)
+
+
+def test_upload_layout_preflight_rejects_cross_device_and_nonstaging_paths(service,monkeypatch):
+    import os
+    cfg=service;formal=Path(cfg['routes'][2]['source']);staging=Path(cfg['data_root'])/'.uploading/task'
+    staging.mkdir(parents=True)
+    with pytest.raises(ValueError,match='below .uploading'):check_upload_layout(formal,formal)
+    real=Path.stat
+    def other_device(path,*args,**kw):
+        value=real(path,*args,**kw)
+        if path==staging:
+            fields=list(value);fields[2]+=1;return os.stat_result(fields)
+        return value
+    monkeypatch.setattr(Path,'stat',other_device)
+    with pytest.raises(ValueError,match='Cross-filesystem'):check_upload_layout(staging,formal)

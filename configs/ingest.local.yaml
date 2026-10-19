@@ -1,0 +1,17 @@
+schema_version: 1
+# Local preparation only. These paths do not access the mounted data server.
+data_root: outputs/ingest-local/data
+state_root: outputs/ingest-local/state
+work_root: outputs/ingest-local/work
+poll_seconds: 10
+stable_scans: 3
+stable_seconds: 60
+max_jobs_per_scan: 1
+max_checks_per_scan: 4
+max_attempts: 3
+retry_seconds: 60
+routes:
+  - {robot: sharpa, group: A}
+  - {robot: sharpa, group: B}
+  - {robot: wuji, group: A}
+  - {robot: wuji, group: B}

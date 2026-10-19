@@ -17,6 +17,7 @@ preview = ["opencv-python-headless>=4.8"]
 [project.scripts]
 bag-worker = "bag_worker.cli:main"
 convert-worker = "convest.cli:main"
+ingest-worker = "convest.ingest.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

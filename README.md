@@ -17,7 +17,7 @@
 
 输入为未使用 bag 层压缩的 ROS2 SQLite3 bag，支持分卷；消息时间字段改写支持 CDR1。关节按名称映射，动作保存为绝对关节目标，单位为弧度。消息与关节契约见 [schemas/](schemas/)。
 
-转换需要有效的采集验证状态：原始包提供 `collection_state.json`；本工具清洗后的包提供 `source_collection_state.json` 和 `trim_report.json`。本地 job 要求采集状态为 finalized、验证失败列表为空，且文件完整、消息计数一致。请在采集和传输结束后启动。
+转换需要有效的采集验证状态：原始包提供 `collection_state.json`；本工具清洗后的包提供 `source_collection_state.json` 和 `trim_report.json`。本地 job 要求采集状态为 finalized、验证失败列表为空，且文件完整、消息计数一致。批处理命令应在采集和传输结束后运行；自动接收模式可以提前启动，由后台观察和体检决定何时处理。
 
 暂不支持 ROS1、MCAP、压缩 bag 或任意机器人话题布局。Sharpa 手部未记录接管状态时，使用新鲜的绝对命令，不构造手部接管字段。
 
@@ -53,6 +53,17 @@ cp configs/wuji.yaml configs/my_wuji.yaml
 | `contract` / `schema_dir` | 关节、话题契约及自定义消息定义 |
 
 相对路径以项目根目录为基准解析。转换输出必须位于项目内；job 输出必须位于 `outputs/` 下。Wuji 和 Sharpa 应分别配置、分别输出，避免混入同一数据集。
+
+## 自动接收新上传的数据
+
+本地已提供自动接收模块，**不要求完成标记或上传回调**：登记新目录，连续观察稳定，通过分卷、SQLite、消息数和必需流检查后冻结副本，再清洗、转换并追加到 Sharpa/Wuji 各自的 A/B 数据集。下一条出现只提高上一条的检查优先级；最后一条也会持续自动检查。处理期间发现输入变化会丢弃本次尝试并重试，原始包保持只读。
+
+```bash
+python -m convest.ingest.cli check-config --config configs/ingest.local.yaml
+python -m convest.ingest.cli run --config configs/ingest.local.yaml
+```
+
+本地模板仅指向项目 `outputs/`；服务和服务器配置只是模板，未自动部署。稳定不代表能够证明上传方未来不会再写入。完整就绪条件、原子版本发布、重启恢复及使用限制见 [自动接收说明](docs/automatic_ingestion.md)。
 
 ## 转换前体检与清单
 

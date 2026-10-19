@@ -1,0 +1,18 @@
+schema_version: 1
+# Template only. Replace after confirming the server's own filesystem path.
+# Do NOT use the workstation's SSHFS mount path on the server.
+data_root: /CHANGE_ME/server-data/real/harvest-tomato
+state_root: outputs/ingest-server/state
+work_root: outputs/ingest-server/work
+poll_seconds: 10
+stable_scans: 3
+stable_seconds: 60
+max_jobs_per_scan: 1
+max_checks_per_scan: 4
+max_attempts: 3
+retry_seconds: 60
+routes:
+  - {robot: sharpa, group: A}
+  - {robot: sharpa, group: B}
+  - {robot: wuji, group: A}
+  - {robot: wuji, group: B}

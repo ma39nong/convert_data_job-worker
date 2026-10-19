@@ -400,6 +400,28 @@ def test_maintenance_cli_request_and_resume_do_not_delete_queue(service,monkeypa
         assert scan(cfg,q,now_ns=time.time_ns()+4_000_000_000)['counts']=={'published':1}
 
 
+def test_explicit_robot_priority_moves_existing_queue_without_skipping_checks(service,monkeypatch):
+    import importlib.util
+    spec=importlib.util.spec_from_file_location('prioritize_ingest',WORKSPACE/'scripts/prioritize_ingest.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    cfg=service;cfg['max_jobs_per_scan']=1;bag(cfg,0);bag(cfg,2)
+    import convest.ingest.worker as worker
+    calls=[];real=worker.check_input
+    def check(b,*args,**kw):calls.append(str(b));return real(b,*args,**kw)
+    monkeypatch.setattr(worker,'check_input',check)
+    with worker_context(cfg) as q:
+        t=time.time_ns();scan(cfg,q,now_ns=t)
+        # Simulate Wuji having higher priority due to a later successor.
+        q.prioritize('wuji-A','episode1',time.time_ns())
+        before=q.get('sharpa-A','episode1')
+        dry=module.prioritize(cfg,'sharpa');assert not dry['applied'] and dry['queued_count']==1
+        result=module.prioritize(cfg,'sharpa',True);assert result['queued_count']==1
+        assert q.get('sharpa-A','episode1')==before
+        report=scan(cfg,q,now_ns=t+2_000_000_000)
+        assert '/sharpa/' in calls[0] and report['counts']=={'published':1,'waiting_stable':1}
+        assert q.get('wuji-A','episode1')['state']=='waiting_stable'
+
+
 def test_empty_output_directories_can_initialize_without_touching_existing_data(service):
     cfg=service;r=cfg['routes'][2];Path(r['output']).mkdir(parents=True);bag(cfg,2)
     with worker_context(cfg) as q:

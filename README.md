@@ -58,7 +58,9 @@ cp configs/wuji.yaml configs/my_wuji.yaml
 
 接收器只监控配置的 Sharpa/Wuji A/B 输入目录，自动发现 `episode数字` 目录并登记队列，不依赖上传器实现、人工标记或回调。新 episode 出现后，先按默认 10 秒扫描、3 次一致且稳定 60 秒观察，再检查归档状态、metadata 所列分卷、SQLite、消息数和必需数据流；目录出现本身不代表已经完整。`.uploading/` 等不匹配 episode 名称的目录不会被递归扫描，不要求上传方使用这些目录。
 
-首次启动必须显式配置 `initial_history`，模板默认跳过首次成功扫描时已有的包；也可列出要处理的历史包或显式选择全部。该范围持久保存，重启恢复队列并补查新到达的包。通过分卷、SQLite、消息数和必需流检查后冻结副本，再沿用既定清洗、转换和质量校验，追加到四套独立数据集。新包无需等下一条出现；最后一条同样自动处理。处理期间输入变化会丢弃本次尝试并重试，原始包保持只读。
+首次启动必须显式配置 `initial_history`：服务器模板设为 `all`，接收已有包和未来新包；本地模板仍为 `none`，跳过首次扫描时已有的包，也支持指定历史清单。该范围持久保存，重启恢复队列并补查遗漏。通过体检后执行既定“清洗 rosbag → LeRobot v2.1 → 校验”，原始包只读，源变化时丢弃本次尝试并重试。
+
+四条路由分别输出到 `data-lerobot/{sharpa,wuji}/{A,B}/`。每批从第一个包成功追加起计时，默认 72 小时；批内持续追加，到期后通过全批校验封存，后续成功包进入下一批。每套完整数据集命名为 `起始原始包序号_结束原始包序号_data_lerobot`，例如 `36_68_data_lerobot`；序号范围允许缺号，实际纳入清单和封存状态可用 `ingest-worker status` 查看。活动批名称随范围更新，封存后固定；每批 LeRobot 内部编号从 0 开始，已处理来源跨批去重。没有下一条时仍会自动处理和封存，不生成空批次。
 
 ```bash
 python -m convest.ingest.cli check-config --config configs/ingest.local.yaml
@@ -66,6 +68,8 @@ python -m convest.ingest.cli run --config configs/ingest.local.yaml
 ```
 
 本地模板仅指向项目 `outputs/`；服务和服务器配置只是模板，未自动部署。接收检查、首次历史范围、异常源变化及数据集版本发布说明见 [自动接收说明](docs/automatic_ingestion.md)。
+
+后续服务器路径、依赖、首次启动范围和验收步骤见 [服务器部署准备](docs/server_deployment.md)。
 
 ## 转换前体检与清单
 

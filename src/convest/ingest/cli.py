@@ -8,6 +8,7 @@ import sys
 import time
 from .config import load_service_config
 from .worker import worker_context,scan
+from .batches import BatchPublisher
 
 
 def main(argv=None):
@@ -30,7 +31,8 @@ def main(argv=None):
                 exists=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='initial_history'").fetchone()
                 history=[{**dict(row),'policy':json.loads(row['policy']),'skipped':json.loads(row['skipped'])}
                          for row in db.execute('SELECT * FROM initial_history ORDER BY route')] if exists else []
-            print(json.dumps({'jobs':rows,'initial_history':history},ensure_ascii=False,indent=2));return 0
+            batches={r['id']:BatchPublisher(r,config['fingerprint']).status() for r in config['routes']}
+            print(json.dumps({'jobs':rows,'initial_history':history,'batches':batches},ensure_ascii=False,indent=2));return 0
         stopping=False
         def stop(signum,frame):
             nonlocal stopping

@@ -9,7 +9,8 @@ import time
 from convest.config import atomic_json,digest
 from convest.jobs import run
 from .inputs import snapshot,check_input,stage_input,monitor_input,InputChanged
-from .publish import Publisher,OWNER,read
+from .publish import OWNER,read
+from .batches import BatchPublisher as Publisher
 from .queue import Queue
 
 EPISODE=re.compile(r'episode[0-9]+\Z')
@@ -53,6 +54,7 @@ def archive_reports(job,archive):
 
 
 def process(config,queue,route,bag,proof):
+    started_ns=time.time_ns()
     key=digest([route['id'],bag.name]);slot=Path(config['work_root'])/key
     clean_slot(slot,config['work_root']);slot.mkdir()
     job=slot/'job';identity=proof['content_identity'];old=queue.get(route['id'],bag.name);attempt=old['attempts']+1
@@ -80,7 +82,7 @@ def process(config,queue,route,bag,proof):
             if after!={k:v for k,v in proof.items() if k!='stability'}:raise InputChanged('Input changed while processing')
             archive_reports(job,archive)
             shutil.copyfile(job/'cleaned'/bag.name/'trim_report.json',archive/'trim_report.json')
-            generation=Publisher(route,config['fingerprint']).publish(job/'dataset',proof,bag.name,archive,precommit=guard)
+            generation=Publisher(route,config['fingerprint']).publish(job/'dataset',proof,bag.name,archive,precommit=guard,started_ns=started_ns)
             queue.put(route['id'],bag.name,identity,'published',error=None,proof={**proof,'generation':str(generation)})
     except InputChanged as exc:
         queue.put(route['id'],bag.name,None,'waiting_stable',attempts=0,proof=None,error=str(exc))
@@ -96,12 +98,14 @@ def process(config,queue,route,bag,proof):
 
 def scan(config,queue,now_ns=None):
     now=time.time_ns() if now_ns is None else now_ns
-    counts={};route_errors={};candidates=[]
+    counts={};route_errors={};candidates=[];batches={}
     for route in config['routes']:
         source=Path(route['source'])
-        if not source.is_dir() or source.is_symlink():route_errors[route['id']]='Input directory missing or symlink';continue
-        try:published=Publisher(route,config['fingerprint']).published()
+        try:
+            publisher=Publisher(route,config['fingerprint']);published=publisher.published(now_ns=now)
+            batches[route['id']]=publisher.status()
         except Exception as exc:route_errors[route['id']]=str(exc);continue
+        if not source.is_dir() or source.is_symlink():route_errors[route['id']]='Input directory missing or symlink';continue
         bags=sorted((p for p in source.iterdir() if EPISODE.fullmatch(p.name) and p.is_dir() and not p.is_symlink()),key=lambda p:(int(p.name[7:]),p.name))
         try:skipped=queue.initialize_history(route['id'],[p.name for p in bags],config['initial_history_by_route'][route['id']],now)
         except ValueError as exc:route_errors[route['id']]=str(exc);continue
@@ -159,6 +163,8 @@ def scan(config,queue,now_ns=None):
         if old['identity']!=proof['content_identity']:queue.put(route['id'],bag.name,proof['content_identity'],'queued',attempts=0,proof=proof,error=None)
         process(config,queue,route,bag,proof);processed+=1
     for row in queue.rows():counts[row['state']]=counts.get(row['state'],0)+1
-    result={'updated_ns':time.time_ns(),'counts':counts,'route_errors':route_errors,'initial_history':queue.history_rows(),
+    for route in config['routes']:
+        if route['id'] not in route_errors:batches[route['id']]=Publisher(route,config['fingerprint']).status()
+    result={'updated_ns':time.time_ns(),'counts':counts,'route_errors':route_errors,'initial_history':queue.history_rows(),'batches':batches,
             'jobs':[{k:v for k,v in row.items() if k!='proof'} for row in queue.rows()]}
     atomic_json(Path(config['state_root'])/'status.json',result);return result

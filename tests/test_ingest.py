@@ -11,7 +11,7 @@ from convest.jobs import checksum
 from convest.ingest.config import load_service_config
 from convest.ingest.worker import worker_context,scan
 from convest.ingest.inputs import snapshot,check_input,stage_input,InputChanged
-from convest.ingest.publish import Publisher
+from convest.ingest.batches import BatchPublisher as Publisher
 from convest.verify import verify
 from conversion_helpers import make_conversion_bag
 
@@ -55,7 +55,8 @@ def test_four_routes_append_atomic_generations_read_only_originals(service):
         pinned=[]
         for r in cfg['routes']:
             root=Publisher(r,cfg['fingerprint']).current();pinned.append(root)
-            assert Path(r['output']).is_symlink() and verify(root)['episodes']==1
+            assert Path(r['output']).is_dir() and (Path(r['output'])/'1_1_data_lerobot').is_symlink()
+            assert verify(root)['episodes']==1
         old=pinned[2];old_meta=(old/'meta/info.json').read_bytes();old_file=next(old.glob('data/**/*.parquet'));old_sha=checksum(old_file)
         bag(cfg,2,2);assert ready_scan(cfg,q)['counts']=={'published':5}
         pub=Publisher(cfg['routes'][2],cfg['fingerprint']);new=pub.current()
@@ -132,7 +133,7 @@ def test_mutation_after_conversion_before_publication_never_exposes_candidate(se
     monkeypatch.setattr(worker,'run',change)
     with worker_context(cfg) as q:
         assert ready_scan(cfg,q)['counts']=={'waiting_stable':1}
-        assert not Path(cfg['routes'][2]['output']).exists()
+        assert Publisher(cfg['routes'][2],cfg['fingerprint']).current() is None
 
 
 def test_mutation_in_final_precommit_guard_blocks_switch(service,monkeypatch):
@@ -146,7 +147,7 @@ def test_mutation_in_final_precommit_guard_blocks_switch(service,monkeypatch):
     monkeypatch.setattr(module.writer,'write_metadata',change)
     with worker_context(cfg) as q:
         assert ready_scan(cfg,q)['counts']=={'waiting_stable':1}
-        assert not Path(cfg['routes'][2]['output']).exists()
+        assert Publisher(cfg['routes'][2],cfg['fingerprint']).current() is None
 
 
 def test_crash_after_pointer_commit_reconciles_without_duplicate(service,monkeypatch):
@@ -172,7 +173,7 @@ def test_failed_switch_preserves_previous_generation_and_retry(service,monkeypat
         ready_scan(cfg,q);pub=Publisher(cfg['routes'][2],cfg['fingerprint']);old=pub.current();bag(cfg,2,2)
         real=publishing.os.replace
         def fail(src,dst):
-            if Path(dst)==Path(cfg['routes'][2]['output']):raise OSError('pointer failure')
+            if Path(dst).name=='current':raise OSError('pointer failure')
             return real(src,dst)
         monkeypatch.setattr(publishing.os,'replace',fail)
         report=ready_scan(cfg,q);assert report['counts']=={'published':1,'retry':1}
@@ -257,7 +258,7 @@ def test_empty_output_directories_can_initialize_without_touching_existing_data(
     cfg=service;r=cfg['routes'][2];Path(r['output']).mkdir(parents=True);bag(cfg,2)
     with worker_context(cfg) as q:
         assert ready_scan(cfg,q)['counts']=={'published':1}
-        assert Path(r['output']).is_symlink()
+        assert (Path(r['output'])/'1_1_data_lerobot').is_symlink()
 
 
 def test_nonempty_unowned_output_is_never_overwritten(service):

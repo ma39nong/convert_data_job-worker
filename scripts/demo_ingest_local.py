@@ -14,6 +14,8 @@ from conversion_helpers import make_conversion_bag
 from convest.jobs import checksum
 from convest.verify import verify
 from convest.config import atomic_json
+from convest.ingest.config import load_service_config
+from convest.ingest.batches import BatchPublisher
 
 
 def main():
@@ -50,15 +52,23 @@ def main():
     originals[str(second)]={p.name:checksum(p) for p in staging.iterdir()};shutil.copytree(staging,second)
     once();time.sleep(1.05);once();once()  # Last scan proves idempotence.
     outputs=[]
-    for route in routes:
-        output=data/'clean-data-lerobot'/route['robot']/route['group'];fixed=output.resolve(strict=True)
+    loaded=load_service_config(cfg)
+    for route,configured in zip(routes,loaded['routes']):
+        publisher=BatchPublisher(configured,loaded['fingerprint'])
+        output=data/'data-lerobot'/route['robot']/route['group'];batch=publisher.status()[0]
+        fixed=(output/batch['name']).resolve(strict=True)
         result=verify(fixed);wanted=2 if route=={'robot':'wuji','group':'A'} else 1
         if result['episodes']!=wanted:raise ValueError('Unexpected episode count')
-        outputs.append({'route':route,'output':str(output),'fixed_generation':str(fixed),'episodes':result['episodes'],'frames':result['frames'],'verification':result['status']})
+        publisher.published(now_ns=batch['deadline_ns'])  # Exercise 72-hour closure without sleeping.
+        sealed=publisher.status()[0]
+        if sealed['state']!='sealed' or sealed['verification']['status']!='passed':raise ValueError('Batch did not seal')
+        outputs.append({'route':route,'output':str(output/sealed['name']),'fixed_generation':str(fixed),
+            'episodes':result['episodes'],'frames':result['frames'],'verification':result['status'],'batch_state':sealed['state']})
     if any(files!={p.name:checksum(p) for p in Path(bag).iterdir()} for bag,files in originals.items()):raise ValueError('Input modified')
     summary={'status':'passed','local_only':True,'server_contacted':False,'upload_marker_required':False,
         'uploader_protocol_required':False,'arrival_model':'partial directories, then files complete','incomplete_inputs_blocked':True,
         'processed_sources':5,'route_datasets':4,'outputs':outputs,'originals_unchanged':True,
+        'batch_hours':72,'sealing_test':'clock advanced to deadline; all four batches fully verified and sealed',
         'work_cache_remaining':[p.name for p in (root/'work').iterdir() if p.is_dir()],
         'stability_note':'Demo uses 2 scans/1 second for synthetic files; production templates remain 3 scans/60 seconds.'}
     atomic_json(root/'validation.json',summary)

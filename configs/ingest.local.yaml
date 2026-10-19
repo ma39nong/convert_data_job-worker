@@ -1,8 +1,8 @@
 schema_version: 1
 # Local preparation only. These paths do not access the mounted data server.
 data_root: outputs/ingest-local/data
-state_root: outputs/ingest-local/state
-work_root: outputs/ingest-local/work
+state_root: outputs/ingest-local-batches/state
+work_root: outputs/ingest-local-batches/work
 poll_seconds: 10
 stable_scans: 3
 stable_seconds: 60
@@ -10,6 +10,7 @@ max_jobs_per_scan: 1
 max_checks_per_scan: 4
 max_attempts: 3
 retry_seconds: 60
+batch_hours: 72
 # Explicit first-scan scope: skip existing bags, then accept future arrivals.
 initial_history: {mode: none}
 routes:

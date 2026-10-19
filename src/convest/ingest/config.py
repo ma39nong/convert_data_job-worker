@@ -38,6 +38,8 @@ def load_service_config(path):
     if cfg['stable_seconds']<(cfg['stable_scans']-1)*cfg['poll_seconds']:
         raise ValueError('Stable duration must span the required independent scans')
     if cfg['max_checks_per_scan']<cfg['max_jobs_per_scan']:raise ValueError('Check budget must cover processing budget')
+    hours=cfg.setdefault('batch_hours',72)
+    if type(hours) is not int or hours<1:raise ValueError('batch_hours must be a positive integer')
     roots=[Path(cfg['state_root']),work];pairs=set();routes=[];history={}
     for route in cfg['routes']:
         robot,group=route['robot'],route['group']
@@ -47,7 +49,8 @@ def load_service_config(path):
         history[route['id']]=history_policy(route.pop('initial_history',cfg.get('initial_history')))
         root=Path(cfg['data_root'])
         route['source']=str(root/'origin-data'/robot/group)
-        route['output']=str(root/'clean-data-lerobot'/robot/group)
+        route['output']=str(root/'data-lerobot'/robot/group)
+        route['batch_hours']=hours
         base=load_config(resolve(route.get('conversion_config',f'configs/{robot}.yaml')))
         if base['robot']!=robot:raise ValueError('Conversion robot mismatch')
         base.update(source_root=route['source'],output_root=route['output'],repo_id=route.get('repo_id',f'fr3_{robot}/auto_{group.lower()}'))
@@ -64,5 +67,5 @@ def load_service_config(path):
     cfg['routes']=routes
     cfg['initial_history_by_route']=history
     cfg['fingerprint']=digest({'routes':routes,'idle':asdict(default_config()),'idle_version':ALGORITHM_VERSION,
-        'converter_version':get_target('lerobot_v21_multimodal').version,'publisher':'generations-v1','readiness':'stable-structural-v1'})
+        'converter_version':get_target('lerobot_v21_multimodal').version,'publisher':'timed-batches-v1','readiness':'stable-structural-v1'})
     return cfg

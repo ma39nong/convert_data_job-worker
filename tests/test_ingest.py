@@ -422,6 +422,50 @@ def test_explicit_robot_priority_moves_existing_queue_without_skipping_checks(se
         assert q.get('wuji-A','episode1')['state']=='waiting_stable'
 
 
+def test_priority_retries_busy_writer_and_rechecks_active_job_before_update(service):
+    import importlib.util
+    import sqlite3
+    import threading
+    spec=importlib.util.spec_from_file_location('priority_busy',WORKSPACE/'scripts/prioritize_ingest.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    cfg=service;bag(cfg,0,1);bag(cfg,0,2)
+    entered=threading.Event();errors=[]
+    def writer():
+        try:
+            with sqlite3.connect(Path(cfg['state_root'])/'queue.sqlite3') as db:
+                db.execute('BEGIN IMMEDIATE')
+                db.execute("UPDATE jobs SET state='processing' WHERE route='sharpa-A' AND episode='episode1'")
+                entered.set();time.sleep(1.2)
+        except Exception as exc:errors.append(exc);entered.set()
+    with worker_context(cfg) as q:
+        scan(cfg,q)
+        thread=threading.Thread(target=writer);thread.start();assert entered.wait(5)
+        try:
+            reports=[];result=module.prioritize(cfg,'sharpa',True,wait_seconds=5,report=reports.append)
+        finally:thread.join()
+        assert not errors and reports
+        assert [r['episode'] for r in result['queued']]==['episode2']
+        assert q.get('sharpa-A','episode1')['state']=='processing'
+        priorities=dict(q.db.execute("SELECT episode,priority FROM observations WHERE route='sharpa-A'"))
+        assert priorities['episode2']>priorities['episode1']
+
+
+def test_priority_lock_timeout_leaves_queue_untouched(service):
+    import importlib.util
+    import sqlite3
+    spec=importlib.util.spec_from_file_location('priority_timeout',WORKSPACE/'scripts/prioritize_ingest.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    cfg=service;bag(cfg,0)
+    with worker_context(cfg) as q:
+        scan(cfg,q);before=q.db.execute('SELECT * FROM observations').fetchall()
+        with sqlite3.connect(Path(cfg['state_root'])/'queue.sqlite3') as writer:
+            writer.execute('BEGIN IMMEDIATE')
+            with pytest.raises(TimeoutError,match='priority was not changed'):
+                module.prioritize(cfg,'sharpa',True,wait_seconds=.1)
+        assert q.db.execute('SELECT * FROM observations').fetchall()==before
+        assert q.get('sharpa-A','episode1')['state']=='waiting_stable'
+
+
 def test_empty_output_directories_can_initialize_without_touching_existing_data(service):
     cfg=service;r=cfg['routes'][2];Path(r['output']).mkdir(parents=True);bag(cfg,2)
     with worker_context(cfg) as q:

@@ -130,7 +130,7 @@ ingest-worker resume --config configs/ingest.local.yaml
 
 未重新安装 CLI 入口时，可用 `python -m convest.ingest.cli` 替代 `ingest-worker`。
 
-需要临时前移已登记的某种机器人数据时，可在服务本机运行 `python scripts/prioritize_ingest.py --config configs/ingest.server.yaml --robot sharpa` 预览，再加 `--apply` 执行。工具以 SQLite 事务仅更新现有、源目录仍存在的待处理项优先级；不改作业状态、稳定性记录或输出，不打断当前包，下一轮调度生效。此操作只针对当时的队列，不设置永久的机器人优先级，后续新到达的数据仍使用正常调度规则。禁止通过 SSHFS 写入运行中的队列数据库。
+需要临时前移已登记的某种机器人数据时，可在服务本机运行 `python scripts/prioritize_ingest.py --config configs/ingest.server.yaml --robot sharpa` 预览，再加 `--apply` 执行。工具先只读筛选，再用一条原子更新语句前移现有待处理项；文件检查不占用数据库写锁，提交时重新排除已经开始处理的包。写锁繁忙时最多等待重试 10 分钟，定期打印等待信息，超时不更改排序。不改作业状态、稳定性记录或输出，不打断当前包，下一轮调度生效。此操作只针对当时的队列，不设置永久的机器人优先级，后续新到达的数据仍使用正常调度规则。禁止通过 SSHFS 写入运行中的队列数据库。
 
 本地模板的公共前缀为项目内 `outputs/ingest-local/data`，不会访问桌面挂载的数据服务器。输入目录由上传方创建；不存在时在状态中记录路由错误，后续扫描会重试。
 

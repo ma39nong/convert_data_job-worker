@@ -17,7 +17,7 @@
 
 输入为未使用 bag 层压缩的 ROS2 SQLite3 bag，支持分卷；消息时间字段改写支持 CDR1。关节按名称映射，动作保存为绝对关节目标，单位为弧度。消息与关节契约见 [schemas/](schemas/)。
 
-转换需要有效的采集验证状态：原始包提供 `collection_state.json`；本工具清洗后的包提供 `source_collection_state.json` 和 `trim_report.json`。本地 job 要求采集状态为 finalized、验证失败列表为空，且文件完整、消息计数一致。批处理命令应在采集和传输结束后运行；自动接收模式可以提前启动，按上传端发布协议发现数据，并执行防御检查和录制质量检查。
+转换需要有效的采集验证状态：原始包提供 `collection_state.json`；本工具清洗后的包提供 `source_collection_state.json` 和 `trim_report.json`。本地 job 要求采集状态为 finalized、验证失败列表为空，且文件完整、消息计数一致。批处理命令应在采集和传输结束后运行；自动接收模式可以提前启动，持续扫描配置的输入目录，执行稳定观察、完整性和录制质量检查。
 
 暂不支持 ROS1、MCAP、压缩 bag 或任意机器人话题布局。Sharpa 手部未记录接管状态时，使用新鲜的绝对命令，不构造手部接管字段。
 
@@ -56,7 +56,7 @@ cp configs/wuji.yaml configs/my_wuji.yaml
 
 ## 自动接收新上传的数据
 
-上传端在 `.uploading/<任务编号>/` 传输并检查完整性，完成后通过**同一文件系统内的原子重命名**将整个 episode 发布到正式 A/B 目录；禁止跨文件系统复制后删除的发布方式。接收器只扫描正式分类目录，忽略 `.uploading/`，不要求完成标记或上传回调。进入正式目录即按上游约定代表上传已完成；10 秒扫描、3 次一致且稳定 60 秒作为额外防御检查保留。
+接收器只监控配置的 Sharpa/Wuji A/B 输入目录，自动发现 `episode数字` 目录并登记队列，不依赖上传器实现、人工标记或回调。新 episode 出现后，先按默认 10 秒扫描、3 次一致且稳定 60 秒观察，再检查归档状态、metadata 所列分卷、SQLite、消息数和必需数据流；目录出现本身不代表已经完整。`.uploading/` 等不匹配 episode 名称的目录不会被递归扫描，不要求上传方使用这些目录。
 
 首次启动必须显式配置 `initial_history`，模板默认跳过首次成功扫描时已有的包；也可列出要处理的历史包或显式选择全部。该范围持久保存，重启恢复队列并补查新到达的包。通过分卷、SQLite、消息数和必需流检查后冻结副本，再沿用既定清洗、转换和质量校验，追加到四套独立数据集。新包无需等下一条出现；最后一条同样自动处理。处理期间输入变化会丢弃本次尝试并重试，原始包保持只读。
 
@@ -65,7 +65,7 @@ python -m convest.ingest.cli check-config --config configs/ingest.local.yaml
 python -m convest.ingest.cli run --config configs/ingest.local.yaml
 ```
 
-本地模板仅指向项目 `outputs/`；服务和服务器配置只是模板，未自动部署。上传发布约定、首次历史范围、异常源变化及版本发布说明见 [自动接收说明](docs/automatic_ingestion.md)。
+本地模板仅指向项目 `outputs/`；服务和服务器配置只是模板，未自动部署。接收检查、首次历史范围、异常源变化及数据集版本发布说明见 [自动接收说明](docs/automatic_ingestion.md)。
 
 ## 转换前体检与清单
 
@@ -118,7 +118,7 @@ convert-worker run --config configs/my_wuji.yaml \
 
 `--resume` 校验配置与来源，复用已完成的裁剪、跳过已提交转换，并重新执行校验。它不会删除历史已提交数据。更换任务、契约或转换参数时应使用新的输出目录。
 
-任务状态和失败原因保存在 `jobs/` 与 `summary.json`。已提交转换若验证失败，记录为 `verification_failed` 并保留 `conversion_committed: true`；其他通过验证的来源仍可标记完成。数据集级验证失败会返回非零，不会把部分通过误报为整批通过。本节命令为本地批处理；常驻扫描、持久队列和上传发布约定见上面的自动接收说明。
+任务状态和失败原因保存在 `jobs/` 与 `summary.json`。已提交转换若验证失败，记录为 `verification_failed` 并保留 `conversion_committed: true`；其他通过验证的来源仍可标记完成。数据集级验证失败会返回非零，不会把部分通过误报为整批通过。本节命令为本地批处理；常驻扫描、持久队列和接收检查见上面的自动接收说明。
 
 ## 独立运行
 

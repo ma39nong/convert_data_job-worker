@@ -1,5 +1,6 @@
 """Build synthetic bags and exercise the real CLI, entirely below local outputs/."""
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -26,19 +27,27 @@ def main():
     for route in routes:
         bag=data/'origin-data'/route['robot']/route['group']/'episode1'
         bag.parent.mkdir(parents=True)
-        staging=data/'.uploading'/f"{route['robot']}-{route['group']}-task1"
+        staging=root/'fixtures'/f"{route['robot']}-{route['group']}-episode1"
         make_conversion_bag(staging,route['robot'],frames=18);pending.append((staging,bag))
         originals[str(bag)]={p.name:checksum(p) for p in staging.iterdir()}
     command=[sys.executable,'-m','convest.ingest.cli','once','--config',str(cfg)]
     def once():
         subprocess.run(command,cwd=WORKSPACE,check=True)
-    once()  # Establish an empty formal baseline; temporary uploads stay invisible.
-    for staging,bag in pending:staging.rename(bag)
+    def counts():return json.loads((root/'state/status.json').read_text())['counts']
+    once()  # Establish an empty input baseline; fixtures outside inputs stay invisible.
+    if counts():raise ValueError('Discovered data outside configured inputs')
+    for staging,bag in pending:
+        bag.mkdir()
+        for name in ('metadata.yaml','collection_state.json'):shutil.copyfile(staging/name,bag/name)
     once();time.sleep(1.05);once()
-    # Append a last episode through the same atomic publication protocol.
-    staging=data/'.uploading/wuji-A-task2';second=data/'origin-data/wuji/A/episode2'
+    if counts()!={'waiting_upload':4}:raise ValueError('Incomplete input passed readiness checks')
+    for staging,bag in pending:
+        for src in staging.iterdir():shutil.copyfile(src,bag/src.name)
+    once();time.sleep(1.05);once()
+    # Append the last episode directly, with no marker, callback or next episode.
+    staging=root/'fixtures/wuji-A-episode2';second=data/'origin-data/wuji/A/episode2'
     make_conversion_bag(staging,'wuji',frames=18)
-    originals[str(second)]={p.name:checksum(p) for p in staging.iterdir()};staging.rename(second)
+    originals[str(second)]={p.name:checksum(p) for p in staging.iterdir()};shutil.copytree(staging,second)
     once();time.sleep(1.05);once();once()  # Last scan proves idempotence.
     outputs=[]
     for route in routes:
@@ -47,7 +56,8 @@ def main():
         if result['episodes']!=wanted:raise ValueError('Unexpected episode count')
         outputs.append({'route':route,'output':str(output),'fixed_generation':str(fixed),'episodes':result['episodes'],'frames':result['frames'],'verification':result['status']})
     if any(files!={p.name:checksum(p) for p in Path(bag).iterdir()} for bag,files in originals.items()):raise ValueError('Input modified')
-    summary={'status':'passed','local_only':True,'server_contacted':False,'upload_marker_required':False,'publication':'same-filesystem directory rename',
+    summary={'status':'passed','local_only':True,'server_contacted':False,'upload_marker_required':False,
+        'uploader_protocol_required':False,'arrival_model':'partial directories, then files complete','incomplete_inputs_blocked':True,
         'processed_sources':5,'route_datasets':4,'outputs':outputs,'originals_unchanged':True,
         'work_cache_remaining':[p.name for p in (root/'work').iterdir() if p.is_dir()],
         'stability_note':'Demo uses 2 scans/1 second for synthetic files; production templates remain 3 scans/60 seconds.'}

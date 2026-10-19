@@ -10,7 +10,7 @@ from convest.config import WORKSPACE,atomic_json
 from convest.jobs import checksum
 from convest.ingest.config import load_service_config
 from convest.ingest.worker import worker_context,scan
-from convest.ingest.inputs import snapshot,check_input,stage_input,InputChanged,check_upload_layout
+from convest.ingest.inputs import snapshot,check_input,stage_input,InputChanged
 from convest.ingest.publish import Publisher
 from convest.verify import verify
 from conversion_helpers import make_conversion_bag
@@ -277,7 +277,8 @@ def test_publication_lock_is_shared_even_with_separate_queue_state(service,tmp_p
     assert pub.current() is None
 
 
-def test_uploading_ignored_then_atomic_publish_discovers_last_and_deduplicates(service):
+@pytest.mark.parametrize('arrival',['copy','rename'])
+def test_configured_input_discovers_last_and_deduplicates_without_upload_protocol(service,arrival):
     cfg=service;r=cfg['routes'][2];formal=Path(r['source'])
     cfg['initial_history_by_route']['wuji-A']={'mode':'none','episodes':[]}
     staging=Path(cfg['data_root'])/'.uploading/task42'
@@ -287,9 +288,9 @@ def test_uploading_ignored_then_atomic_publish_discovers_last_and_deduplicates(s
     originals={p.name:checksum(p) for p in staging.iterdir()};t=time.time_ns()
     with worker_context(cfg) as q:
         assert scan(cfg,q,now_ns=t)['counts']=={}  # Includes no temporary-upload jobs.
-        layout=check_upload_layout(staging,formal)
-        assert layout['same_device'] and not layout['uploader_operation_verified']
-        staging.rename(formal/'episode42')  # Real same-filesystem rename, no copy fallback.
+        # Arrival mechanism is irrelevant to the receiver; both use the same checks.
+        if arrival=='copy':shutil.copytree(staging,formal/'episode42')
+        else:staging.rename(formal/'episode42')
         assert scan(cfg,q,now_ns=t+2_000_000_000)['counts']=={'waiting_stable':1}
         assert scan(cfg,q,now_ns=t+4_000_000_000)['counts']=={'published':1}
         pub=Publisher(r,cfg['fingerprint']);fixed=pub.current()
@@ -297,7 +298,7 @@ def test_uploading_ignored_then_atomic_publish_discovers_last_and_deduplicates(s
         assert scan(cfg,q,now_ns=t+6_000_000_000)['counts']=={'published':1}
     with worker_context(cfg) as q:
         assert scan(cfg,q)['counts']=={'published':1} and pub.current()==fixed
-        # A write after formal publication violates the uploader contract.
+        # Unexpected later source changes must not silently alter an existing dataset.
         p=formal/'episode42/metadata.yaml';p.write_text(p.read_text()+'\n# unexpected write\n')
         assert scan(cfg,q)['counts']=={'conflict':1} and pub.current()==fixed
     assert {p.name:checksum(p) for p in (formal/'episode42').iterdir() if p.name!='metadata.yaml'}=={
@@ -362,18 +363,3 @@ def test_initial_history_is_explicit_config_and_does_not_change_conversion_finge
     assert loaded['initial_history_by_route']['wuji-A']=={'mode':'include','episodes':['episode7']}
     raw['initial_history']={'mode':'include','episodes':['../episode1']};path.write_text(yaml.safe_dump(raw))
     with pytest.raises(ValueError,match='exact episode'):load_service_config(path)
-
-
-def test_upload_layout_preflight_rejects_cross_device_and_nonstaging_paths(service,monkeypatch):
-    import os
-    cfg=service;formal=Path(cfg['routes'][2]['source']);staging=Path(cfg['data_root'])/'.uploading/task'
-    staging.mkdir(parents=True)
-    with pytest.raises(ValueError,match='below .uploading'):check_upload_layout(formal,formal)
-    real=Path.stat
-    def other_device(path,*args,**kw):
-        value=real(path,*args,**kw)
-        if path==staging:
-            fields=list(value);fields[2]+=1;return os.stat_result(fields)
-        return value
-    monkeypatch.setattr(Path,'stat',other_device)
-    with pytest.raises(ValueError,match='Cross-filesystem'):check_upload_layout(staging,formal)

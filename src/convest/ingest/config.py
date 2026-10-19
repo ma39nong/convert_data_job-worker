@@ -47,8 +47,6 @@ def load_service_config(path):
         history[route['id']]=history_policy(route.pop('initial_history',cfg.get('initial_history')))
         root=Path(cfg['data_root'])
         route['source']=str(root/'origin-data'/robot/group)
-        if '.uploading' in Path(route['source']).resolve().parts:
-            raise ValueError('Formal source must not be inside .uploading')
         route['output']=str(root/'clean-data-lerobot'/robot/group)
         base=load_config(resolve(route.get('conversion_config',f'configs/{robot}.yaml')))
         if base['robot']!=robot:raise ValueError('Conversion robot mismatch')

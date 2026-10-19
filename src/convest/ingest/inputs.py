@@ -14,17 +14,6 @@ import yaml
 class InputChanged(RuntimeError):pass
 
 
-def check_upload_layout(staging,formal_parent):
-    """Read-only preflight; the external uploader must still use rename(2)."""
-    staging=Path(staging).resolve(strict=True);formal_parent=Path(formal_parent).resolve(strict=True)
-    if not staging.is_dir() or '.uploading' not in staging.parts:raise ValueError('Staging directory must be below .uploading')
-    if not formal_parent.is_dir() or '.uploading' in formal_parent.parts:raise ValueError('Destination must be a formal category directory')
-    if staging.stat().st_dev!=formal_parent.stat().st_dev:
-        raise ValueError('Cross-filesystem upload publication prohibited; rename would fail with EXDEV')
-    return {'same_device':True,'staging':str(staging),'formal_parent':str(formal_parent),
-            'uploader_operation_verified':False,'required_operation':'same-filesystem atomic rename; no copy/delete fallback'}
-
-
 def snapshot(root):
     root=Path(root)
     if root.is_symlink() or not root.is_dir():raise InputChanged('Input directory missing or symlink')
@@ -58,7 +47,7 @@ def check_input(bag,route,expected):
     require_same(bag,expected)
     identity=digest({'robot':route['robot'],'group':route['group'],'episode':bag.name,'files':files})
     return {'content_identity':identity,'recording_id':item['source_recording_id'],'input':str(bag),'snapshot':expected,'files':files,
-            'readiness':ready,'input_profile':profile,'readiness_basis':'formal-directory publication by upstream atomic rename contract; defensive stability and structural validation'}
+            'readiness':ready,'input_profile':profile,'readiness_basis':'configured input directory discovery; observed stability and structural validation; no uploader protocol dependency'}
 
 
 def stage_input(bag,target,proof):

@@ -7,7 +7,7 @@ import re
 import shutil
 import time
 from convest.config import atomic_json,digest
-from convest.jobs import run
+from convest.jobs import run,complete_source_verification
 from .inputs import snapshot,check_input,stage_input,direct_input,monitor_input,InputChanged,verify_input_content
 from .control import maintenance_requested,progress_reporter
 from .publish import OWNER,read
@@ -81,9 +81,10 @@ def process(config,queue,route,bag,proof):
             guard()
             queue.put(route['id'],bag.name,identity,'processing',proof=proof,error=None)
             cfg={**route['conversion'],'source_root':str(staged.parent)}
-            run(cfg,job,episodes=[bag.name],validated_inputs={bag.name:receipt},progress=progress);guard()
+            run(cfg,job,episodes=[bag.name],validated_inputs={bag.name:receipt},progress=progress,defer_source_final_hash=not copy_input);guard()
             summary=read(job/'summary.json');outcome=summary['jobs'][0]
-            if outcome['state']!='completed':
+            expected_state='completed' if copy_input else 'awaiting_source_verification'
+            if outcome['state']!=expected_state:
                 if outcome['state']=='excluded':
                     queue.put(route['id'],bag.name,identity,'excluded',error=json.dumps(outcome.get('quality_rejection')))
                     return
@@ -94,6 +95,9 @@ def process(config,queue,route,bag,proof):
             # check, without repeating SQLite scans or required-stream parsing.
             progress('original_final_hash')
             verify_input_content(bag,proof,lambda phase,**kw:progress('original_final.'+phase,**kw));guard()
+            if not copy_input:
+                receipt.reuse(staged,cfg)
+                complete_source_verification(job,bag.name)
             progress('archiving')
             archive_reports(job,archive)
             shutil.copyfile(job/'cleaned'/bag.name/'trim_report.json',archive/'trim_report.json')

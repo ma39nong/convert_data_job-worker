@@ -1,0 +1,67 @@
+{
+  "status": "passed",
+  "date": "2026-10-19",
+  "scope": "local validation; server switch pending",
+  "mode": "copy_input=false; one final source hash owned by ingest",
+  "real_dataset_equivalence": [
+    {
+      "robot": "sharpa",
+      "episode": "episode36",
+      "frames": 807,
+      "status": "passed",
+      "elapsed_s": 31.121,
+      "parquet_exact_match": true,
+      "rgb_files_exact_match": 3,
+      "trim_mapping_exact_match": true,
+      "full_readiness_calls": 1,
+      "working_copy_full_readiness_calls": 0,
+      "final_original_sha256_verified": true,
+      "job_source_hash_deferred": true,
+      "final_source_sha256_verified": true,
+      "raw_copy_created": false,
+      "lossless_sensor_rows_compared": 16947
+    },
+    {
+      "robot": "wuji",
+      "episode": "episode995",
+      "frames": 914,
+      "status": "passed",
+      "elapsed_s": 23.986,
+      "parquet_exact_match": true,
+      "rgb_files_exact_match": 3,
+      "trim_mapping_exact_match": true,
+      "full_readiness_calls": 1,
+      "working_copy_full_readiness_calls": 0,
+      "final_original_sha256_verified": true,
+      "job_source_hash_deferred": true,
+      "final_source_sha256_verified": true,
+      "raw_copy_created": false,
+      "lossless_sensor_rows_compared": 914
+    }
+  ],
+  "checks_retained": [
+    "initial complete readiness and SHA256",
+    "source snapshots and monitor",
+    "final all-file original SHA256",
+    "schema receipt and precommit guard",
+    "independent cleaning effectiveness and source alignment",
+    "full video decode and PTS",
+    "lossless depth and tactile comparisons",
+    "publication source/destination hashes and append validation"
+  ],
+  "operation_removed": "job-level repeated final original db3 SHA256 in direct receiver only",
+  "standalone_and_copy_mode_unchanged": true,
+  "pending_state": "awaiting_source_verification; not completed until final content hash passes",
+  "failure_tests": [
+    "source modification",
+    "source deletion",
+    "same-size same-mtime digest mismatch",
+    "interruption before final hash and restart retry without duplicate publication"
+  ],
+  "performance_note": "No server timing claim; local NVMe and cache timings are not a server benchmark.",
+  "tests": {
+    "total_passed": 168,
+    "failures": 0,
+    "real_cleaning_baselines_included": true
+  }
+}

@@ -100,7 +100,7 @@ def job_quality_report(root,jobs):
         except Exception as exc:row['input_metrics_error']=f'{type(exc).__name__}: {exc}'
         rows.append(row)
     failed=any(j['state'] in ('failed','verification_failed') for j in jobs) or (dataset or {}).get('status')=='failed'
-    report={'status':'failed' if failed else 'passed_with_exclusions' if any(j['state']=='excluded' for j in jobs) else 'passed',
+    report={'status':'failed' if failed else 'awaiting_source_verification' if any(j['state']=='awaiting_source_verification' for j in jobs) else 'passed_with_exclusions' if any(j['state']=='excluded' for j in jobs) else 'passed',
             'source_loss_rate':None,'source_loss_rate_reason':'Not inferred from alignment, repetition or deliberate trimming',
             'dataset_report':'dataset/conversion/quality_report.json' if dataset else None,
             'sources':rows}

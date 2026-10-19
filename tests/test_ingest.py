@@ -634,3 +634,99 @@ def test_initial_history_is_explicit_config_and_does_not_change_conversion_finge
     assert loaded['initial_history_by_route']['wuji-A']=={'mode':'include','episodes':['episode7']}
     raw['initial_history']={'mode':'include','episodes':['../episode1']};path.write_text(yaml.safe_dump(raw))
     with pytest.raises(ValueError,match='exact episode'):load_service_config(path)
+
+
+def test_direct_receiver_hashes_source_once_at_final_gate_and_marks_pending(service,monkeypatch):
+    import convest.ingest.worker as worker
+    import convest.ingest.inputs as inputs
+    import convest.jobs as jobs
+    cfg=service;cfg['copy_input']=False;source=bag(cfg,2)
+    run_real=worker.run;job_hash=jobs.checksum;final_hash=inputs.checksum
+    checks=[];seen=[]
+    def count_job(path,*args,**kw):
+        if Path(path).parent==source and Path(path).suffix=='.db3':checks.append('precheck_or_job')
+        return job_hash(path,*args,**kw)
+    def count_final(path,*args,**kw):
+        if Path(path).parent==source and Path(path).suffix=='.db3':checks.append('final')
+        return final_hash(path,*args,**kw)
+    def inspect_pending(*args,**kw):
+        result=run_real(*args,**kw)
+        root=Path(args[1]);j=json.loads((root/'jobs/episode1.json').read_text())
+        summary=json.loads((root/'summary.json').read_text())
+        assert j['state']=='awaiting_source_verification' and j['original_sha256_verified'] is False
+        assert summary['completed']==0 and summary['awaiting_source_verification']==1
+        assert json.loads((root/'quality_report.json').read_text())['status']=='awaiting_source_verification'
+        seen.append(True);return result
+    monkeypatch.setattr(jobs,'checksum',count_job);monkeypatch.setattr(inputs,'checksum',count_final)
+    monkeypatch.setattr(worker,'run',inspect_pending)
+    with worker_context(cfg) as q:assert ready_scan(cfg,q)['counts']=={'published':1}
+    assert seen and checks==['precheck_or_job','final']
+    archives=list((Path(cfg['state_root'])/'attempts').glob('*/0001/jobs/episode1.json'))
+    j=json.loads(archives[0].read_text())
+    assert j['state']=='completed' and j['original_sha256_verified'] is True
+    assert j['source_hash_verification_owner']=='ingest.final_original_hash'
+
+
+def test_standalone_direct_receipt_keeps_final_hash_and_deferral_requires_receipt(service,monkeypatch):
+    import convest.jobs as jobs
+    from convest.ingest.inputs import direct_input
+    cfg=service;source=bag(cfg,2);conversion={**cfg['routes'][2]['conversion'],'source_root':str(source.parent)}
+    proof=check_input(source,cfg['routes'][2],snapshot(source));receipt=direct_input(source,proof)
+    calls=[];real=jobs.checksum
+    def count(path,*args,**kw):
+        if Path(path).parent==source and Path(path).suffix=='.db3':calls.append(str(path))
+        return real(path,*args,**kw)
+    monkeypatch.setattr(jobs,'checksum',count)
+    root=Path(cfg['work_root'])/'standalone'
+    assert jobs.run(conversion,root,validated_inputs={source.name:receipt})==0
+    assert len(calls)==1
+    j=json.loads((root/'jobs/episode1.json').read_text())
+    assert j['state']=='completed' and j['original_sha256_verified']
+    with pytest.raises(ValueError,match='validated direct-input receipts'):
+        jobs.run(conversion,root/'invalid',defer_source_final_hash=True)
+
+
+@pytest.mark.parametrize('mutation',['write','delete','digest_mismatch'])
+def test_deferred_final_source_check_failure_never_publishes(service,monkeypatch,mutation):
+    import os
+    import convest.ingest.worker as worker
+    cfg=service;cfg['copy_input']=False;source=bag(cfg,2);real=worker.verify_input_content
+    def change(path,proof,*args,**kw):
+        target=source/'collection_state.json';st=target.stat()
+        if mutation=='delete':target.unlink()
+        else:
+            data=target.read_bytes();target.write_bytes(data.replace(b'finalized',b'finalizeX',1))
+            os.utime(target,ns=(st.st_atime_ns,st.st_mtime_ns))
+            if mutation=='digest_mismatch':
+                # Force the content check to prove it catches a change even
+                # when metadata alone is treated as unchanged.
+                proof['snapshot']=snapshot(source)
+        return real(path,proof,*args,**kw)
+    monkeypatch.setattr(worker,'verify_input_content',change)
+    with worker_context(cfg) as q:
+        assert ready_scan(cfg,q)['counts']=={'waiting_stable':1}
+        assert Publisher(cfg['routes'][2],cfg['fingerprint']).current() is None
+    archive=next((Path(cfg['state_root'])/'attempts').glob('*/0001/jobs/episode1.json'))
+    j=json.loads(archive.read_text())
+    assert j['state']=='awaiting_source_verification' and j['original_sha256_verified'] is False
+    assert not [p for p in Path(cfg['work_root']).iterdir() if p.is_dir()]
+
+
+def test_deferred_hash_retry_after_interruption_rechecks_and_publishes_once(service,monkeypatch):
+    import convest.ingest.worker as worker
+    cfg=service;cfg['copy_input']=False;bag(cfg,2);real=worker.verify_input_content;calls=[]
+    def interrupt_once(*args,**kw):
+        calls.append(True)
+        if len(calls)==1:raise OSError('Interrupted before final source hash')
+        return real(*args,**kw)
+    monkeypatch.setattr(worker,'verify_input_content',interrupt_once)
+    with worker_context(cfg) as q:
+        assert ready_scan(cfg,q)['counts']=={'retry':1}
+        assert Publisher(cfg['routes'][2],cfg['fingerprint']).current() is None
+    # New receiver context uses its normal preflight; no pending receipt is
+    # restored from JSON and an unverified output is never recovered as published.
+    with worker_context(cfg) as q:
+        assert scan(cfg,q,now_ns=time.time_ns()+4_000_000_000)['counts']=={'published':1}
+        assert scan(cfg,q,now_ns=time.time_ns()+8_000_000_000)['counts']=={'published':1}
+        assert verify(Publisher(cfg['routes'][2],cfg['fingerprint']).current())['episodes']==1
+    assert len(calls)==2

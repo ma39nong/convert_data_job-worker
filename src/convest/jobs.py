@@ -76,8 +76,14 @@ def check_ready(path,contract,schema_dir,profile=None,progress=None):
             'collection_state_sha256':checksum(path/'collection_state.json')}
 
 
-def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None,*,validated_inputs=None,progress=None):
+def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None,*,validated_inputs=None,progress=None,defer_source_final_hash=False):
     from convest.verify import verify
+    # Only an in-process receiver with validated source receipts may own the
+    # final content check. CLI and ordinary jobs retain their full final hash.
+    if defer_source_final_hash and (not validated_inputs or any(
+            not isinstance(r, ValidatedInput) or r.kind != 'source'
+            for r in validated_inputs.values())):
+        raise ValueError('Deferred source hash requires validated direct-input receipts')
     root=Path(run_root).resolve();source=Path(config['source_root']).resolve()
     if not root.is_relative_to(WORKSPACE/'outputs') or root==WORKSPACE/'outputs':
         raise ValueError('Job root must be under workspace outputs/')
@@ -177,13 +183,16 @@ def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None,*
                                     raise ValueError('Original changed during job')
                                 receipt=(validated_inputs or {}).get(name)
                                 if receipt is not None:receipt.assert_unchanged()
-                                final_prefix='job.source_final' if receipt is not None and receipt.kind=='source' else 'job.working_copy_final'
-                                if progress:progress(final_prefix+'_hash')
-                                for volume in job['readiness']['volumes']:
-                                    report=(lambda phase,**kw:progress(final_prefix+'.'+phase,**kw)) if progress else None
-                                    if checksum(Path(job['source'])/volume['name'],report)!=volume['sha256']:
-                                        raise ValueError('Original content hash changed during job')
-                                job.update(state='completed',verification={'status':'passed','results':relevant,'episodes':len(relevant),'frames':sum(r['frames'] for r in relevant),'report':'dataset/conversion/verification.json'},error=None,original_sha256_verified=True)
+                                pending = defer_source_final_hash and receipt is not None and receipt.kind == 'source'
+                                if not pending:
+                                    final_prefix='job.source_final' if receipt is not None and receipt.kind=='source' else 'job.working_copy_final'
+                                    if progress:progress(final_prefix+'_hash')
+                                    for volume in job['readiness']['volumes']:
+                                        report=(lambda phase,**kw:progress(final_prefix+'.'+phase,**kw)) if progress else None
+                                        if checksum(Path(job['source'])/volume['name'],report)!=volume['sha256']:
+                                            raise ValueError('Original content hash changed during job')
+                                job.update(state='awaiting_source_verification' if pending else 'completed',verification={'status':'passed','results':relevant,'episodes':len(relevant),'frames':sum(r['frames'] for r in relevant),'report':'dataset/conversion/verification.json'},error=None,original_sha256_verified=not pending)
+                                if pending and progress:progress('job.awaiting_source_verification')
                         elif name in rejected:job.update(state='excluded',quality_rejection=rejected[name])
                         else:job.update(state='failed',error=errors.get(name,{'error':'No committed output'}))
                     except Exception as exc:
@@ -200,6 +209,7 @@ def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None,*
                     atomic_json(root/'jobs'/f'{job["episode"]}.json',job)
         final=[json.loads((root/'jobs'/f'{n}.json').read_text()) for n in selected]
         summary={'robot':config['robot'],'selected':len(final),'completed':sum(j['state']=='completed' for j in final),
+                 'awaiting_source_verification':sum(j['state']=='awaiting_source_verification' for j in final),
                  'excluded':sum(j['state']=='excluded' for j in final),'failed':sum(j['state'] in ('failed','verification_failed') for j in final),
                  'verification_failed':sum(j['state']=='verification_failed' for j in final),
                  'jobs':final}
@@ -212,3 +222,22 @@ def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None,*
         atomic_json(root/'summary.json',summary)
         print(json.dumps({k:v for k,v in summary.items() if k!='jobs'}),flush=True)
         return 2 if summary['failed'] or summary['dataset_verification_passed'] is False else 0
+
+
+def complete_source_verification(run_root, episode):
+    """Receiver calls only after its final all-file hash and source guard pass."""
+    root=Path(run_root)
+    journal=root/'jobs'/f'{episode}.json'
+    job=json.loads(journal.read_text())
+    if job['state'] != 'awaiting_source_verification' or job.get('original_sha256_verified'):
+        raise ValueError('Job is not awaiting source verification')
+    job.update(state='completed',original_sha256_verified=True,
+               source_hash_verification_owner='ingest.final_original_hash',updated_ns=time.time_ns())
+    atomic_json(journal,job)
+    summary=json.loads((root/'summary.json').read_text())
+    summary['jobs']=[job if j['episode']==episode else j for j in summary['jobs']]
+    summary['completed']=sum(j['state']=='completed' for j in summary['jobs'])
+    summary['awaiting_source_verification']=sum(j['state']=='awaiting_source_verification' for j in summary['jobs'])
+    from .reporting import job_quality_report
+    job_quality_report(root,summary['jobs'])
+    atomic_json(root/'summary.json',summary)

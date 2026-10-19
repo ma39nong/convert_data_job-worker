@@ -8,10 +8,10 @@
 
 | 路由 | 只读输入 | LeRobot v2.1 批次父目录 |
 | --- | --- | --- |
-| Sharpa A | `origin-data/sharpa/A/episodeXX` | `data-lerobot/sharpa/A/` |
-| Sharpa B | `origin-data/sharpa/B/episodeXX` | `data-lerobot/sharpa/B/` |
-| Wuji A | `origin-data/wuji/A/episodeXX` | `data-lerobot/wuji/A/` |
-| Wuji B | `origin-data/wuji/B/episodeXX` | `data-lerobot/wuji/B/` |
+| Sharpa A | `origin-rosbag/sharpa/A/episodeXX` | `data-lerobot/sharpa/A/` |
+| Sharpa B | `origin-rosbag/sharpa/B/episodeXX` | `data-lerobot/sharpa/B/` |
+| Wuji A | `origin-rosbag/wuji/A/episodeXX` | `data-lerobot/wuji/A/` |
+| Wuji B | `origin-rosbag/wuji/B/episodeXX` | `data-lerobot/wuji/B/` |
 
 四条路由独立计时和去重，同名 `episodeXX` 可以分别存在于不同路由。A/B 是包含多个批次的父目录，不是单套数据集根目录；每个 `起始序号_结束序号_data_lerobot` 子目录才是一套标准数据集，内部含 `data/`、`videos/`、`meta/` 等。输出的 `episode_000000` 是批内编号，不能直接当作原始包序号；原始目录、采集标识、文件哈希和处理记录保存在来源记录中。
 

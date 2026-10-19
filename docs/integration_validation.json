@@ -1,0 +1,279 @@
+{
+  "status": "passed",
+  "date": "2026-10-19",
+  "training_started": false,
+  "weights_loaded": false,
+  "training_repository_commit": "8e6915c",
+  "scope": "actual converted datasets and fresh local end-to-end acceptance; not a fresh audit of every historical delivery",
+  "source_rechecks": {
+    "sharpa": {
+      "status": "passed",
+      "episodes": 6,
+      "frames": 7094,
+      "source_comparison": true,
+      "independent_alignment": true,
+      "lossless_sensor_rows_compared": 148974,
+      "rgb_sampled_content": {
+        "samples_compared": 405,
+        "min_psnr_db": 34.56095583533329,
+        "max_mae": 3.1320540364583334
+      }
+    },
+    "wuji": {
+      "status": "passed",
+      "episodes": 3,
+      "frames": 2763,
+      "source_comparison": true,
+      "independent_alignment": true,
+      "lossless_sensor_rows_compared": 2763,
+      "rgb_sampled_content": {
+        "samples_compared": 54,
+        "min_psnr_db": 32.036964279393004,
+        "max_mae": 4.19406640625
+      }
+    }
+  },
+  "pi05_data_input": {
+    "sharpa": {
+      "status": "passed",
+      "robot": "sharpa",
+      "dataset": "/home/user/convert_data_job-worker/outputs/jobs/sharpa_stage2/dataset",
+      "experiment_module": "training_configs.experiments.tomato_sharpa.multimodal_rgb.tomato_fr3_sharpa_lora_v1",
+      "frames": 7094,
+      "episodes": 6,
+      "fps": 30,
+      "normalization_provenance": "verified",
+      "raw_state_shape": [
+        116
+      ],
+      "model_state_shape": [
+        1,
+        58
+      ],
+      "model_action_shape": [
+        1,
+        50,
+        58
+      ],
+      "model_images": {
+        "base_0_rgb": [
+          1,
+          224,
+          224,
+          3
+        ],
+        "left_wrist_0_rgb": [
+          1,
+          224,
+          224,
+          3
+        ],
+        "right_wrist_0_rgb": [
+          1,
+          224,
+          224,
+          3
+        ]
+      },
+      "tokenized_prompt_shape": [
+        1,
+        256
+      ],
+      "depth_features_stored": [
+        "observation.depths.cam0"
+      ],
+      "tactile_features_stored": [
+        "observation.tactile.left.thumb.deformation",
+        "observation.tactile.left.thumb.wrench",
+        "observation.tactile.left.index.deformation",
+        "observation.tactile.left.index.wrench",
+        "observation.tactile.left.middle.deformation",
+        "observation.tactile.left.middle.wrench",
+        "observation.tactile.left.ring.deformation",
+        "observation.tactile.left.ring.wrench",
+        "observation.tactile.left.pinky.deformation",
+        "observation.tactile.left.pinky.wrench",
+        "observation.tactile.right.thumb.deformation",
+        "observation.tactile.right.thumb.wrench",
+        "observation.tactile.right.index.deformation",
+        "observation.tactile.right.index.wrench",
+        "observation.tactile.right.middle.deformation",
+        "observation.tactile.right.middle.wrench",
+        "observation.tactile.right.ring.deformation",
+        "observation.tactile.right.ring.wrench",
+        "observation.tactile.right.pinky.deformation",
+        "observation.tactile.right.pinky.wrench"
+      ],
+      "boundary_middle_samples_checked": 18,
+      "input_metadata_sha256": {
+        "episodes.jsonl": "2d8e6d0198609fd6925dfd0394c531f4718ed0b9799f0c19762773bbfb4ef320",
+        "episodes_stats.jsonl": "ebab971b439ed8843043ee27c4b5a9d1faffbef2a6ee2f6c182e10254597b4d0",
+        "info.json": "015e6647e73752e878dc59b424f0fe86fc957f0b2ab19a84bc69934650c46dd4",
+        "tasks.jsonl": "215abb61c0958b797f694ac2f029d5cccbde8b87b553837548165cf7a130361c"
+      },
+      "training_started": false,
+      "model_weights_loaded": false,
+      "dataset_version": "tomato_sharpa_multimodal_rgb_absolute_v1_30hz",
+      "exp_name": "tomato_sharpa_multimodal_rgb_lora_v1_absolute_30hz_s42",
+      "prompts": [
+        "Pick up a tomato truss with the right hand, then pick a cherry tomato with the left hand and place it in the left basket."
+      ],
+      "norm_stats_sha256": "2de06cc4a805e711a79e01291b296a5e7a21365f557f9796ddb498badc97e7c5",
+      "norm_metadata_sha256": "9bc298837c3d921e4d6ffb904ae6e71c2a82fb4437171fbdc485dcb5e8296863",
+      "loader_framework": "jax",
+      "sampling_mode": "epoch_shuffle"
+    },
+    "wuji": {
+      "status": "passed",
+      "robot": "wuji",
+      "dataset": "/home/user/convert_data_job-worker/outputs/jobs/wuji_stage2/dataset",
+      "experiment_module": "training_configs.experiments.tomato_wuji.baseline.tomato_fr3_lora_v1",
+      "frames": 2763,
+      "episodes": 3,
+      "fps": 30,
+      "normalization_provenance": "verified",
+      "raw_state_shape": [
+        108
+      ],
+      "model_state_shape": [
+        1,
+        54
+      ],
+      "model_action_shape": [
+        1,
+        50,
+        54
+      ],
+      "model_images": {
+        "base_0_rgb": [
+          1,
+          224,
+          224,
+          3
+        ],
+        "left_wrist_0_rgb": [
+          1,
+          224,
+          224,
+          3
+        ],
+        "right_wrist_0_rgb": [
+          1,
+          224,
+          224,
+          3
+        ]
+      },
+      "tokenized_prompt_shape": [
+        1,
+        256
+      ],
+      "depth_features_stored": [
+        "observation.depths.cam0"
+      ],
+      "tactile_features_stored": [],
+      "boundary_middle_samples_checked": 9,
+      "input_metadata_sha256": {
+        "episodes.jsonl": "a8a919d08aa37802473325fa68bd22fba11002c52041568da872c3bcd418d539",
+        "episodes_stats.jsonl": "ea6fd030b026ed74c5affb12a87a391d420e17bdcce7176e45bd53febe31d2d3",
+        "info.json": "b545ee2c12bcab36a482455646fa7d544e3d4a62c0e3e117b69a8a30d6139393",
+        "tasks.jsonl": "215abb61c0958b797f694ac2f029d5cccbde8b87b553837548165cf7a130361c"
+      },
+      "training_started": false,
+      "model_weights_loaded": false,
+      "dataset_version": "tomato_fulltask_v1_30hz",
+      "exp_name": "tomato_fulltask_lora_v1_absolute_30hz_s42",
+      "prompts": [
+        "Pick up a tomato truss with the right hand, then pick a cherry tomato with the left hand and place it in the left basket."
+      ],
+      "norm_stats_sha256": "bfb1bab4c7ef11f8673b7de937db40eed6212517c60ce157a76630e5da5e30c0",
+      "norm_metadata_sha256": "2122e29af63bb60d398b24e4e74fbc8ac34f34ede6efb32dede627432d6c0849",
+      "loader_framework": "jax",
+      "sampling_mode": "epoch_shuffle"
+    }
+  },
+  "fresh_chain_acceptance": {
+    "sharpa": {
+      "status": "completed",
+      "original_sha256_verified": true,
+      "source": "/home/user/franka_teleop_data/bags/gello_sharpa_tactile/episode36",
+      "frames": 807,
+      "source_comparison": true,
+      "independent_alignment": true,
+      "lossless_sensor_rows_compared": 16947,
+      "idle_algorithm": 3,
+      "cleaning_effectiveness_audit": {
+        "version": "independent-quiet-blocks-v1",
+        "status": "passed",
+        "criteria": "same measured-arm noise/freshness limits; independent quiet-block coverage and cut safety; no duration split or hand condition",
+        "checked_internal_quiet_blocks": 2,
+        "eligible_blocks": [
+          {
+            "source_start_ns": "1792129669266250019",
+            "source_end_ns": "1792129669276242262",
+            "observed_frames": 4
+          },
+          {
+            "source_start_ns": "1792129677450437848",
+            "source_end_ns": "1792129682366270628",
+            "observed_frames": 989
+          }
+        ],
+        "missed_blocks": [],
+        "unsafe_cuts": [],
+        "invalid_pair_frames": 0,
+        "invalid_window_frames": 21
+      },
+      "deleted_seconds": 4.935757577,
+      "rgb_streams": 3,
+      "depth_streams": 1,
+      "tactile_streams": 20
+    },
+    "wuji": {
+      "status": "completed",
+      "original_sha256_verified": true,
+      "source": "/home/user/franka_teleop_data/bags/gello_wuji/episode995",
+      "frames": 914,
+      "source_comparison": true,
+      "independent_alignment": true,
+      "lossless_sensor_rows_compared": 914,
+      "idle_algorithm": 3,
+      "cleaning_effectiveness_audit": {
+        "version": "independent-quiet-blocks-v1",
+        "status": "passed",
+        "criteria": "same measured-arm noise/freshness limits; independent quiet-block coverage and cut safety; no duration split or hand condition",
+        "checked_internal_quiet_blocks": 2,
+        "eligible_blocks": [
+          {
+            "source_start_ns": "1790591218117223822",
+            "source_end_ns": "1790591218202150454",
+            "observed_frames": 19
+          },
+          {
+            "source_start_ns": "1790591218317189703",
+            "source_end_ns": "1790591222781234550",
+            "observed_frames": 896
+          }
+        ],
+        "missed_blocks": [],
+        "unsafe_cuts": [],
+        "invalid_pair_frames": 40,
+        "invalid_window_frames": 396
+      },
+      "deleted_seconds": 4.55415953,
+      "rgb_streams": 3,
+      "depth_streams": 1,
+      "tactile_streams": 0
+    }
+  },
+  "tests": {
+    "converter_python_3_12": 138,
+    "converter_python_3_11": 138,
+    "training_adapter_regression": 68
+  },
+  "runtime": {
+    "relocated_standalone_python": "3.12.11",
+    "offline_install": "passed",
+    "end_to_end_demo": "passed"
+  }
+}

@@ -1,0 +1,14 @@
+# Validated runtime versions; build the environment on the server, never copy .venv.
+setuptools==80.9.0
+wheel==0.45.1
+numpy==2.5.4; python_version >= "3.12"
+numpy==2.2.6; python_version < "3.12"
+PyYAML==6.0.3
+rosbags==0.11.8
+pyarrow==19.0.1
+av==14.2.0
+apsw==3.54.0.0
+backports.zstd==1.8.0; python_version < "3.14"
+lz4==4.4.5
+ruamel.yaml==0.19.1
+typing_extensions==4.15.0; python_version < "3.12"

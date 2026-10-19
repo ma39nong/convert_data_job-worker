@@ -48,7 +48,7 @@ def load_service_config(path):
         pairs.add((robot,group));route=dict(route);route['id']=f'{robot}-{group}'
         history[route['id']]=history_policy(route.pop('initial_history',cfg.get('initial_history')))
         root=Path(cfg['data_root'])
-        route['source']=str(root/'origin-data'/robot/group)
+        route['source']=str(root/'origin-rosbag'/robot/group)
         route['output']=str(root/'data-lerobot'/robot/group)
         route['batch_hours']=hours
         base=load_config(resolve(route.get('conversion_config',f'configs/{robot}.yaml')))

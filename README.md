@@ -400,3 +400,19 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
 ```
 
 该检查使用 PyAV，缓存写入项目内，不修改训练环境。来源与消息定义许可见 [移植记录](docs/conversion_provenance.json) 和 [消息定义许可](schemas/LICENSE.gello-retarget)。
+
+## π0.5 的 RGB 训练兼容性
+
+深度和触觉可以保留在数据集中，由训练适配明确选择三路 RGB、实测关节位置、动作和任务文本。额外列不会自动变成模型输入；标准 LeRobot loader 仍可能读取这些列，因此存储完整性和读取性能是不同问题。
+
+Wuji 的 108D 原始状态和 54D 动作可使用现有 Wuji 适配。Sharpa 的原始状态为 116D 位置/速度，动作为 58D 的“左臂、右臂、左手、右手”，不能直接套用只接受物理顺序 58D 状态的旧训练配置。`tomato-openpi` 的独立配置 `training_configs.experiments.tomato_sharpa.multimodal_rgb.tomato_fr3_sharpa_lora_v1`（或 `fullft_v1`）先严格核对字段名称，选取位置并重排为“左臂、左手、右臂、右手”；三路相机保持 cam0 外部、cam2 左腕、cam1 右腕。原有 58D baseline 不变。
+
+训练应指向一套固定、已封存的批次，重新计算与该批数据、适配和 horizon 绑定的统计。该训练适配属于独立训练工程，不是接收器依赖。实际来源、归一化和 JAX 数据输入验证摘要见 [集成验证记录](docs/integration_validation.json)；记录只证明数据链路已验证，不代表训练或实机效果已验证。
+
+`--compare-source` 覆盖所选状态、动作、无损传感器和采样时间，并完整解码 RGB。可另外执行只读的 RGB 内容抽查，比较每集首/中/尾和裁剪接缝附近的源图像：
+
+```bash
+python scripts/check_rgb_source.py --dataset /path/to/dataset --output outputs/new_rgb_report.json
+```
+
+该抽查报告 MAE/PSNR，不新增质量门槛，也不将有损 RGB 宣称为逐像素无损。清洗与 30 Hz 对齐本来就会删除等待段、丢弃未选中的高频消息或重复低频图像；LeRobot 不是所有 ROS 话题的逐消息备份，原始 rosbag 始终保留。执行来源比较需要当时的清洗包仍可访问；自动接收器在删除中间包前完成比较并归档结果。

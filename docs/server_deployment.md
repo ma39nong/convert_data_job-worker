@@ -4,23 +4,26 @@
 
 ## 路径与运行账户
 
-工程应完整复制到服务器本机目录，例如 `/opt/convert-data-job-worker`，包括 `src/`、`schemas/`、`configs/`、`deploy/` 和 `pyproject.toml`。不要搬运工作站的 `.venv/`、`outputs/` 或原始数据作为部署依赖。安装依赖及编译产物由服务器环境生成。
+工程目录为 `/data/data-fruits/real/harvest-tomato/code/auto-clean-convert`，包括源码、schema、配置、服务与安装脚本。部署包可附带 Linux x86_64 的独立 CPython 3.12.11（`runtime/python/`）和 Python 3.11/3.12 的离线 wheel（`deploy/wheels/`）。这些发行依赖不进入 Git；版本及每个文件的哈希记录在部署包的 `DEPLOYMENT.json`。不要搬运工作站现有 `.venv/`、原始数据或训练环境。
 
-`/home/user/company-remote-2/real/harvest-tomato` 是工作站上的挂载入口；配置必须填服务器上该数据的本机真实目录，不能凭挂载路径推测。配置的 `data_root` 下应已有四个 `origin-data/{sharpa,wuji}/{A,B}` 输入目录，输出为四个 `data-lerobot/{sharpa,wuji}/{A,B}` 批次父目录。
+运行时、服务器原生生成的 `.venv/`、队列/暂存 `outputs/` 都在该工程目录内。训练工程的 Torch/JAX 环境不属于接收器依赖，不需要装到数据服务器来做转换。
+
+`/home/user/company-remote-2/real/harvest-tomato` 是工作站上的挂载入口；配置必须填服务器上该数据的本机真实目录，挂载源已确认服务器本机路径为 `/data/data-fruits/real/harvest-tomato`，实际 `data_root` 为该目录下的 `data/`。配置的 `data_root` 下应已有四个 `origin-rosbag/{sharpa,wuji}/{A,B}` 输入目录，输出为四个 `data-lerobot/{sharpa,wuji}/{A,B}` 批次父目录。
 
 运行账户需要输入的目录遍历/只读权限，以及工程 `outputs/`、输出批次父目录的写权限。检查本机可用空间、硬链接和输出指针原子替换行为。输入目录不需要写权限，接收器不依赖上传器脚本、回调、完成标记或临时目录布局。
 
 ## 安装和正式配置
 
-在服务器工程目录中建立独立 Python 虚拟环境，项目要求 Python >=3.11；当前本地验证环境为 Python 3.12。激活后以 editable 方式安装，确保相对配置、schema 和工作区路径仍以工程目录解析：
+在**服务器本机终端**运行下面的准备命令。它优先使用包内独立 Python，也支持 `PYTHON_BIN` 指定本机 Python 3.11/3.12；部署依赖版本见 `deploy/requirements-server.txt`。wheel 目录存在时安装不访问 PyPI，不复制本机虚拟环境。脚本会检查依赖、保存实际 `runtime.freeze.txt`、保留已有配置、只读检查四个输入根目录，并拒绝在正在运行的同名服务上重装：
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[conversion]'
-cp configs/ingest.server.example.yaml configs/ingest.server.yaml
+cd /data/data-fruits/real/harvest-tomato/code/auto-clean-convert
+bash deploy/setup_server.sh --prepare
 ```
 
-编辑实际配置中的 `data_root`。服务器模板已设置：
+`--prepare` 不创建接收队列，不处理原始包，也不启动服务。脚本拒绝从工作站的 SSHFS 挂载执行，以免在错误机器上创建环境。挂载只提供文件读写，安装/启动需要服务器终端或可执行命令的 SSH 登录。
+
+服务器配置的 `data_root` 为 `/data/data-fruits/real/harvest-tomato/data`；实际配置不存在时从模板创建，已存在时不覆盖。其余默认设置：
 
 ```yaml
 initial_history: {mode: all}
@@ -42,11 +45,12 @@ stable_seconds: 60
 
 先使用独立的验收配置、队列和输出处理一个真实包，核查裁剪效果、RGB、深度、触觉、独立来源审计和 LeRobot 校验。验收配置不能与正式队列共用路径，不能先在正式队列用 `include` 测试、再改成 `all` 期待自动扩大历史范围。分批到期、去重和恢复另有本地测试覆盖，不需要在服务器等待 72 小时才能开始验收。
 
-验收通过后编辑 `deploy/ingest-worker.service.example` 中的账户、工程路径和实际配置路径，将其作为系统服务安装。模板本身不会安装或启用。启用后可用以下方式观察：
+验收通过后在服务器本机执行启动命令，需要安装系统服务的 sudo 权限。模板已按 `user` 账户和上述工程路径设置；该命令安装并启用独立的 `auto-clean-convert.service`，不会停止其他服务或批处理。启用后按下面的命令观察：
 
 ```bash
-systemctl status ingest-worker
-journalctl -u ingest-worker -f
+bash deploy/setup_server.sh --start
+systemctl status auto-clean-convert.service
+journalctl -u auto-clean-convert.service -f
 .venv/bin/python -m convest.ingest.cli status --config configs/ingest.server.yaml
 ```
 

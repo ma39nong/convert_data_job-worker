@@ -27,7 +27,7 @@ def main():
     cfg=root/'service.yaml';cfg.write_text(yaml.safe_dump(config))
     originals={};pending=[]
     for route in routes:
-        bag=data/'origin-data'/route['robot']/route['group']/'episode1'
+        bag=data/'origin-rosbag'/route['robot']/route['group']/'episode1'
         bag.parent.mkdir(parents=True)
         staging=root/'fixtures'/f"{route['robot']}-{route['group']}-episode1"
         make_conversion_bag(staging,route['robot'],frames=18);pending.append((staging,bag))
@@ -47,7 +47,7 @@ def main():
         for src in staging.iterdir():shutil.copyfile(src,bag/src.name)
     once();time.sleep(1.05);once()
     # Append the last episode directly, with no marker, callback or next episode.
-    staging=root/'fixtures/wuji-A-episode2';second=data/'origin-data/wuji/A/episode2'
+    staging=root/'fixtures/wuji-A-episode2';second=data/'origin-rosbag/wuji/A/episode2'
     make_conversion_bag(staging,'wuji',frames=18)
     originals[str(second)]={p.name:checksum(p) for p in staging.iterdir()};shutil.copytree(staging,second)
     once();time.sleep(1.05);once();once()  # Last scan proves idempotence.

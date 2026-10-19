@@ -5,3 +5,6 @@ __pycache__/
 outputs/
 *.partial/
 .cache/
+configs/ingest.server.yaml
+deploy/wheels/
+runtime/

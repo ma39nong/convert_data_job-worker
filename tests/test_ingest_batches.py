@@ -159,11 +159,13 @@ def test_last_batch_seals_even_when_input_root_is_temporarily_missing(service):
 def test_batch_config_output_paths_duration_and_server_existing_data_policy(service):
     cfg=service
     for r in cfg['routes']:
+        assert Path(r['source'])==Path(cfg['data_root'])/'origin-rosbag'/r['robot']/r['group']
         assert Path(r['output'])==Path(cfg['data_root'])/'data-lerobot'/r['robot']/r['group']
         assert r['batch_hours']==72
     from convest.config import WORKSPACE
     template=yaml.safe_load((WORKSPACE/'configs/ingest.server.example.yaml').read_text())
     assert template['initial_history']=={'mode':'all'} and template['batch_hours']==72
+    assert template['data_root']=='/data/data-fruits/real/harvest-tomato/data'
     path=Path(cfg['state_root']).parent/'config.yaml';raw=yaml.safe_load(path.read_text());raw['batch_hours']=0
     path.write_text(yaml.safe_dump(raw))
     with pytest.raises(ValueError,match='batch_hours'):load_service_config(path)

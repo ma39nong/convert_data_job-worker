@@ -127,6 +127,7 @@ def test_cloned_subprocess_uses_production_fingerprint_and_publishes_exactly_one
     cfg['copy_input'] = False
     bag(cfg, 3, 3)
     bag(cfg, 3, 11)
+    bag(cfg, 3, 27)
     lease = prepare(cfg)
     project = tmp_path / 'nvme/project'
     nvme_next.trial.clone_project(WORKSPACE, project, nvme_next.trial.code_signature(WORKSPACE))
@@ -151,8 +152,58 @@ def test_cloned_subprocess_uses_production_fingerprint_and_publishes_exactly_one
         assert queue.get('wuji-B', 'episode3')['state'] == 'published'
         assert queue.get('wuji-B', 'episode11')['state'] == 'waiting_stable'
     assert verify(BatchPublisher(cfg['routes'][3], cfg['fingerprint']).current())['episodes'] == 1
+    # A second sequential child keeps the service stopped and shares the real
+    # queue/output, selecting a different pending bag without replaying the first.
+    second_report = tmp_path / 'report-two'
+    nvme_next.trial.write(spec_path, {'project': str(project), 'config': cfg,
+                                     'lease': lease, 'report_root': str(second_report)})
+    child = subprocess.run([sys.executable, str(project / 'scripts/nvme_next.py'), '--child', str(spec_path)],
+                           env=env, cwd=project, text=True, capture_output=True)
+    assert child.returncode == 0, child.stdout + child.stderr
+    assert nvme_next.trial.read(second_report / 'result.json')['episode'] == 'episode11'
+    with worker_context(cfg) as queue:
+        assert queue.get('wuji-B', 'episode3')['state'] == 'published'
+        assert queue.get('wuji-B', 'episode11')['state'] == 'published'
+        assert queue.get('wuji-B', 'episode27')['state'] == 'waiting_stable'
+    assert verify(BatchPublisher(cfg['routes'][3], cfg['fingerprint']).current())['episodes'] == 2
     request_maintenance(cfg, False)
     with worker_context(cfg) as queue:
         # Only observe/reconcile the completed source, without starting another.
         request_maintenance(cfg, True)
-        assert scan(cfg, queue)['counts'] == {'published': 1, 'waiting_stable': 1}
+        assert scan(cfg, queue)['counts'] == {'published': 2, 'waiting_stable': 1}
+
+
+def test_wait_keeps_current_input_check_alive_until_processing_before_drain(service, monkeypatch):
+    cfg = service
+    source = bag(cfg, 3, 20)
+    prepare(cfg)
+    request_maintenance(cfg, False)
+    state = Path(cfg['state_root'])
+    prior = nvme_next.trial.read(state / 'maintenance.json')
+    monkeypatch.setattr(nvme_next, 'service_state', lambda: {'ActiveState': 'active'})
+    with worker_context(cfg) as queue:
+        queue.put('wuji-B', source.name, None, 'checking')
+        def enter_processing(seconds):
+            assert nvme_next.trial.read(state / 'maintenance.json') == prior
+            queue.put('wuji-B', source.name, None, 'processing')
+        monkeypatch.setattr(nvme_next.time, 'sleep', enter_processing)
+        nvme_next.wait_for_current_processing_boundary(state, [False], prior)
+        assert queue.get('wuji-B', source.name)['state'] == 'processing'
+        assert nvme_next.trial.read(state / 'maintenance.json') == prior
+
+
+def test_wait_never_overwrites_new_external_maintenance(service):
+    cfg = service
+    source = bag(cfg, 3, 20)
+    prepare(cfg)
+    request_maintenance(cfg, False)
+    state = Path(cfg['state_root'])
+    prior = nvme_next.trial.read(state / 'maintenance.json')
+    with worker_context(cfg) as queue:
+        queue.put('wuji-B', source.name, None, 'checking')
+        request_maintenance(cfg, True)
+        external = nvme_next.trial.read(state / 'maintenance.json')
+        with pytest.raises(RuntimeError, match='Maintenance changed'):
+            nvme_next.wait_for_current_processing_boundary(state, [False], prior)
+        assert nvme_next.trial.read(state / 'maintenance.json') == external
+        assert queue.get('wuji-B', source.name)['state'] == 'checking'

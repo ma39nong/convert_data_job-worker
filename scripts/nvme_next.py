@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Process exactly one queued recording on NVMe, then restore the receiver.
+"""Process one or two queued recordings sequentially on NVMe, then restore the receiver.
 
 The existing ABBA coordinator is asked to finish its current run and exit.
 The service exits gracefully before this one-shot consumer acquires its queue
@@ -166,6 +166,41 @@ def still_same_process(pid, start):
         return False
 
 
+def wait_for_current_processing_boundary(state, cancelled, expected_maintenance):
+    """Do not stop a currently checking bag before it can enter processing.
+
+    Once it is processing, the normal drain/SIGTERM path lets that whole bag
+    finish. Failed input checks also end the current attempt naturally.
+    """
+    def active():
+        with sqlite3.connect((state / 'queue.sqlite3').as_uri() + '?mode=ro', uri=True) as db:
+            return db.execute("SELECT route,episode,state FROM jobs WHERE state IN ('checking','processing','staging')").fetchall()
+    rows = active()
+    if len(rows) > 1:
+        raise RuntimeError('Multiple active queue entries; inspect before switching workspace')
+    if not rows or rows[0][2] != 'checking':
+        return
+    route, episode, _ = rows[0]
+    print('Letting the current input check continue into normal processing:', route, episode, flush=True)
+    tick = 0
+    while True:
+        if cancelled[0]:
+            raise InterruptedError('Cancelled before requesting maintenance')
+        current = trial.read(state / 'maintenance.json') if (state / 'maintenance.json').exists() else None
+        if current != expected_maintenance:
+            raise RuntimeError('Maintenance changed while waiting; preserving the external request')
+        with sqlite3.connect((state / 'queue.sqlite3').as_uri() + '?mode=ro', uri=True) as db:
+            row = db.execute('SELECT state FROM jobs WHERE route=? AND episode=?', (route, episode)).fetchone()
+        if not row or row[0] != 'checking':
+            return
+        if tick % 6 == 0:
+            if service_state().get('ActiveState') != 'active':
+                raise RuntimeError('Service stopped while waiting for the current check')
+            print('Waiting for current bag input check:', route, episode, flush=True)
+        tick += 1
+        time.sleep(5)
+
+
 def stop_service_gracefully(cancelled):
     state = service_state()
     pid = int(state.get('MainPID', '0'))
@@ -187,6 +222,8 @@ def main(argv=None):
     p.add_argument('--handoff', type=Path, required=False, help='Staged ownership information for the existing trial')
     p.add_argument('--child', type=Path, help=argparse.SUPPRESS)
     p.add_argument('--run', action='store_true')
+    p.add_argument('--jobs', type=int, choices=[1, 2], default=1,
+                   help='Process one or two queued bags sequentially on NVMe')
     args = p.parse_args(argv)
     if args.child:
         run_next(trial.read(args.child))
@@ -216,8 +253,8 @@ def main(argv=None):
         raise ValueError('An unrelated maintenance request exists; preserved without modification')
     print(json.dumps({'next_candidate': route['id'] + '/' + row['episode'],
                       'nvme': str(nvme), 'mount': mount, 'old_trial_pids': [x[0] for x in old],
-                      'action': 'finish old current run; skip remaining ABBA; process one queued source on NVMe and publish normally',
-                      'production_config_changed': False}, ensure_ascii=False, indent=2), flush=True)
+                      'action': f'finish current work; process {args.jobs} queued source(s) sequentially on NVMe and publish normally',
+                      'production_config_changed': False, 'queued_jobs': args.jobs, 'parallel_jobs': 1}, ensure_ascii=False, indent=2), flush=True)
     if not args.run:
         return 0
     subprocess.run(['sudo', '-v'], check=True)
@@ -230,13 +267,18 @@ def main(argv=None):
     trial_id = 'nvme-next-' + datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6]
     report_root = project.parent / 'experiments' / trial_id
     report_root.mkdir(parents=True, exist_ok=False)
-    report = {'status': 'failed', 'trial': trial_id, 'runs': 1, 'variant': 'nvme',
+    report = {'status': 'failed', 'trial': trial_id, 'runs': args.jobs, 'variant': 'nvme',
+              'requested_jobs': args.jobs, 'results': [],
               'production_config_changed': False, 'official_queue_and_publication': True}
     lease = None
     lock = None
     legacy_done = not old
     stopped = False
     try:
+        if not old:
+            wait_for_current_processing_boundary(state, cancelled, prior)
+        if cancelled[0]:
+            raise InterruptedError('Cancelled before requesting maintenance')
         # Replace only the known earlier trial's request with our own lease. The
         # old coordinator will preserve it instead of resuming the receiver.
         trial.cli_command(project, config_path, 'drain')
@@ -261,21 +303,42 @@ def main(argv=None):
         target = nvme / 'auto-clean-convert-next' / trial_id / 'project'
         trial.clone_project(project, target, signature)
         shutil.copyfile(Path(__file__).resolve(), target / 'scripts/nvme_next.py')
-        spec = {'project': str(target), 'config': cfg, 'lease': lease, 'report_root': str(report_root)}
-        spec_path = report_root / 'spec.json'
-        trial.write(spec_path, spec)
         trial.write(report_root / 'code_hashes.json', signature)
         env = {**os.environ, 'PYTHONPATH': str(target / 'src'), 'PYTHONNOUSERSITE': '1'}
-        command = [str(project / '.venv/bin/python'), '-u', str(target / 'scripts/nvme_next.py'), '--child', str(spec_path)]
-        with (report_root / 'run.log').open('w') as log:
-            child = subprocess.Popen(command, cwd=target, env=env, stdout=log,
-                                     stderr=subprocess.STDOUT, start_new_session=True)
-            while child.poll() is None:
-                print('One queued bag running on NVMe; log:', str(report_root / 'run.log'), flush=True)
-                time.sleep(15)
-            if child.returncode:
-                raise RuntimeError('NVMe one-shot failed; inspect ' + str(report_root / 'run.log'))
-        report.update(trial.read(report_root / 'result.json'))
+        for index in range(args.jobs):
+            if cancelled[0]:
+                report['status'] = 'cancelled_after_current_job'
+                break
+            run_root = report_root if args.jobs == 1 else report_root / 'runs' / f'{index+1:02d}'
+            spec = {'project': str(target), 'config': cfg, 'lease': lease, 'report_root': str(run_root)}
+            spec_path = run_root / 'spec.json'
+            trial.write(spec_path, spec)
+            command = [str(project / '.venv/bin/python'), '-u', str(target / 'scripts/nvme_next.py'), '--child', str(spec_path)]
+            print(f'Starting NVMe queued bag {index+1}/{args.jobs}; no original-disk run.', flush=True)
+            with (run_root / 'run.log').open('w') as log:
+                child = subprocess.Popen(command, cwd=target, env=env, stdout=log,
+                                         stderr=subprocess.STDOUT, start_new_session=True)
+                while child.poll() is None:
+                    print('Queued bag running on NVMe; log:', str(run_root / 'run.log'), flush=True)
+                    time.sleep(15)
+                if child.returncode:
+                    raise RuntimeError('NVMe queued job failed; inspect ' + str(run_root / 'run.log'))
+            outcome = trial.read(run_root / 'result.json')
+            report['results'].append(outcome)
+            report['status'] = 'running'
+            report['processed_jobs'] = len(report['results'])
+            report['published_jobs'] = sum(r['status'] == 'passed' for r in report['results'])
+            trial.write(report_root / 'summary.json', report)
+        if args.jobs == 1 and report['results']:
+            report.update(report['results'][0])
+        elif len(report['results']) == args.jobs:
+            report['status'] = 'passed' if all(r['status'] == 'passed' for r in report['results']) else 'passed_with_quality_exclusions'
+            report['total_processing_s'] = sum(r['total_s'] for r in report['results'])
+            report['mean_processing_s'] = report['total_processing_s'] / len(report['results'])
+    except BaseException as exc:
+        report.update(status='cancelled' if isinstance(exc, InterruptedError) else 'failed',
+                      error=f'{type(exc).__name__}: {exc}')
+        raise
     finally:
         try:
             current = service_state()

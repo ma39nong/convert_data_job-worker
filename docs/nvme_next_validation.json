@@ -3,8 +3,8 @@
   "date": "2026-10-20",
   "scope": "local correctness and regression; native one-shot execution pending",
   "tests": {
-    "total_passed": 183,
-    "new_single_next_tests": 6,
+    "total_passed": 185,
+    "new_single_next_tests": 8,
     "failures": 0,
     "real_cleaning_baselines_included": true
   },
@@ -17,9 +17,12 @@
     "Sharpa and Wuji real receiver publication tests",
     "restart reconciles published source without duplication",
     "real cloned-code subprocess publishes exactly one queued bag",
-    "other queued source remains pending"
+    "other queued source remains pending",
+    "two sequential cloned-code children publish two distinct queue entries; third remains queued",
+    "current input check reaches processing before drain, without changing maintenance early",
+    "external maintenance request during waiting is preserved"
   ],
-  "operation": "one actual pending input processed once on NVMe and normally published; no original-disk comparison",
+  "operation": "one or two actual queued inputs sequentially on NVMe, normal publication; no original-disk comparison",
   "native_lifecycle": "sudo only for graceful systemd exit and restart; exact old trial process finishes before lock takeover",
   "performance_claim": "Not measured yet for next queued input"
 }

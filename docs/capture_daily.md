@@ -79,3 +79,13 @@ systemctl --user disable --now capture-convert-transfer.service
 合成测试覆盖四路各两包合批、24小时边界、空闲封存、重启计时不变、原始备份确认后释放、删除中断恢复、同名新目录保护、目标损坏拒绝删除、封存失败拒绝上传、空间不足暂停和台账镜像恢复。
 
 真实验收使用原始样例的独立本地副本，不删除用户给定的原始样例。为了当次验证封存上传，只有独立试验调用维护函数时的now_ns被推进到已记录24小时截止之后；不修改系统时钟或正式服务24小时窗口，不能据此宣称已经实跑满24小时。结果见 `capture_daily_validation.json`，日志在outputs。
+
+## 本机启用结果（2026-10-20）
+
+服务已安装到 `~/.config/systemd/user/capture-convert-transfer.service`，已启用并运行，linger为yes。使用四路实际采集目录及zmx-testing上传目标，首次跳过4/2/2/1共9个既有历史样例，当前等待未来新包，不回溯删除原始样例。
+
+本机实时台账：[recordings.csv](../outputs/capture-daily/state/recordings.csv)。服务器存底位置见 `outputs/capture-daily/state/ledger_mirror.json`。初始化时为空表，以后处理、备份及删除新包时自动添加记录。
+
+最终完整回归218项通过、7项跳过，其中新增daily测试17项、兼容单包模式15项。真实包副本验收验证了本地完整校验、已存在服务器备份的全部SHA-256、备份后删除副本与释放中间文件、源已删除时封存/上传LeRobot、台账本机及服务器存底；真实导出828帧。正式24小时周期尚未经过一个完整自然日，不将受控时钟测试称为连续实跑24小时。
+
+详细证据：[capture_daily_validation.json](capture_daily_validation.json)。

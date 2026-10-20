@@ -1,0 +1,59 @@
+{
+  "status": "passed",
+  "checked_at": "2026-10-20T16:40:22.490127",
+  "code_commit": "08593acb7a1c69b2938269e3540a30be656588b6",
+  "regression": {
+    "passed": 218,
+    "skipped": 7,
+    "daily_tests": 17,
+    "compatible_single_mode_tests": 15,
+    "log": "outputs/capture_daily_regression.log"
+  },
+  "real_acceptance": {
+    "status": "passed",
+    "original_test_copy_deleted": true,
+    "user_original_preserved": true,
+    "original_snapshot_unchanged": true,
+    "local_intermediates_released": true,
+    "raw_uploaded_and_verified": true,
+    "batch_uploaded_and_verified": true,
+    "batch_frames": 828,
+    "batch_episodes": 1,
+    "batch_hours": 24,
+    "window_ns": 86400000000000,
+    "clock_test": "Only isolated maintenance now_ns argument advanced; actual clock and production 24h duration unchanged.",
+    "ledger": "/home/user/convert_data_job-worker/outputs/capture-daily-acceptance/state/recordings.csv",
+    "remote_dataset": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/data-lerobot/wuji/B/1003_1003_data_lerobot",
+    "config": "/home/user/convert_data_job-worker/outputs/capture-daily-acceptance/config.yaml",
+    "elapsed_s": 298.758953957,
+    "remote_ledger": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/data-lerobot/.capture-ledgers/a546a9bba43e32c908beefc87f43e8158e1624830fe7e31e60a34eaacd062564/e5660e8a203a45eeada1781512b7ca2d",
+    "remote_ledger_verified": true
+  },
+  "service": {
+    "MainPID": "4063083",
+    "NRestarts": "0",
+    "ActiveState": "active",
+    "SubState": "running",
+    "UnitFileState": "enabled"
+  },
+  "linger": "Linger=yes",
+  "config": "/home/user/convert_data_job-worker/configs/capture.daily.yaml",
+  "live_ledger": "/home/user/convert_data_job-worker/outputs/capture-daily/state/recordings.csv",
+  "live_remote_ledger": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/data-lerobot/.capture-ledgers/f2df16d0f64a7c0673208e1afbb385b5037fd54841d047bf5f8eb8225d664c2f/efb438c254b646bc9f7e1b60c211015e",
+  "startup_history_skipped": {
+    "sharpa-A": 4,
+    "sharpa-B": 2,
+    "wuji-A": 2,
+    "wuji-B": 1
+  },
+  "live_batch_hours": 24,
+  "server_batch_hours": 72,
+  "server_service_or_queue_modified": false,
+  "full_24h_wall_clock_observed": false,
+  "notes": [
+    "24h boundary and restart behavior covered with controlled maintenance time in isolated tests; system clock unchanged.",
+    "Real test deletes only a dedicated local copy of user bag; user original samples retained.",
+    "Initial acceptance harness lacked Python spawn main guard; corrected and retried only isolated failed test. No quality rule relaxed.",
+    "Local uploaded LeRobot batches retained; originals deleted only after verified remote backup and durable ledger."
+  ]
+}

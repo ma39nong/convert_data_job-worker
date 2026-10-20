@@ -1,0 +1,25 @@
+{
+  "status": "passed",
+  "date": "2026-10-20",
+  "scope": "local correctness and regression; native one-shot execution pending",
+  "tests": {
+    "total_passed": 183,
+    "new_single_next_tests": 6,
+    "failures": 0,
+    "real_cleaning_baselines_included": true
+  },
+  "checks": [
+    "same official queue and fingerprint",
+    "only alternate work_root in child; production config unmodified",
+    "select unchanged observed stable queued input by priority",
+    "service active prevents real queue takeover",
+    "normal source validation failure prevents publication",
+    "Sharpa and Wuji real receiver publication tests",
+    "restart reconciles published source without duplication",
+    "real cloned-code subprocess publishes exactly one queued bag",
+    "other queued source remains pending"
+  ],
+  "operation": "one actual pending input processed once on NVMe and normally published; no original-disk comparison",
+  "native_lifecycle": "sudo only for graceful systemd exit and restart; exact old trial process finishes before lock takeover",
+  "performance_claim": "Not measured yet for next queued input"
+}

@@ -21,6 +21,10 @@ def context(cfg, kind='processing'):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         queue = Queue(Path(cfg['state_root'])/'queue.sqlite3')
         init_uploads(queue)
+        if cfg.get('delivery_mode')=='daily':
+            from . import ledger
+            own_directory(cfg['local_batch_root'],'capture-batches',cfg['fingerprint'])
+            ledger.init(queue)
         try:
             yield queue
         finally:
@@ -42,6 +46,10 @@ def payload_from(cfg, route, bag, proof, job):
 
 
 def process(cfg, queue, route, bag, proof):
+    started_ns=time.time_ns()
+    daily_mode=cfg.get('delivery_mode')=='daily'
+    if daily_mode:
+        from . import daily
     old = queue.get(route['id'], bag.name)
     attempt = old['attempts']+1
     # Retry interrupted/failed processing in a new attempt. Successful completed
@@ -51,13 +59,24 @@ def process(cfg, queue, route, bag, proof):
     complete = root/'local_complete.json'
     progress = reporter(cfg,route,bag.name)
     queue.put(route['id'],bag.name,proof['content_identity'],'processing',attempts=attempt,proof=proof,error=None)
+    if daily_mode:
+        from . import ledger
+        ledger.export(cfg,queue)
     try:
+        if daily_mode and not complete.exists():
+            recovered=daily.recover(cfg,route,bag,proof)
+            if recovered is not None:
+                from convest.ingest.batches import durable_json
+                durable_json(complete,recovered)
         if complete.exists():
             payload = json.loads(complete.read_text())
             if payload['identity'] != proof['content_identity'] or payload['source_snapshot'] != proof['snapshot']:
                 raise InputChanged('Completed source snapshot changed; retained existing local data')
-            from .transfer import verify_tree
-            verify_tree(payload['dataset'],payload['dataset_files'])
+            if daily_mode:
+                if daily.recover(cfg,route,bag,proof) is None:raise ValueError('Local batch commit missing')
+            else:
+                from .transfer import verify_tree
+                verify_tree(payload['dataset'],payload['dataset_files'])
         else:
             job = root / f'attempt-{attempt:04d}'
             # A crash after creating an attempt cannot overwrite that attempt.
@@ -84,20 +103,32 @@ def process(cfg, queue, route, bag, proof):
                 guard()
                 complete_source_verification(job,bag.name)
                 progress('upload_manifest')
-                payload=payload_from(cfg,route,bag,proof,job)
+                payload=daily.commit(cfg,queue,route,bag,proof,job,guard,started_ns) if daily_mode else payload_from(cfg,route,bag,proof,job)
                 guard()
-                atomic_json(complete,payload)
+                if daily_mode:
+                    from convest.ingest.batches import durable_json
+                    durable_json(complete,payload)
+                else:atomic_json(complete,payload)
         # Idempotent enqueue recovers a crash between the journal and local job
         # completion. Conversion and source verification are never repeated for
         # a successfully preserved local_complete.json.
-        enqueue(queue,payload)
-        queue.put(route['id'],bag.name,proof['content_identity'],'converted',proof=proof,error=None)
+        if daily_mode:
+            queue.put(route['id'],bag.name,proof['content_identity'],'converted',proof=proof,error=None)
+            daily.handoff(cfg,queue,payload)
+            try:daily.cleanup_intermediates(cfg,route,bag,proof,root)
+            except Exception as exc:
+                print('Intermediate cleanup retained for inspection: '+str(exc),flush=True)
+        else:
+            enqueue(queue,payload)
+            queue.put(route['id'],bag.name,proof['content_identity'],'converted',proof=proof,error=None)
         progress('queued_for_upload')
     except InputChanged as exc:
         queue.put(route['id'],bag.name,None,'waiting_stable',attempts=0,proof=None,error=str(exc))
         queue.observe(route['id'],bag.name,None,time.time_ns(),cfg['poll_seconds']*10**9)
     except Exception as exc:
-        queue.put(route['id'],bag.name,proof['content_identity'],'retry' if attempt<cfg['max_attempts'] else 'failed',
+        space=daily_mode and (getattr(exc,'errno',None)==28 or 'Insufficient local disk reserve' in str(exc) or 'No space left on device' in str(exc))
+        state='waiting_space' if space else 'retry' if attempt<cfg['max_attempts'] else 'failed'
+        queue.put(route['id'],bag.name,proof['content_identity'],state,attempts=old['attempts'] if space else attempt,
                   next_ns=time.time_ns()+cfg['retry_seconds']*10**9,error=f'{type(exc).__name__}: {exc}')
     # Raw data, validated dataset, reports and intermediates are retained in this
     # first version. Nothing is deleted following an upload.
@@ -106,6 +137,10 @@ def process(cfg, queue, route, bag, proof):
 def scan(cfg, queue, now_ns=None, should_stop=lambda:False):
     now=time.time_ns() if now_ns is None else now_ns
     candidates=[];errors={}
+    daily_mode=cfg.get('delivery_mode')=='daily'
+    if daily_mode:
+        from . import daily,ledger
+        errors.update(daily.maintain(cfg,queue,now))
     for route in cfg['routes']:
         source=Path(route['source'])
         if not source.is_dir() or source.is_symlink():
@@ -119,6 +154,15 @@ def scan(cfg, queue, now_ns=None, should_stop=lambda:False):
             old=queue.get(route['id'],bag.name)
             if old is None:
                 old=queue.put(route['id'],bag.name,None,'waiting_stable')
+            if daily_mode and old['state']=='converted':
+                saved=queue.db.execute('SELECT payload,raw_deleted_ns FROM recordings WHERE route=? AND episode=?',(route['id'],bag.name)).fetchone()
+                if saved and saved['raw_deleted_ns']:
+                    queue.put(route['id'],bag.name,old['identity'],'conflict',error='Deleted recording name reappeared; new directory preserved')
+                else:
+                    complete=Path(cfg['work_root'])/route['id']/bag.name/old['identity']/'local_complete.json'
+                    if saved:daily.handoff(cfg,queue,json.loads(saved['payload']))
+                    elif complete.exists():daily.handoff(cfg,queue,json.loads(complete.read_text()))
+                continue
             try:
                 snap=snapshot(bag);signature=digest(snap)
                 obs=queue.observe(route['id'],bag.name,signature,now,cfg['poll_seconds']*10**9)
@@ -145,6 +189,7 @@ def scan(cfg, queue, now_ns=None, should_stop=lambda:False):
             break
         old=queue.get(route['id'],bag.name)
         queue.put(route['id'],bag.name,old['identity'],'checking',error=None)
+        if daily_mode:ledger.export(cfg,queue)
         progress=reporter(cfg,route,bag.name)
         try:
             proof=check_input(bag,route,snap,lambda phase,**kw:progress('readiness.'+phase,**kw))
@@ -157,6 +202,7 @@ def scan(cfg, queue, now_ns=None, should_stop=lambda:False):
             break
         process(cfg,queue,route,bag,proof)
         processed+=1
+    if daily_mode:errors.update(daily.maintain(cfg,queue,now))
     counts={}
     for row in queue.rows():
         counts[row['state']]=counts.get(row['state'],0)+1

@@ -159,6 +159,9 @@ def enqueue(queue, payload):
 
 
 def upload_once(cfg, queue):
+    if cfg.get('delivery_mode')=='daily':
+        from .daily import upload_once as daily_upload
+        return daily_upload(cfg,queue)
     init_uploads(queue)
     queue.db.row_factory = __import__('sqlite3').Row
     rows = queue.db.execute("SELECT * FROM uploads WHERE state IN ('pending','retry','uploading') AND next_ns <= ? ORDER BY updated_ns,id", (time.time_ns(),)).fetchall()

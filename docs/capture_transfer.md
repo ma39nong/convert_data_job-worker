@@ -1,5 +1,7 @@
 # 采集电脑本地处理与上传
 
+本页记录旧单包成对上传的兼容试验模式（capture.testing.yaml）。当前推荐的24小时常驻、原始备份后删除和台账功能见 [capture_daily.md](capture_daily.md)，通用capture.example.yaml也已改为daily模板。
+
 本功能仅位于 `Auto-convert-transfer-data` 分支。处理和上传发生在采集电脑，服务器仅接收 `zmx-testing` 下的数据；未更改服务器 `main` 服务、生产输入/输出、队列或 NVMe 挂载。
 
 本次使用独立的 `zmx-testing` 目录，避免服务器原接收器对采集端已经处理的数据再次转换。以后改为生产路径时，需要明确同一来源由采集端还是服务器接入处理，避免两条链路重复处理。

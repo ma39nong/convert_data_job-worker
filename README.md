@@ -6,7 +6,7 @@
 原始 ROS2 bag → 输入完整性检查 → 静止段裁剪 → 30 Hz 对齐 → LeRobot v2.1 → 输出校验
 ```
 
-原始数据以只读方式访问。裁剪、转换和校验均可独立运行，也可通过可恢复的本地 job 串联执行。
+处理阶段原始数据以只读方式访问；采集端daily模式在服务器备份核验通过后释放本机原始副本。裁剪、转换和校验均可独立运行，也可通过可恢复的本地 job 串联执行。
 
 ## 本分支：采集电脑本地处理与排队上传
 
@@ -22,6 +22,27 @@
 ```
 
 本分支已新增采集端入口 `python -m convest.capture.cli`，包含独立本地处理与上传队列、断线重试、文件续传和上传回读 SHA-256 校验。四路真实样例已完成端到端试验：Sharpa A36/B55、Wuji A995/B1003，共4,155帧，原始rosbag与LeRobot均已上传并通过校验。见 [采集端使用说明](docs/capture_transfer.md) 和 [真实验收记录](docs/capture_validation.json)。下文服务器自动接收器属于原有功能；采集端使用本节的新配置和命令。
+
+### 24小时常驻与存储释放（新模式）
+
+使用 `configs/capture.daily.yaml`：四路各自从首包成功加入起累计24小时，到期完整校验并封存成一套LeRobot后排队上传；没有新包时也会到期封存，重启不会重置计时。原始rosbag在每包本地清洗、转换、来源/输出校验及本地批次安全提交后立即优先上传，不等24小时。
+
+原始上传逐文件回读SHA-256、完成凭据及本机台账落盘后，自动删除工作机上对应原始包；未完成或校验不一致时保留。清洗中间包及单包数据集重复副本在本地不可变批次安全接收后释放。已上传LeRobot批次目前继续保留本机副本。
+
+包号、类别、内容身份、原始上传及删除时间、所属批次、批次截止时间和远端位置实时保存到 `outputs/capture-daily/state/recordings.csv`、`recordings.json` 与SQLite事件日志；上传器另在服务器 `data-lerobot/.capture-ledgers/` 下备份台账。单个原始包也有独立服务器完成凭据，断线/进程中断后可恢复。
+
+```bash
+# 检查配置；不会删除或上传。
+.venv/bin/python -m convest.capture.cli check-config --config configs/capture.daily.yaml
+
+# 安装/启动当前用户的常驻服务（工作机本地，不操作服务器服务）。
+.venv/bin/python scripts/install_capture_service.py --config configs/capture.daily.yaml --apply
+
+systemctl --user status capture-convert-transfer.service
+journalctl --user -u capture-convert-transfer.service -f
+```
+
+配置默认首次跳过已有历史包，持续接收之后新增的目录，不会因此回溯删除此前的样例。存储不足时暂停新转换并重试，不删除未确认备份的原始包。详见 [24小时模式说明](docs/capture_daily.md)。下面的 `capture.testing.yaml` 是上一轮按包成对上传的兼容试验模式，常驻使用上面的daily配置。
 
 ### 启动与查询
 
@@ -68,7 +89,7 @@
 - 本地处理和上传分别记录状态。上传队列应支持重启恢复、失败重试和去重；传输中断不能要求重新清洗、转换已经验证完成的数据。
 - 本地沿用现有输入检查、裁剪规则、转换与来源及输出校验，不为上传提速降低质量门槛。未通过校验的输出不能作为合格 LeRobot 上传。
 - 上传完成需核验内容完整性，再标记成功；未完成的传输不能作为已就绪数据暴露。原始 rosbag 和 LeRobot 的上传状态分别记录，并关联同一来源。
-- 当前不删除或移动本机原始包，保留本地中间产物和合格数据集。历史接入通过 `initial_history` 配置；第一版通过已挂载的服务器目录传输，每个原始包上传一套独立 LeRobot。后续可另行扩展传输方式、自动清理和批次合并。
+- 单包兼容试验模式保留本机原始与中间文件；当前推荐的daily模式执行原始备份后释放、24小时批次封存上传及台账存底。历史接入通过 `initial_history` 配置，传输使用已挂载的服务器目录。
 
 ## 支持范围
 
@@ -481,4 +502,4 @@ Wuji 的 108D 原始状态和 54D 动作可使用现有 Wuji 适配。Sharpa 的
 python scripts/check_rgb_source.py --dataset /path/to/dataset --output outputs/new_rgb_report.json
 ```
 
-该抽查报告 MAE/PSNR，不新增质量门槛，也不将有损 RGB 宣称为逐像素无损。清洗与 30 Hz 对齐本来就会删除等待段、丢弃未选中的高频消息或重复低频图像；LeRobot 不是所有 ROS 话题的逐消息备份，原始 rosbag 始终保留。执行来源比较需要当时的清洗包仍可访问；自动接收器在删除中间包前完成比较并归档结果。
+该抽查报告 MAE/PSNR，不新增质量门槛，也不将有损 RGB 宣称为逐像素无损。清洗与 30 Hz 对齐本来就会删除等待段、丢弃未选中的高频消息或重复低频图像；LeRobot 不是所有 ROS 话题的逐消息备份，原始 rosbag 的服务器备份保留；采集端daily模式在备份核验后释放本机副本。执行来源比较需要当时的清洗包仍可访问；自动接收器在删除中间包前完成比较并归档结果。

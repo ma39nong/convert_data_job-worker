@@ -21,6 +21,9 @@ def status(cfg):
             db.row_factory=sqlite3.Row
             result={'jobs':[dict(row) for row in db.execute('SELECT route,episode,state,attempts,error FROM jobs ORDER BY route,episode')],
                     'uploads':[dict(row) for row in db.execute('SELECT route,episode,state,attempts,raw_done,dataset_done,error FROM uploads ORDER BY route,episode')]}
+        if cfg.get('delivery_mode')=='daily':
+            p=Path(cfg['state_root'])/'recordings.json'
+            if p.exists():result['ledger']=json.loads(p.read_text())
         for name in ['progress','upload_progress','status']:
             p=Path(cfg['state_root'])/(name+'.json')
             if p.exists():result[name]=json.loads(p.read_text())

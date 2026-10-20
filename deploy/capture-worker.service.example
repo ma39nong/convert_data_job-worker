@@ -1,0 +1,18 @@
+# Managed by convert-data capture daily service v1
+[Unit]
+Description=Capture computer local cleaning, 24h LeRobot batching and verified upload
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/user/convert_data_job-worker
+Environment=PYTHONUNBUFFERED=1
+ExecStart="/home/user/convert_data_job-worker/.venv/bin/python" -u -m convest.capture.cli run --config "/home/user/convert_data_job-worker/configs/capture.daily.yaml"
+Restart=always
+RestartSec=15
+KillMode=control-group
+TimeoutStopSec=infinity
+UMask=0022
+
+[Install]
+WantedBy=default.target

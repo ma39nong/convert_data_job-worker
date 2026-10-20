@@ -1,5 +1,5 @@
-# Copy to a machine-specific config before use. Paths and transfer targets are configurable.
-# First startup skips existing bags; future recordings are accepted. Use mode all/include explicitly for history.
+# Recommended capture-machine template: 24h batches. Verified uploaded originals are deleted.
+# Change roots for your machine; existing histories are skipped on first startup.
 schema_version: 1
 state_root: outputs/capture/state
 work_root: outputs/capture/work
@@ -27,3 +27,8 @@ routes:
   source: /home/user/franka_teleop_data/bags/gello_wuji/B
 initial_history:
   mode: none
+delivery_mode: daily
+batch_hours: 24
+delete_raw_after_upload: true
+cleanup_intermediates: true
+local_batch_root: outputs/capture/batches

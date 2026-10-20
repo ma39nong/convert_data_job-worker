@@ -492,7 +492,7 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
 
 深度和触觉可以保留在数据集中，由训练适配明确选择三路 RGB、实测关节位置、动作和任务文本。额外列不会自动变成模型输入；标准 LeRobot loader 仍可能读取这些列，因此存储完整性和读取性能是不同问题。
 
-Wuji 的 108D 原始状态和 54D 动作可使用现有 Wuji 适配。Sharpa 的原始状态为 116D 位置/速度，动作为 58D 的“左臂、右臂、左手、右手”，不能直接套用只接受物理顺序 58D 状态的旧训练配置。`tomato-openpi` 的独立配置 `training_configs.experiments.tomato_sharpa.multimodal_rgb.tomato_fr3_sharpa_lora_v1`（或 `fullft_v1`）先严格核对字段名称，选取位置并重排为“左臂、左手、右臂、右手”；三路相机保持 cam0 外部、cam2 左腕、cam1 右腕。原有 58D baseline 不变。
+Wuji 的 108D 原始状态和 54D 动作可使用现有 Wuji 适配。Sharpa 的原始状态为 116D 位置/速度，动作为 58D 的“左臂、右臂、左手、右手”，不能直接套用只接受物理顺序 58D 状态的旧训练配置。`tomato-openpi` （https://gitlab.litchibot.top/fruit-train/tomato-openpi.git）的独立配置 `training_configs.experiments.tomato_sharpa.multimodal_rgb.tomato_fr3_sharpa_lora_v1`（或 `fullft_v1`）先严格核对字段名称，选取位置并重排为“左臂、左手、右臂、右手”；三路相机保持 cam0 外部、cam2 左腕、cam1 右腕。原有 58D baseline 不变。
 
 训练应指向一套固定、已封存的批次，重新计算与该批数据、适配和 horizon 绑定的统计。该训练适配属于独立训练工程，不是接收器依赖。实际来源、归一化和 JAX 数据输入验证摘要见 [集成验证记录](docs/integration_validation.json)；记录只证明数据链路已验证，不代表训练或实机效果已验证。
 

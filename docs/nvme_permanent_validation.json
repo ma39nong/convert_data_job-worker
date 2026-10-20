@@ -1,0 +1,31 @@
+{
+  "tests": {
+    "passed": 186,
+    "skipped": 7,
+    "log": "outputs/nvme_permanent_regression.log",
+    "new_guard_tests": 8
+  },
+  "mount_unit_systemd_analyze_verify": "passed locally",
+  "native_mount_performed": false,
+  "production_code_changed": false,
+  "production_config_changed": false,
+  "real_queue_changed": false,
+  "real_nvme_sources": [
+    {
+      "route": "wuji-B",
+      "episode": "episode11",
+      "total_s": 644.168649
+    },
+    {
+      "route": "wuji-B",
+      "episode": "episode27",
+      "total_s": 676.562434
+    },
+    {
+      "route": "wuji-B",
+      "episode": "episode40",
+      "total_s": 737.951191
+    }
+  ],
+  "two_job_restore_confirmed": false
+}

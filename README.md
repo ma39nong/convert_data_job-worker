@@ -8,6 +8,53 @@
 
 原始数据以只读方式访问。裁剪、转换和校验均可独立运行，也可通过可恢复的本地 job 串联执行。
 
+## 本分支：采集电脑本地处理与排队上传
+
+分支名：`Auto-convert-transfer-data`。本分支面向录制数据的采集电脑：发现本机新生成的 rosbag，确认录制完成并通过稳定性及完整性检查后，在本机清洗、转换和校验，最后将原始 rosbag 与通过校验的 LeRobot 数据加入上传队列，传到服务器对应目录。
+
+```text
+采集电脑录制 rosbag
+  → 录制完成与输入检查
+  → 本地静止段清洗
+  → 本地 LeRobot 转换与完整校验
+  → 持久上传队列
+  → 服务器原始 rosbag / LeRobot 对应目录
+```
+
+当前仅记录需求和试验路径，自动上传功能尚未实现或启动。下文已有清洗、转换和自动接收命令属于现有基础功能，不代表本分支已具备完整的采集端上传链路。
+
+### 本机试验输入路径
+
+| 路由 | 采集电脑 rosbag 存储目录 |
+| --- | --- |
+| Sharpa A | `/home/user/franka_teleop_data/bags/gello_sharpa_tactile/A` |
+| Sharpa B | `/home/user/franka_teleop_data/bags/gello_sharpa_tactile/B` |
+| Wuji A | `/home/user/franka_teleop_data/bags/gello_wuji/A` |
+| Wuji B | `/home/user/franka_teleop_data/bags/gello_wuji/B` |
+
+这四条路径作为当前开发试验输入；目录出现不等于录制完成，不能处理仍在写入的包。后续实现将把各路输入目录做成可配置项，支持在不同采集电脑上替换。
+
+### 服务器试验上传位置
+
+以下是采集电脑通过服务器挂载访问的目标路径：
+
+| 上传内容 | 试验目标根目录 |
+| --- | --- |
+| 原始 rosbag | `/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/origin-rosbag` |
+| 已通过本地校验的 LeRobot | `/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/data-lerobot` |
+
+两个根目录均按 `sharpa/A`、`sharpa/B`、`wuji/A`、`wuji/B` 分开保存。例如 Sharpa A 原始包上传到 `origin-rosbag/sharpa/A/`，其 LeRobot 上传到 `data-lerobot/sharpa/A/`；Wuji B 对应 `origin-rosbag/wuji/B/` 和 `data-lerobot/wuji/B/`。
+
+上传的 rosbag 是采集得到的原始包；清洗后的 rosbag 属于本地处理中间产物，不代替原始包。上传目标根目录和路由映射后续同样做成可配置项，不能将本次 `zmx-testing` 示例路径写死在程序中。这些路径是本机挂载路径，服务器原生路径或其他传输连接参数需在选定传输方式时另行配置。
+
+### 开发边界与后续实现要求
+
+- 服务器现有 `main` 服务与队列正常运行。本分支仅在采集电脑侧开发，当前不更改服务器生产服务、配置、队列或 NVMe 挂载。
+- 本地处理和上传分别记录状态。上传队列应支持重启恢复、失败重试和去重；传输中断不能要求重新清洗、转换已经验证完成的数据。
+- 本地沿用现有输入检查、裁剪规则、转换与来源及输出校验，不为上传提速降低质量门槛。未通过校验的输出不能作为合格 LeRobot 上传。
+- 上传完成需核验内容完整性，再标记成功；未完成的传输不能作为已就绪数据暴露。原始 rosbag 和 LeRobot 的上传状态分别记录，并关联同一来源。
+- 当前不删除或移动本机原始包。历史包是否补处理、本地临时目录与保留策略、上传工具和连接方式、LeRobot 按包或按批发布方式，留待实现时明确。
+
 ## 支持范围
 
 | 机器人 | State / Action 维度 | 输出模态 |

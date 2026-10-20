@@ -1,0 +1,34 @@
+{
+  "status": "passed",
+  "date": "2026-10-20",
+  "scope": "local correctness and regression only; native server NVMe performance trial not run yet",
+  "tests": {
+    "total_passed": 175,
+    "failures": 0,
+    "new_trial_tests": 7,
+    "real_cleaning_baselines_included": true
+  },
+  "checks": [
+    "nonoverlapping monotonic stage timing",
+    "only restore owned maintenance request",
+    "reject stale drained status before new maintenance boundary",
+    "one trial coordinator at a time",
+    "reject non-NVMe or insufficient capacity",
+    "actual cloned-code subprocess receiver flow for Sharpa and Wuji",
+    "same source identity and trim mapping",
+    "exact Parquet values and RGB SHA256",
+    "full normal source and publication verification",
+    "original bag unchanged; isolated production outputs untouched; temporary work cleaned"
+  ],
+  "trial_design": {
+    "sequential": true,
+    "default_order": "ABBA",
+    "source": "same already published original; full preflight every run",
+    "A": "workspace on original storage",
+    "B": "workspace on NVMe",
+    "final_publication": "isolated dataset on original storage for both variants",
+    "production_receiver": "drain then restore own maintenance request",
+    "source_copy": false
+  },
+  "performance_claim": "None until native server trial completes; cache and unrelated storage workloads remain uncontrolled."
+}

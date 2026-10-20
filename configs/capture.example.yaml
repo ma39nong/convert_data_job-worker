@@ -1,0 +1,29 @@
+# Copy to a machine-specific config before use. Paths and transfer targets are configurable.
+# First startup skips existing bags; future recordings are accepted. Use mode all/include explicitly for history.
+schema_version: 1
+state_root: outputs/capture/state
+work_root: outputs/capture/work
+remote_raw_root: /home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/origin-rosbag
+remote_dataset_root: /home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/data-lerobot
+require_mount: /home/user/company-remote-2
+poll_seconds: 10
+stable_scans: 3
+stable_seconds: 60
+retry_seconds: 30
+max_attempts: 3
+max_jobs_per_scan: 1
+routes:
+- robot: sharpa
+  group: A
+  source: /home/user/franka_teleop_data/bags/gello_sharpa_tactile/A
+- robot: sharpa
+  group: B
+  source: /home/user/franka_teleop_data/bags/gello_sharpa_tactile/B
+- robot: wuji
+  group: A
+  source: /home/user/franka_teleop_data/bags/gello_wuji/A
+- robot: wuji
+  group: B
+  source: /home/user/franka_teleop_data/bags/gello_wuji/B
+initial_history:
+  mode: none

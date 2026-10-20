@@ -21,7 +21,22 @@
   → 服务器原始 rosbag / LeRobot 对应目录
 ```
 
-当前仅记录需求和试验路径，自动上传功能尚未实现或启动。下文已有清洗、转换和自动接收命令属于现有基础功能，不代表本分支已具备完整的采集端上传链路。
+本分支已新增采集端入口 `python -m convest.capture.cli`，包含独立本地处理与上传队列、断线重试、文件续传和上传回读 SHA-256 校验。四路真实样例正在进行端到端试验，验收结果见 [采集端使用说明](docs/capture_transfer.md)。下文服务器自动接收器属于原有功能；采集端使用本节的新配置和命令。
+
+### 启动与查询
+
+```bash
+# 只检查配置，不启动或上传。
+.venv/bin/python -m convest.capture.cli check-config --config configs/capture.testing.yaml
+
+# 本次四路样例试验；处理与上传完成后自动退出。
+.venv/bin/python -u -m convest.capture.cli run --config configs/capture.testing.yaml --until-idle
+
+# 查询本地处理队列及上传状态。
+.venv/bin/python -m convest.capture.cli status --config configs/capture.testing.yaml
+```
+
+持续接收新录制请复制 `configs/capture.example.yaml` 到自己的配置文件，修改输入、上传目标及独立的本地 `state_root` / `work_root` 后执行 `run`（不加 `--until-idle`）。不要同时启动两个使用同一状态目录的处理器；重复启动会被锁拒绝。已有试验正在运行时先查询状态，不要另开重复试验。
 
 ### 本机试验输入路径
 
@@ -32,7 +47,7 @@
 | Wuji A | `/home/user/franka_teleop_data/bags/gello_wuji/A` |
 | Wuji B | `/home/user/franka_teleop_data/bags/gello_wuji/B` |
 
-这四条路径作为当前开发试验输入；目录出现不等于录制完成，不能处理仍在写入的包。后续实现将把各路输入目录做成可配置项，支持在不同采集电脑上替换。
+这四条路径作为当前开发试验输入；目录出现不等于录制完成，不能处理仍在写入的包。各路输入目录通过配置文件的 `routes[].source` 修改，支持在不同采集电脑上替换。
 
 ### 服务器试验上传位置
 
@@ -45,15 +60,15 @@
 
 两个根目录均按 `sharpa/A`、`sharpa/B`、`wuji/A`、`wuji/B` 分开保存。例如 Sharpa A 原始包上传到 `origin-rosbag/sharpa/A/`，其 LeRobot 上传到 `data-lerobot/sharpa/A/`；Wuji B 对应 `origin-rosbag/wuji/B/` 和 `data-lerobot/wuji/B/`。
 
-上传的 rosbag 是采集得到的原始包；清洗后的 rosbag 属于本地处理中间产物，不代替原始包。上传目标根目录和路由映射后续同样做成可配置项，不能将本次 `zmx-testing` 示例路径写死在程序中。这些路径是本机挂载路径，服务器原生路径或其他传输连接参数需在选定传输方式时另行配置。
+上传的 rosbag 是采集得到的原始包；清洗后的 rosbag 属于本地处理中间产物，不代替原始包。上传目标根目录分别通过 `remote_raw_root` 和 `remote_dataset_root` 配置，路由由各项 `robot` / `group` 决定；本次 `zmx-testing` 路径没有写死在程序中。这些路径是本机挂载路径，服务器原生路径或其他传输连接参数需在选定传输方式时另行配置。
 
-### 开发边界与后续实现要求
+### 运行边界
 
 - 服务器现有 `main` 服务与队列正常运行。本分支仅在采集电脑侧开发，当前不更改服务器生产服务、配置、队列或 NVMe 挂载。
 - 本地处理和上传分别记录状态。上传队列应支持重启恢复、失败重试和去重；传输中断不能要求重新清洗、转换已经验证完成的数据。
 - 本地沿用现有输入检查、裁剪规则、转换与来源及输出校验，不为上传提速降低质量门槛。未通过校验的输出不能作为合格 LeRobot 上传。
 - 上传完成需核验内容完整性，再标记成功；未完成的传输不能作为已就绪数据暴露。原始 rosbag 和 LeRobot 的上传状态分别记录，并关联同一来源。
-- 当前不删除或移动本机原始包。历史包是否补处理、本地临时目录与保留策略、上传工具和连接方式、LeRobot 按包或按批发布方式，留待实现时明确。
+- 当前不删除或移动本机原始包，保留本地中间产物和合格数据集。历史接入通过 `initial_history` 配置；第一版通过已挂载的服务器目录传输，每个原始包上传一套独立 LeRobot。后续可另行扩展传输方式、自动清理和批次合并。
 
 ## 支持范围
 

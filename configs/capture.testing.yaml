@@ -1,0 +1,32 @@
+schema_version: 1
+# Separate local state: never reuse the server ingest queue.
+state_root: outputs/capture-testing/state
+work_root: outputs/capture-testing/work
+remote_raw_root: /home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/origin-rosbag
+remote_dataset_root: /home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/data-lerobot
+require_mount: /home/user/company-remote-2
+poll_seconds: 10
+stable_scans: 3
+stable_seconds: 60
+retry_seconds: 30
+max_attempts: 3
+max_jobs_per_scan: 1
+# Limit first-run history to four real samples; future new episode directories
+# on these routes are still discovered. Do not start new recording in this trial.
+routes:
+  - robot: sharpa
+    group: A
+    source: /home/user/franka_teleop_data/bags/gello_sharpa_tactile/A
+    initial_history: {mode: include, episodes: [episode36]}
+  - robot: sharpa
+    group: B
+    source: /home/user/franka_teleop_data/bags/gello_sharpa_tactile/B
+    initial_history: {mode: include, episodes: [episode55]}
+  - robot: wuji
+    group: A
+    source: /home/user/franka_teleop_data/bags/gello_wuji/A
+    initial_history: {mode: include, episodes: [episode995]}
+  - robot: wuji
+    group: B
+    source: /home/user/franka_teleop_data/bags/gello_wuji/B
+    initial_history: {mode: include, episodes: [episode1003]}

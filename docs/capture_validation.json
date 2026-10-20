@@ -1,0 +1,91 @@
+{
+  "status": "passed",
+  "checked_at": "2026-10-20T16:06:21.145790",
+  "code_commit": "d8bf6c4",
+  "regression": {
+    "passed": 201,
+    "skipped": 7,
+    "new_capture_tests": 15,
+    "log": "outputs/capture_regression.log"
+  },
+  "real_trial": {
+    "status": "passed",
+    "checked_ns": 1792483581133522319,
+    "uploads": [
+      {
+        "route": "sharpa-A",
+        "episode": "episode36",
+        "frames": 807,
+        "episodes": 1,
+        "raw_bytes": 3302045709,
+        "dataset_bytes": 154889383,
+        "local_quality": "passed",
+        "original_unchanged": true,
+        "upload": "completed",
+        "receipt": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/data-lerobot/.capture-transfer/8373dcd796db67f3bb6fe4ac81273ddc5fc56c958f5e8bb7404ff3aab2f4917a/f3ea024ca7c937ecf8cdbc968f07b452610b468855068671b69a33839c23814a.json",
+        "raw": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/origin-rosbag/sharpa/A/episode36",
+        "dataset": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/data-lerobot/sharpa/A/episode36_data_lerobot"
+      },
+      {
+        "route": "sharpa-B",
+        "episode": "episode55",
+        "frames": 1606,
+        "episodes": 1,
+        "raw_bytes": 7264632968,
+        "dataset_bytes": 314434888,
+        "local_quality": "passed",
+        "original_unchanged": true,
+        "upload": "completed",
+        "receipt": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/data-lerobot/.capture-transfer/8373dcd796db67f3bb6fe4ac81273ddc5fc56c958f5e8bb7404ff3aab2f4917a/a2a90d044bcaf7843fef932d8c37037c4c157b2cc1083a4c2ad6cc00fd276293.json",
+        "raw": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/origin-rosbag/sharpa/B/episode55",
+        "dataset": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/data-lerobot/sharpa/B/episode55_data_lerobot"
+      },
+      {
+        "route": "wuji-A",
+        "episode": "episode995",
+        "frames": 914,
+        "episodes": 1,
+        "raw_bytes": 2973395917,
+        "dataset_bytes": 113305007,
+        "local_quality": "passed",
+        "original_unchanged": true,
+        "upload": "completed",
+        "receipt": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/data-lerobot/.capture-transfer/8373dcd796db67f3bb6fe4ac81273ddc5fc56c958f5e8bb7404ff3aab2f4917a/66891f907b070598115dc31ae6e98fc49759ad67b65e3c8eb24ecf31d9d99242.json",
+        "raw": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/origin-rosbag/wuji/A/episode995",
+        "dataset": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/data-lerobot/wuji/A/episode995_data_lerobot"
+      },
+      {
+        "route": "wuji-B",
+        "episode": "episode1003",
+        "frames": 828,
+        "episodes": 1,
+        "raw_bytes": 2695011903,
+        "dataset_bytes": 94584014,
+        "local_quality": "passed",
+        "original_unchanged": true,
+        "upload": "completed",
+        "receipt": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/data-lerobot/.capture-transfer/8373dcd796db67f3bb6fe4ac81273ddc5fc56c958f5e8bb7404ff3aab2f4917a/6e0e08d72970b8dd35c76bb3886de399ce6a45fc92c6b3a4e8e9e04e77ecb6a5.json",
+        "raw": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/origin-rosbag/wuji/B/episode1003",
+        "dataset": "/home/user/company-remote-2/real/harvest-tomato/data/zmx-testing/data-lerobot/wuji/B/episode1003_data_lerobot"
+      }
+    ],
+    "count": 4,
+    "full_remote_hashes_verified_before_commit": true,
+    "additional_remote_rehash": false
+  },
+  "production_service_or_config_changed": false,
+  "main_ref_unchanged": "ef10d083489cb9f15f6d6554f1969d2b554699b0",
+  "notes": [
+    "Four real local recordings converted exactly once; originals retained.",
+    "First Sharpa A transfer used two remote hash passes; subsequent transfers use one full final independent read-back.",
+    "Uploader restarted gracefully after first complete pair; all four converted datasets reused.",
+    "Acceptance checks receipts, inventory sizes and quality reports; no extra full remote rehash beyond actual upload verification."
+  ],
+  "trial_started_at": "2026-10-20T15:14:47.717411",
+  "trial_wall_s": 3093.416,
+  "trial_wall_scope": "Includes initial 60s stability, local processing, serial uploads/read-back verification, graceful uploader restart and final acceptance; not per-bag conversion time.",
+  "total_frames": 4155,
+  "total_raw_bytes": 16235086497,
+  "total_dataset_bytes": 677213292,
+  "finite_trial_processes_exited": true
+}

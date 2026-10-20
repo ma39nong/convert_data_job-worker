@@ -21,7 +21,7 @@
   → 服务器原始 rosbag / LeRobot 对应目录
 ```
 
-本分支已新增采集端入口 `python -m convest.capture.cli`，包含独立本地处理与上传队列、断线重试、文件续传和上传回读 SHA-256 校验。四路真实样例正在进行端到端试验，验收结果见 [采集端使用说明](docs/capture_transfer.md)。下文服务器自动接收器属于原有功能；采集端使用本节的新配置和命令。
+本分支已新增采集端入口 `python -m convest.capture.cli`，包含独立本地处理与上传队列、断线重试、文件续传和上传回读 SHA-256 校验。四路真实样例已完成端到端试验：Sharpa A36/B55、Wuji A995/B1003，共4,155帧，原始rosbag与LeRobot均已上传并通过校验。见 [采集端使用说明](docs/capture_transfer.md) 和 [真实验收记录](docs/capture_validation.json)。下文服务器自动接收器属于原有功能；采集端使用本节的新配置和命令。
 
 ### 启动与查询
 

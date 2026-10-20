@@ -3,9 +3,9 @@
   "date": "2026-10-20",
   "scope": "local correctness and regression only; native server NVMe performance trial not run yet",
   "tests": {
-    "total_passed": 175,
+    "total_passed": 177,
     "failures": 0,
-    "new_trial_tests": 7,
+    "new_trial_tests": 9,
     "real_cleaning_baselines_included": true
   },
   "checks": [
@@ -18,7 +18,9 @@
     "same source identity and trim mapping",
     "exact Parquet values and RGB SHA256",
     "full normal source and publication verification",
-    "original bag unchanged; isolated production outputs untouched; temporary work cleaned"
+    "original bag unchanged; isolated production outputs untouched; temporary work cleaned",
+    "NVMe diagnostics distinguish permissions, capacity and mount type",
+    "writable user subdirectory accepted when mount root is read-only"
   ],
   "trial_design": {
     "sequential": true,

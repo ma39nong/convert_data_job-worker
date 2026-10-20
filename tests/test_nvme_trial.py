@@ -145,3 +145,25 @@ def test_only_one_native_trial_can_hold_the_coordinator_lock(tmp_path):
     finally:
         lock.close()
     trial.acquire_trial_lock(project).close()
+
+
+def test_nvme_diagnostic_separates_permissions_from_capacity(tmp_path, monkeypatch):
+    monkeypatch.setattr(trial.os, 'access', lambda *a: False)
+    monkeypatch.setattr(trial.shutil, 'disk_usage', lambda p: SimpleNamespace(free=200))
+    monkeypatch.setattr(trial.subprocess, 'run', lambda *a, **k: SimpleNamespace(stdout='/dev/nvme0n1p1 ext4\n'))
+    row = trial.inspect_nvme([tmp_path], 100)[0]
+    assert row['reason'] == 'directory_not_writable_or_traversable'
+    assert row['free_GiB'] is not None and row['permissions']
+    row = trial.inspect_nvme([tmp_path], 300)[0]
+    assert row['reason'] == 'insufficient_free_space'
+    assert not row['usable']
+
+
+def test_nvme_can_use_writable_child_when_mount_root_is_not_writable(tmp_path, monkeypatch):
+    child = tmp_path / 'user'
+    child.mkdir()
+    monkeypatch.setattr(trial.os, 'access', lambda p, mode: Path(p) == child)
+    monkeypatch.setattr(trial.shutil, 'disk_usage', lambda p: SimpleNamespace(free=200))
+    monkeypatch.setattr(trial.subprocess, 'run', lambda *a, **k: SimpleNamespace(stdout='/dev/nvme0n1p1 ext4\n'))
+    selected, mount = trial.choose_nvme([tmp_path, child], 100)
+    assert selected == child and mount.startswith('/dev/nvme')

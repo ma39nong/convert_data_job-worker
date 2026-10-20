@@ -271,18 +271,53 @@ def restore_receiver(project, config, state, lease):
     return 'resume_requested'
 
 
+def default_nvme_candidates():
+    import pwd
+    username = pwd.getpwuid(os.getuid()).pw_name
+    return [Path(base) / suffix for base in ('/data1', '/data2')
+            for suffix in ('', username, 'auto-clean-convert-trials/' + username)]
+
+
+def inspect_nvme(candidates, needed):
+    import stat
+    checks = []
+    for candidate in candidates:
+        root = Path(candidate).resolve()
+        row = {'candidate': str(candidate), 'resolved': str(root),
+               'required_GiB': round(needed / 2**30, 2), 'usable': False}
+        checks.append(row)
+        try:
+            if not root.is_dir():
+                row['reason'] = 'directory_missing_or_inaccessible'
+                continue
+            st = root.stat()
+            row.update(owner_uid=st.st_uid, owner_gid=st.st_gid,
+                       permissions=stat.filemode(st.st_mode),
+                       writable=os.access(root, os.W_OK | os.X_OK))
+            mount = subprocess.run(['findmnt', '-n', '-T', str(root), '-o', 'SOURCE,FSTYPE'],
+                                   capture_output=True, text=True, check=True).stdout.strip()
+            row['mount'] = mount
+            row['free_GiB'] = round(shutil.disk_usage(root).free / 2**30, 2)
+            if not mount.split() or not mount.split()[0].startswith('/dev/nvme'):
+                row['reason'] = 'not_a_direct_NVMe_mount'
+            elif shutil.disk_usage(root).free < needed:
+                row['reason'] = 'insufficient_free_space'
+            elif not row['writable']:
+                row['reason'] = 'directory_not_writable_or_traversable'
+            else:
+                row.update(usable=True, reason='ready')
+        except (OSError, subprocess.CalledProcessError) as exc:
+            row['reason'] = str(exc)
+    return checks
+
+
 def choose_nvme(candidates, needed):
-    for root in candidates:
-        root = Path(root).resolve()
-        if not root.is_dir() or not os.access(root, os.W_OK):
-            continue
-        mount = subprocess.run(['findmnt', '-n', '-T', str(root), '-o', 'SOURCE,FSTYPE'],
-                               capture_output=True, text=True, check=True).stdout.strip()
-        if not mount.split() or not mount.split()[0].startswith('/dev/nvme'):
-            continue
-        if shutil.disk_usage(root).free >= needed:
-            return root, mount
-    raise ValueError('No writable NVMe location with sufficient free space; use --nvme-root for a writable directory on /data1 or /data2')
+    checks = inspect_nvme(candidates, needed)
+    for row in checks:
+        if row['usable']:
+            return Path(row['resolved']), row['mount']
+    raise ValueError('No writable NVMe location with sufficient free space. '
+                     'Preflight details: ' + json.dumps(checks, ensure_ascii=False))
 
 
 def acquire_trial_lock(project):
@@ -305,6 +340,8 @@ def main(argv=None):
     parser.add_argument('--group', choices=['A', 'B'], default='A')
     parser.add_argument('--episode', default='episode62')
     parser.add_argument('--nvme-root', type=Path)
+    parser.add_argument('--check-nvme', action='store_true',
+                        help='Only report NVMe mount, permissions and capacity; never drain or run')
     parser.add_argument('--order', choices=['ab', 'abba'], default='abba', help='a=/data, b=NVMe; strictly sequential')
     parser.add_argument('--run', action='store_true', help='Without this flag, only check prerequisites')
     parser.add_argument('--child', type=Path, help=argparse.SUPPRESS)
@@ -339,7 +376,13 @@ def main(argv=None):
     if not size or not (source / 'collection_state.json').is_file():
         raise ValueError('Original source is unavailable')
     reserve = 10 * 10**9
-    nvme, mount = choose_nvme([args.nvme_root] if args.nvme_root else ['/data1', '/data2'], size * 3 + reserve)
+    candidates = [args.nvme_root] if args.nvme_root else default_nvme_candidates()
+    if args.check_nvme:
+        print(json.dumps({'writes_performed': False, 'service_changed': False,
+                          'checks': inspect_nvme(candidates, size * 3 + reserve)},
+                         ensure_ascii=False, indent=2))
+        return 0
+    nvme, mount = choose_nvme(candidates, size * 3 + reserve)
     if shutil.disk_usage(project).free < size * (3 + 2 * len(args.order)) + reserve:
         raise ValueError('Insufficient /data free space for trial artifacts')
     if 'defer_source_final_hash' not in (project / 'src/convest/jobs.py').read_text():
@@ -422,4 +465,8 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except (ValueError, RuntimeError, OSError) as exc:
+        print('ERROR: ' + str(exc), file=sys.stderr)
+        raise SystemExit(2)

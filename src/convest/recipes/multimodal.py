@@ -6,6 +6,8 @@ from convest.sources.robot_rosbag2 import modalities
 
 
 def validate_config(config):
+    if config.get('image_time_basis', 'capture') not in ('receive', 'capture'):
+        raise ValueError('image_time_basis must be receive or capture')
     if config['robot'] not in ('wuji', 'sharpa') or config['segments'] != 'full-all':
         raise ValueError('Use robot=wuji/sharpa and segments=full-all')
     if config['fps'] != 30 or config['window'] != 'validated':

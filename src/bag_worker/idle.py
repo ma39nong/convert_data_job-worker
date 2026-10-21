@@ -183,9 +183,10 @@ def inspect_bag(bag: Bag, config=None):
     return report
 
 
-def trim_bag(source, output, config=None, custom_dir=None, progress=lambda **kw: None):
+def trim_bag(source, output, config=None, custom_dir=None, progress=lambda **kw: None, *, image_time_basis='capture'):
     bag = Bag(source, custom_dir)
     if (bag.root/'trim_report.json').exists():
         raise ValueError('输入已经裁剪；请使用原始 bag，避免重复压缩及来源映射歧义')
     report = inspect_bag(bag, config)
-    return bag.export(report['ranges_seconds'], Path(output), progress=progress, detection=report)
+    return bag.export(report['ranges_seconds'], Path(output), progress=progress, detection=report,
+                      image_time_basis=image_time_basis)

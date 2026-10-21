@@ -84,6 +84,8 @@ def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None,*
             not isinstance(r, ValidatedInput) or r.kind != 'source'
             for r in validated_inputs.values())):
         raise ValueError('Deferred source hash requires validated direct-input receipts')
+    image_time_basis=config.get('image_time_basis','capture')
+    if image_time_basis not in ('capture','receive'):raise ValueError('Invalid image_time_basis')
     root=Path(run_root).resolve();source=Path(config['source_root']).resolve()
     if not root.is_relative_to(WORKSPACE/'outputs') or root==WORKSPACE/'outputs':
         raise ValueError('Job root must be under workspace outputs/')
@@ -100,13 +102,16 @@ def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None,*
     root.mkdir(parents=True,exist_ok=True)
     with (root/'lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        fingerprint=digest({'config':config,'idle':asdict(default_config()),'version':'job-2-idle-v3'})
+        policy={'config':config,'idle':asdict(default_config()),'version':'job-2-idle-v3'}
+        if image_time_basis=='capture':policy['image_selection_policy']='image-capture-v1'
+        fingerprint=digest(policy)
         marker=root/'manifest.json'
         if marker.exists():
             previous=json.loads(marker.read_text())
             if previous.get('owner')!='convert-data-job-worker' or previous['fingerprint']!=fingerprint:
                 raise ValueError('Job config changed; use a new job directory')
-        else:atomic_json(marker,{'owner':'convert-data-job-worker','fingerprint':fingerprint,'config':config})
+        else:atomic_json(marker,{'owner':'convert-data-job-worker','fingerprint':fingerprint,'config':config,
+                                 'image_time_basis':image_time_basis})
         results=[]
         cleaned=root/'cleaned';cleaned.mkdir(exist_ok=True)
         for name in selected:
@@ -143,7 +148,10 @@ def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None,*
                         raise ValueError('Cleaned output has no committed snapshot or has changed')
                 else:
                     transition('trimming')
-                    report=trim_bag(source/name,target)
+                    if image_time_basis == 'capture':
+                        report=trim_bag(source/name,target,image_time_basis='capture')
+                    else:
+                        report=trim_bag(source/name,target,image_time_basis='receive')
                 transition('trimmed',cleaned=str(target),cleaned_snapshot=snapshot(target),
                            deleted_seconds=report['deleted_seconds'])
                 results.append(job.copy())

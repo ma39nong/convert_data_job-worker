@@ -166,6 +166,7 @@ def test_job_recovers_kill_between_cleaned_export_and_snapshot(tmp_path,monkeypa
     from convest.config import digest
     raw=make_conversion_bag(tmp_path/'input/episode1')
     cfg=load_config(WORKSPACE/'configs/wuji.yaml');cfg['source_root']=str(raw.parent)
+    cfg['image_time_basis']='receive'  # Explicit legacy-job recovery fixture.
     monkeypatch.setattr(jobs,'WORKSPACE',tmp_path);monkeypatch.setattr(pipeline,'WORKSPACE',tmp_path)
     def serial(items,config,contract,staging,workers):
         for item in items:
@@ -173,7 +174,7 @@ def test_job_recovers_kill_between_cleaned_export_and_snapshot(tmp_path,monkeypa
             yield item,stage,pipeline.prepare_bag(item,config,contract,stage),None
     monkeypatch.setattr(pipeline,'prepared_in_order',serial)
     root=tmp_path/'outputs/job';clean=root/'cleaned/episode1'
-    trim_bag(raw,clean)
+    trim_bag(raw,clean,image_time_basis='receive')
     contract=yaml.safe_load(Path(cfg['contract']).read_text())
     ready=jobs.check_ready(raw,contract,cfg['schema_dir'])
     atomic_json(root/'manifest.json',{'owner':'convert-data-job-worker','fingerprint':digest({'config':cfg,'idle':asdict(default_config()),'version':'job-2-idle-v3'}),'config':cfg})

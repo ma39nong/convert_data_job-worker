@@ -76,6 +76,19 @@ def decode_joint(data):
             'velocity': values[1], 'effort': values[2]}
 
 
+IMAGE_TYPES = frozenset({'sensor_msgs/msg/Image', 'sensor_msgs/msg/CompressedImage'})
+
+
+def image_capture_ns(prefix):
+    """Read the recorded image header; no receive-time fallback or invented stamp."""
+    if len(prefix) < 12 or prefix[:2] not in (b'\x00\x00', b'\x00\x01'):
+        raise ValueError('Image requires a complete CDR1 Header timestamp')
+    sec, ns = struct.unpack_from('<iI' if prefix[1] else '>iI', prefix, 4)
+    if ns >= 1_000_000_000 or (sec == 0 and ns == 0):
+        raise ValueError('Image capture timestamp is invalid; no receive-time fallback')
+    return sec * 1_000_000_000 + ns
+
+
 def normalized_ranges(ranges, duration, allow_empty=False):
     if not isinstance(ranges, list) or (not ranges and not allow_empty):
         raise ValueError('请添加 有效的需要删除的时间段')
@@ -226,16 +239,42 @@ class Bag:
             data = db.execute('SELECT data FROM messages WHERE id=?', (ident,)).fetchone()[0]
         return data, (stamp-self.start)/1e9
 
-    def plan(self, ranges, compact=True):
+    def selection_refs(self, image_time_basis='capture'):
+        if image_time_basis not in ('receive', 'capture'):
+            raise ValueError('image_time_basis must be receive or capture')
+        if image_time_basis == 'receive':
+            return self.refs
+        refs = {name: list(rows) for name, rows in self.refs.items()}
+        for name, topic in self.topics.items():
+            if topic['type'] not in IMAGE_TYPES:
+                continue
+            rows = []
+            for fi, file in enumerate(self.files):
+                with connect(file) as db:
+                    ident = db.execute('SELECT id FROM topics WHERE name=?', (name,)).fetchone()
+                    if ident is None:
+                        continue
+                    rows.extend((image_capture_ns(data), fi, row_id) for row_id, data in db.execute(
+                        'SELECT id,substr(data,1,12) FROM messages WHERE topic_id=?', (ident[0],)))
+            refs[name] = sorted(rows)
+        self.check_unchanged()
+        return refs
+
+    def plan(self, ranges, compact=True, *, image_time_basis='capture'):
         merged = normalized_ranges(ranges, self.duration, allow_empty=True)
         topics = []
-        for name, refs in sorted(self.refs.items()):
+        for name, refs in sorted(self.selection_refs(image_time_basis).items()):
             deleted = sum(bisect.bisect_left(refs, (self.start+b, -1, -1)) -
                           bisect.bisect_left(refs, (self.start+a, -1, -1)) for a, b in merged)
             topics.append({'name': name, 'before': len(refs), 'deleted': deleted,
                            'kept': len(refs)-deleted})
         deleted = sum(t['deleted'] for t in topics)
-        return {'ranges': [[a/1e9, b/1e9] for a, b in merged],
+        policy = ({'image_time_basis': 'capture', 'selection_policy_version': 'image-capture-v1',
+                   'message_selection': {'sensor_msgs/msg/Image': 'header_timestamp',
+                                         'sensor_msgs/msg/CompressedImage': 'header_timestamp',
+                                         'other_types': 'bag_record_timestamp'}}
+                  if image_time_basis == 'capture' else {})
+        return {**policy, 'ranges': [[a/1e9, b/1e9] for a, b in merged],
                 'deleted_seconds': sum(b-a for a, b in merged)/1e9,
                 'deleted': deleted, 'kept': self.count-deleted, 'topics': topics,
                 'compact': compact,
@@ -243,10 +282,11 @@ class Bag:
                 'mapping': [{'source_start_ns': str(self.start+a), 'source_end_ns': str(self.start+b),
                              'removed_ns': str(b-a)} for a,b in merged]}
 
-    def export(self, ranges, output: Path, progress=lambda **kw: None, compact=True, annotations=None, detection=None):
+    def export(self, ranges, output: Path, progress=lambda **kw: None, compact=True, annotations=None, detection=None,
+               *, image_time_basis='capture'):
         """Keep source read-only; compact record times and typed ROS Time fields."""
         self.check_unchanged()
-        plan = self.plan(ranges, compact)
+        plan = self.plan(ranges, compact, image_time_basis=image_time_basis)
         if not plan['kept']:
             raise ValueError('所选区间会删除全部消息，请至少保留一段数据')
         output = output.resolve()
@@ -264,7 +304,6 @@ class Bag:
         mapping = TimeMap(self.start, merged)
         rewriter = TimestampRewriter(self.store, mapping)
         unmodified_types = Counter()
-        condition = 'COALESCE((SELECT r.end FROM trim_ranges r WHERE r.start <= messages.timestamp ORDER BY r.start DESC LIMIT 1), -9223372036854775808) <= messages.timestamp'
         allcounts = Counter()
         fileinfo = []
         kept_total = 0
@@ -285,6 +324,16 @@ class Bag:
                     cols = [r[1] for r in src.execute('PRAGMA table_info(messages)')]
                     tid_col, stamp_col, data_col = (cols.index(x) for x in ('topic_id','timestamp','data'))
                     local_types = dict(src.execute('SELECT id,type FROM topics'))
+                    selection_time = 'messages.timestamp'
+                    if image_time_basis == 'capture':
+                        src.create_function('image_capture_ns', 1, image_capture_ns, deterministic=True)
+                        image_ids = ','.join(str(tid) for tid, kind in local_types.items() if kind in IMAGE_TYPES)
+                        if image_ids:
+                            selection_time = (f'CASE WHEN messages.topic_id IN ({image_ids}) '
+                                              'THEN image_capture_ns(substr(messages.data,1,12)) '
+                                              'ELSE messages.timestamp END')
+                    condition = ('COALESCE((SELECT r.end FROM trim_ranges r WHERE r.start <= (' + selection_time +
+                                 ') ORDER BY r.start DESC LIMIT 1), -9223372036854775808) <= (' + selection_time + ')')
                     placeholders = ','.join('?' for _ in cols)
                     src.execute('CREATE TEMP TABLE trim_ranges(start INTEGER PRIMARY KEY, end INTEGER)')
                     src.executemany('INSERT INTO trim_ranges VALUES (?,?)', [(self.start+a, self.start+b) for a,b in merged])

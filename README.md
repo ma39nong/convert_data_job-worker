@@ -91,6 +91,8 @@ journalctl --user -u capture-convert-transfer.service -f
 - 上传完成需核验内容完整性，再标记成功；未完成的传输不能作为已就绪数据暴露。原始 rosbag 和 LeRobot 的上传状态分别记录，并关联同一来源。
 - 单包兼容试验模式保留本机原始与中间文件；当前推荐的daily模式执行原始备份后释放、24小时批次封存上传及台账存底。历史接入通过 `initial_history` 配置，传输使用已挂载的服务器目录。
 
+默认按图像/深度/触觉图像的 Header 拍摄或采样时间判断裁剪归属，静止区间和质量阈值保持原规则。已成功的 LeRobot 不重转；仅对 Wuji 因内部对齐缺口被排除的包定向补缺。升级保持原队列、批次计时及暂停状态，详见 [拍摄时间修复与历史数据补缺](docs/capture_time_upgrade.md)。
+
 ## 支持范围
 
 | 机器人 | State / Action 维度 | 输出模态 |

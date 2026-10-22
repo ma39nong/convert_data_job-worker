@@ -59,7 +59,40 @@ journalctl --user -u capture-convert-transfer.service -f
 
 持续接收新录制请复制 `configs/capture.example.yaml` 到自己的配置文件，修改输入、上传目标及独立的本地 `state_root` / `work_root` 后执行 `run`（不加 `--until-idle`）。不要同时启动两个使用同一状态目录的处理器；重复启动会被锁拒绝。已有试验正在运行时先查询状态，不要另开重复试验。
 
-### 本机试验输入路径
+### 部署到其他工作机：必须检查的输入和输出路径
+
+先复制24小时配置，再按实际电脑和服务器修改；下面的路径仅是当前试验示例，不能在其他工作机上直接照用。
+
+```bash
+cp configs/capture.daily.yaml configs/capture.local.yaml
+```
+
+| 配置字段 | 用途及修改要求 |
+| --- | --- |
+| `routes[].source` | 工作机录制 rosbag 的输入目录；四路分别填写，目录下直接放 `episode数字/`，不要填成某一个 episode。用 `robot` 和 `group` 明确对应 Sharpa/Wuji、A/B。 |
+| `remote_raw_root` | 原始 rosbag 的服务器目标根目录；程序自动追加 `{robot}/{group}/{episode}`，根目录不要再填写 `wuji/A` 等路由后缀。 |
+| `remote_dataset_root` | LeRobot 的服务器目标根目录；程序自动追加 `{robot}/{group}/{批次名}`。 |
+| `require_mount` | 工作机上实际的服务器挂载点，例如 `/home/user/company-remote-2`；两个远端根目录必须位于此挂载点内。未挂载时上传等待，不会把数据写入同名本地空目录。 |
+| `state_root` | 本机持久队列、处理台账和上传状态，例如 `outputs/capture-local/state`。 |
+| `work_root` | 本机清洗和转换临时目录，例如 `outputs/capture-local/work`。 |
+| `local_batch_root` | 本机24小时 LeRobot 批次目录，例如 `outputs/capture-local/batches`；不是服务器上传目标。 |
+
+三个本机目录必须分别位于工程的 `outputs/` 下，互不包含，也不能与输入或远端目录重叠。相对路径按工程根目录解析，与终端当前目录无关。
+
+当前上传方式使用**工作机已挂载的服务器文件系统**（例如SSHFS），不直接读取 `user@host:/path` 地址。先将服务器目录挂载到工作机，再填写挂载后的路径；服务器自身的 `/data/...` 路径不能直接当作工作机路径使用。服务器上的两个目标根目录需要预先存在且可写。
+
+首次部署时，`initial_history: {mode: none}` 会登记并跳过当时已有的包，仅接入之后出现的新包；若需要处理已有录制，应在首次启动前改为 `initial_history: {mode: all}`。`delete_raw_after_upload: true` 表示原包在服务器完整备份、校验和凭据落盘后自动从本机删除；希望保留本机原包则设为 `false`。
+
+修改完成后检查并使用**同一份配置**安装服务：
+
+```bash
+.venv/bin/python -m convest.capture.cli check-config --config configs/capture.local.yaml
+.venv/bin/python scripts/install_capture_service.py --config configs/capture.local.yaml --apply
+```
+
+已有服务运行时，先执行 `systemctl --user stop capture-convert-transfer.service`，等待当前处理和上传正常结束，再修改配置。相同配置继续使用原队列；更换输入、上传目标或历史接入策略等身份配置时，必须同时选择新的 `state_root`、`work_root`、`local_batch_root`，保留旧目录供查询和恢复。新队列不会继承旧队列的去重记录，先核对旧队列及目标数据，避免重复接入或同名冲突。
+
+#### 当前试验的输入路径
 
 | 路由 | 采集电脑 rosbag 存储目录 |
 | --- | --- |
@@ -70,7 +103,7 @@ journalctl --user -u capture-convert-transfer.service -f
 
 这四条路径作为当前开发试验输入；目录出现不等于录制完成，不能处理仍在写入的包。各路输入目录通过配置文件的 `routes[].source` 修改，支持在不同采集电脑上替换。
 
-### 服务器试验上传位置
+#### 当前试验的服务器上传位置
 
 以下是采集电脑通过服务器挂载访问的目标路径：
 
@@ -83,9 +116,11 @@ journalctl --user -u capture-convert-transfer.service -f
 
 上传的 rosbag 是采集得到的原始包；清洗后的 rosbag 属于本地处理中间产物，不代替原始包。上传目标根目录分别通过 `remote_raw_root` 和 `remote_dataset_root` 配置，路由由各项 `robot` / `group` 决定；本次 `zmx-testing` 路径没有写死在程序中。这些路径是本机挂载路径，服务器原生路径或其他传输连接参数需在选定传输方式时另行配置。
 
+24小时批次命名为 `最小来源包号_最大来源包号_data_lerobot`（例如 `23_50_data_lerobot`），允许缺号，实际来源见台账。四路各自从首包成功加入起计时，不是每天固定零点上传。传输先写目标路由下的 `.uploading/<任务ID>/`，全部文件清单、大小和回读SHA-256通过后，才在同一文件系统内重命名为正式批次目录。下游只读取 `*_data_lerobot` 正式目录，忽略 `.uploading`、`.capture-transfer`、`.capture-ledgers` 等内部目录，避免读取上传中的数据。原始rosbag也使用暂存后发布机制。
+
 ### 运行边界
 
-- 服务器现有 `main` 服务与队列正常运行。本分支仅在采集电脑侧开发，当前不更改服务器生产服务、配置、队列或 NVMe 挂载。
+- `main` 用于服务器侧处理，本分支用于采集电脑侧处理；两者独立部署。安装工作机服务不操作服务器生产服务、配置、队列或 NVMe 挂载，服务器是否运行由服务器自身维护状态决定。
 - 本地处理和上传分别记录状态。上传队列应支持重启恢复、失败重试和去重；传输中断不能要求重新清洗、转换已经验证完成的数据。
 - 本地沿用现有输入检查、裁剪规则、转换与来源及输出校验，不为上传提速降低质量门槛。未通过校验的输出不能作为合格 LeRobot 上传。
 - 上传完成需核验内容完整性，再标记成功；未完成的传输不能作为已就绪数据暴露。原始 rosbag 和 LeRobot 的上传状态分别记录，并关联同一来源。
@@ -111,8 +146,8 @@ journalctl --user -u capture-convert-transfer.service -f
 需要 Python 3.11+。转换不依赖 ROS 安装；生成预览另需 PATH 中可用的 `ffmpeg` 和 `ffprobe`。
 
 ```bash
-git clone https://github.com/ma39nong/convert_data_job-worker.git
-cd convert_data_job-worker
+git clone --branch Auto-convert-transfer-data ssh://git@gitlab.litchibot.top:2222/fruit-infra/data-auto-processing.git
+cd data-auto-processing
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[conversion,preview]'

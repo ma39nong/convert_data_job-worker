@@ -1,0 +1,20 @@
+{
+  "source": "user-provided pi05-pipeline/2026-10-19-prefect-docker-cleaning/src/steps/adatempo on data server",
+  "copied_date": "2026-10-22",
+  "original_sha256": {
+    "algorithm.py": "94eab9f47a1bc4ccf4dc0f2eec44ef61a8d621dbd2e83053cfa76e2ff2083f41",
+    "alignment.py": "dcf071140b1a3177a0f66ffffbc8f54c3a13bab49ebcdf416a7b83f4e35313c1",
+    "lerobot_io.py": "166e25333d2989a30e84542592776cd1bd4af7aaf6c493fab727763893c63004",
+    "lerobot_main.py": "60903d945fae29312d528bb1562664610743f9798ac22410f4cc1920da9159ad",
+    "lerobot_checks.py": "ce1e323628ec1000316e145a0fbb5385c7b92830997b8dfe7b7099015f0de6f7",
+    "lerobot_video.py": "33c86c7708eb234fe87f264b5f6d56732eb1beaddde9a0683cb22094ae7ec7bc",
+    "_common.py": "667ef995dc1ce53e50276c4435f7cf617bf8aacf97666680f0e70d2bf8eb6eaa"
+  },
+  "changes": [
+    "local package imports",
+    "preserve native Sharpa116/58 and Wuji108/54; no cross-hand mapping",
+    "accept recorded two-arm engagement without fabricating hand flags",
+    "dimension-neutral summary",
+    "support original minimum two-frame episodes without discarding trajectories"
+  ]
+}

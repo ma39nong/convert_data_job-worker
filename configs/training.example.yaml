@@ -1,0 +1,21 @@
+# Copy to training.local.yaml and configure your own training server/namespace.
+schema_version: 1
+# May point to the existing live capture config in another checkout; read only.
+capture_config: configs/capture.daily.yaml
+state_root: outputs/training/state
+output_root: outputs/training/datasets
+poll_seconds: 60
+retry_seconds: 300
+workers: 1
+cmax: 3.0
+min_free_gib: 8
+training_target:
+  transport: ssh
+  # Host alias and identity files in ~/.ssh/config are respected.
+  host: 47.116.73.163
+  port: 28
+  user: mengxiang
+  # SERVER path. Replace mengxiang for your namespace, e.g. tairan/junyu/zhiwei.
+  dataset_root: /home/mengxiang/workspace/data
+  python: python3
+  rsync: rsync

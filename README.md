@@ -8,9 +8,61 @@
 
 处理阶段原始数据以只读方式访问；采集端daily模式在服务器备份核验通过后释放本机原始副本。裁剪、转换和校验均可独立运行，也可通过可恢复的本地 job 串联执行。
 
-## 本分支：采集电脑本地处理与排队上传
+## 本分支：本地清洗、24小时批次、normal/speedup与训练服务器上传
 
-分支名：`Auto-convert-transfer-data`。本分支面向录制数据的采集电脑：发现本机新生成的 rosbag，确认录制完成并通过稳定性及完整性检查后，在本机清洗、转换和校验，最后将原始 rosbag 与通过校验的 LeRobot 数据加入上传队列，传到服务器对应目录。
+分支名：`clean-covert-normal-speedup`，从 `Auto-convert-transfer-data` 继续开发。
+原始rosbag备份、备份核验后的本机原始释放、完整24小时LeRobot向data服务器上传，均沿用已有链路。
+新增独立本地后处理服务：只读取已经完整封存的本地24小时批次，生成normal和speedup，校验后将两版上传训练服务器。
+
+```text
+rosbag → 本地清洗/转换/校验
+  ├─ 原始rosbag → data服务器（既有链路）
+  └─ 本地24小时完整LeRobot封存
+       ├─ 完整LeRobot → data服务器（既有链路）
+       └─ 本地normal → 本地AdaTempo speedup → 两版均上传训练服务器
+```
+
+**手型与维度保持原样**：Sharpa为state116/action58，Wuji为state108/action54；保留关节名称、顺序及全部关节维度，不做跨手型映射。
+normal只移除训练不使用的深度、触觉和额外审计数组，保留完整轨迹/帧及RGB视频字节；speedup保留全部轨迹，按1–3倍率范围进行时间重采样，视频分辨率及30Hz保持，重新编码视频并重算索引/统计。
+记录的双臂engaged状态原样保留，不凭空填充双手engaged。
+
+训练服务器输出明确区分机器人、A/B、批次及两个版本：
+
+```text
+/home/<个人目录>/workspace/data/
+  sharpa/A/<批次名>--<批次ID>--<版本标识>/normal/
+  sharpa/A/<批次名>--<批次ID>--<版本标识>/speedup/
+  sharpa/B/...
+  wuji/A/...
+  wuji/B/...
+```
+
+`mengxiang`只是示例个人目录，其他人可使用`tairan`、`junyu`、`zhiwei`等；修改`training_target.dataset_root`为本人服务器上的`/home/<个人目录>/workspace/data`。
+SSH登录账号`training_target.user`与个人目录分别配置，两者不必相同；程序自动追加`sharpa`或`wuji`及后续层级，不要在目标根里重复填写机器人名称。
+支持SSH（例如`47.116.73.163:28`，使用已有SSH配置和密钥）或本地已挂载的训练服务器目录。data服务器的SSHFS配置与训练服务器的SSH上传配置互不替代。
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e '.[conversion,training]'
+cp configs/training.example.yaml configs/training.local.yaml
+# 按本人环境修改capture_project、capture_config及training_target。
+.venv/bin/python -m convest.training.cli check-config --config configs/training.local.yaml
+# 先预览服务；加--apply才安装并启动新的独立用户服务。
+.venv/bin/python scripts/install_training_service.py --config configs/training.local.yaml
+.venv/bin/python scripts/install_training_service.py --config configs/training.local.yaml --apply
+systemctl --user status capture-normal-speedup.service
+.venv/bin/python -m convest.training.cli status --config configs/training.local.yaml
+```
+
+已有采集服务在另一目录运行时，`capture_project`填该采集工程的绝对路径，`capture_config`填原配置的绝对路径。
+后处理从上游工程自身加载配置，保持其路径及指纹，不重建原队列、不重置24小时计时；后处理自身有独立状态、工作目录和上传队列。
+只有本地批次catalog、匹配generation的封存校验和seal记录全部通过才处理；不等待向data服务器上传完成，也不处理尚在积累的批次。
+训练端整对normal/speedup先暂存、完整SHA256回读校验后原子发布，目标冲突不覆盖；上传失败可续传，不重新加工。
+两版均只上传，不自动启动训练；选择一个固定版本并使用对应数据重新计算训练norm_stats。详见[部署与语义说明](docs/normal_speedup.md)。
+
+## 继承的采集电脑本地处理与排队上传
+
+以下为原 `Auto-convert-transfer-data` 的采集功能，本分支完整保留：发现本机新生成的 rosbag，确认录制完成并通过稳定性及完整性检查后，在本机清洗、转换和校验，最后将原始 rosbag 与通过校验的 LeRobot 数据加入上传队列，传到data服务器对应目录。
 
 ```text
 采集电脑录制 rosbag
@@ -146,7 +198,7 @@ cp configs/capture.daily.yaml configs/capture.local.yaml
 需要 Python 3.11+。转换不依赖 ROS 安装；生成预览另需 PATH 中可用的 `ffmpeg` 和 `ffprobe`。
 
 ```bash
-git clone --branch Auto-convert-transfer-data ssh://git@gitlab.litchibot.top:2222/fruit-infra/data-auto-processing.git
+git clone --branch clean-covert-normal-speedup ssh://git@gitlab.litchibot.top:2222/fruit-infra/data-auto-processing.git
 cd data-auto-processing
 python3 -m venv .venv
 source .venv/bin/activate

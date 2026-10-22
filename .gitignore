@@ -6,5 +6,6 @@ outputs/
 *.partial/
 .cache/
 configs/ingest.server.yaml
+configs/training.local.yaml
 deploy/wheels/
 runtime/

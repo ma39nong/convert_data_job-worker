@@ -1,0 +1,135 @@
+{
+  "status": "passed",
+  "recorded_at": "2026-10-22T17:11:39.335372+08:00",
+  "historical_coordinator_commit": "6d78cb08cc2d652e16c2f1fd180deb1be184a2d1",
+  "tests": {
+    "passed": 249,
+    "skipped": 7,
+    "historical_tests": 5,
+    "regression_log": "outputs/training-validation/historical-regression.log"
+  },
+  "source_scope": "Two explicitly selected, immutable ready Sharpa generations from the data server; no upstream sealing or queue changes",
+  "groups": [
+    {
+      "group": "A",
+      "sources": 41,
+      "normal_frames": 37145,
+      "speedup_frames": 27402,
+      "dimensions": {
+        "state": 116,
+        "action": 58
+      },
+      "bytes": {
+        "normal": 264913854,
+        "speedup": 298823934
+      },
+      "training_root": "/home/mengxiang/workspace/data/sharpa/A/54_120_data_lerobot--batch-000001--e1f8de59549f8711",
+      "remote_receipt": "/mnt/data/users/mengxiang/workspace/data/.training-transfer/36f05a17750df80452b36c581bb85f3381d92bfd7408e1b5f062f8ba98251939/e1f8de59549f8711dcfb27feba1fea1c8bc85146ed96fbeb1a094b7e17c2f93f.json",
+      "all_remote_files_sha256": "passed",
+      "local_normal_validation": {
+        "episodes": 41,
+        "frames": 37145,
+        "videos": 123,
+        "native_dimensions": [
+          116,
+          58
+        ],
+        "all_values_and_video_bytes_checked": true,
+        "full_video_decode_and_pts": true
+      },
+      "local_speedup_validation": {
+        "episodes": 41,
+        "frames": 27402,
+        "videos": 123,
+        "all_tables_mappings_stats_and_video_pts_checked": true
+      },
+      "source_cache_verification": {
+        "status": "passed",
+        "complete_source_files_sha256": true,
+        "retained_source_chunks_match_verified_full_input": true,
+        "files": 168,
+        "bytes": 6834465772,
+        "cache": "/mnt/data/users/mengxiang/workspace/data/sharpa/A/54_120_data_lerobot"
+      },
+      "transform_recipe": "84f8a4674498fcf5b6842c005de9b586b02f4f2264213fa311f7bf14bb3c13c3",
+      "source_generation": "/data/data-fruits/real/harvest-tomato/data/data-lerobot/sharpa/A/.ingest/streams/batch-000001/.worker-generations/current/gen-pruned-80717a142ac54084a5e9ff1126db13c8"
+    },
+    {
+      "group": "B",
+      "sources": 8,
+      "normal_frames": 10607,
+      "speedup_frames": 7450,
+      "dimensions": {
+        "state": 116,
+        "action": 58
+      },
+      "bytes": {
+        "normal": 77845257,
+        "speedup": 83717079
+      },
+      "training_root": "/home/mengxiang/workspace/data/sharpa/B/56_106_data_lerobot--batch-000001--ba765ddf94aef37c",
+      "remote_receipt": "/mnt/data/users/mengxiang/workspace/data/.training-transfer/36f05a17750df80452b36c581bb85f3381d92bfd7408e1b5f062f8ba98251939/ba765ddf94aef37cdb885635ebf5918b037c37d5b0e304afb8eafd92e093bec3.json",
+      "all_remote_files_sha256": "passed",
+      "local_normal_validation": {
+        "episodes": 8,
+        "frames": 10607,
+        "videos": 24,
+        "native_dimensions": [
+          116,
+          58
+        ],
+        "all_values_and_video_bytes_checked": true,
+        "full_video_decode_and_pts": true
+      },
+      "local_speedup_validation": {
+        "episodes": 8,
+        "frames": 7450,
+        "videos": 24,
+        "all_tables_mappings_stats_and_video_pts_checked": true
+      },
+      "source_cache_verification": {
+        "status": "passed",
+        "complete_source_files_sha256": true,
+        "retained_source_chunks_match_verified_full_input": true,
+        "files": 36,
+        "bytes": 1889498118,
+        "cache": "/mnt/data/users/mengxiang/workspace/data/sharpa/B/56_106_data_lerobot"
+      },
+      "transform_recipe": "84f8a4674498fcf5b6842c005de9b586b02f4f2264213fa311f7bf14bb3c13c3",
+      "source_generation": "/data/data-fruits/real/harvest-tomato/data/data-lerobot/sharpa/B/.ingest/streams/batch-000001/.worker-generations/current/gen-00000008-6a28cf71826a414aa746f942613f620e"
+    }
+  ],
+  "totals": {
+    "sources": 49,
+    "normal_frames": 47752,
+    "speedup_frames": 34852,
+    "normal_bytes": 342759111,
+    "speedup_bytes": 382541013,
+    "original_core_bytes": 8723963890
+  },
+  "all_transformations_executed_locally": true,
+  "remote_operations": "read-only full cache SHA256/range validation; byte-identical normal video copies; transfer validation and atomic publication",
+  "final_source_checks": [
+    {
+      "group": "A",
+      "source_inventory_and_metadata_unchanged": true,
+      "upstream_state": "active",
+      "generation": "/data/data-fruits/real/harvest-tomato/data/data-lerobot/sharpa/A/.ingest/streams/batch-000001/.worker-generations/current/gen-pruned-80717a142ac54084a5e9ff1126db13c8"
+    },
+    {
+      "group": "B",
+      "source_inventory_and_metadata_unchanged": true,
+      "upstream_state": "active",
+      "generation": "/data/data-fruits/real/harvest-tomato/data/data-lerobot/sharpa/B/.ingest/streams/batch-000001/.worker-generations/current/gen-00000008-6a28cf71826a414aa746f942613f620e"
+    }
+  ],
+  "original_full_datasets_preserved": true,
+  "regular_24h_policy_unchanged": true,
+  "data_server_processing_not_resumed": true,
+  "training_started": false,
+  "notes": [
+    "All 49 trajectories retained; no 108/54 cross-hand mapping.",
+    "Speedup compresses trajectory time; H264 CRF18 re-encoding can produce a larger video file than normal despite fewer frames.",
+    "Data-server upstream catalogues remain active exactly as before; this was a bounded, user-requested historical snapshot operation."
+  ]
+}

@@ -101,3 +101,24 @@ state_root含queue.sqlite3、discovery.json、progress.json及upload_progress.js
 ## 验收
 
 tests/test_training_pipeline.py覆盖四路原始数据备份及整批上传兼容、封存阻断、原生维度/名称/数值/RGB字节、AdaTempo全量映射与视频、失败恢复/不重算、目标冲突、远端哈希与路径保护、锁及所有权。scripts/validate_training_trial.py可复制已完成且来源校验通过的真实单包job，建立独立24小时试验批次，受控推进试验的now_ns后封存，使用正常CLI加工/可选SSH上传。该验收不改系统时钟或上游状态，不等于自然运行满24小时，也不启动训练。
+
+## 已有服务器历史批次的一次性处理
+
+`scripts/process_historical_training.py`用于用户明确选定的历史批次，不接入或改写常规24小时队列，也不把服务器仍为active的批次伪标记为sealed。它固定当前ready generation，并要求该generation已有完整输出校验、帧数/轨迹数及来源artifact清单。上游目录和批次状态均只读。
+
+此入口针对**训练服务器已保存同批次完整副本**的情况：在训练服务器只做原始完整副本的全文件SHA256核验，同时核对data服务器保留的Parquet列数据块及footer与已验证副本一致。深度、触觉等弃用大列无需搬到工作机；normal字段筛选、所有保留数值逐行比对、RGB哈希/完整解码、AdaTempo及全部输出验证仍在工作机执行。训练服务器不承担转换或编码计算。缺少或不匹配的完整副本会报错，不降低校验要求继续处理。
+
+```bash
+.venv/bin/python scripts/process_historical_training.py \
+  --filesystem-root /path/to/data-server-sftp-mount \
+  --source /server/path/to/data/data-lerobot/sharpa \
+  --groups A B \
+  --config configs/training.local.yaml \
+  --upload-workers 4
+```
+
+`filesystem-root`是服务器文件系统根在本机的挂载位置，`source`是服务器上的绝对Sharpa根路径；两者拼接后可读取A/B目录及其原生generation。当前一次最多选择每组的一个历史批次，多批次时拒绝隐式混合。
+
+结果位于`outputs/historical-sharpa/`，progress.json记录阶段，report.json保存最终结果。该入口可恢复已验证normal/speedup，重复上传保持完成清单字节不变；不会因重跑改写完成时间而产生目标冲突。输出使用与常规任务相同的机器人/A或B/批次版本/normal与speedup层级，独立版本标识避免覆盖完整数据。
+
+上传前可在训练服务器暂存区复制哈希完全相同的normal视频，不硬链接或修改原完整数据。其余文件用1–8条互不重叠的rsync文件列表并行传输；全部结束后仍由同一个远端完整清单/SHA256校验及原子发布入口提交。上传失败只重试传输，不重复编码；不自动删除原数据、完整副本或本机已验证派生结果。

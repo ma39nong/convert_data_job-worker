@@ -1,0 +1,135 @@
+{
+  "status": "passed",
+  "recorded_at": "2026-10-22T14:48:55.910267+08:00",
+  "implementation_commit": "8f47fe1903de025a388d72db4f15cc250d42700c",
+  "regression": {
+    "passed": 244,
+    "skipped": 7,
+    "new_tests": 11,
+    "log": "outputs/training-validation/regression-final.log"
+  },
+  "real_trial": {
+    "status": "passed",
+    "results": [
+      {
+        "robot": "sharpa",
+        "episode": "36_36_data_lerobot",
+        "state": "uploaded",
+        "local": "/home/user/convert_data_job-worker-normal-speedup/outputs/training-real-20261022-143354/datasets/sharpa/A/36_36_data_lerobot--batch-000001--3d759d4dab973a89",
+        "normal": {
+          "episodes": 1,
+          "frames": 807,
+          "videos": 3,
+          "native_dimensions": [
+            116,
+            58
+          ],
+          "all_values_and_video_bytes_checked": true,
+          "full_video_decode_and_pts": true
+        },
+        "speedup": {
+          "method": "adatempo",
+          "input_frames": 807,
+          "output_frames": 665,
+          "episodes": 1,
+          "cmin": 1.0,
+          "cmax": 3.0,
+          "fps": 30,
+          "validation": {
+            "episodes": 1,
+            "frames": 665,
+            "videos": 3,
+            "all_tables_mappings_stats_and_video_pts_checked": true
+          },
+          "implementation": "joint-command AdaTempo prototype; no robot evaluation",
+          "observations": "continuous state interpolated at source_index; recorded velocity interpolated without time scaling",
+          "actions": "recorded commands interpolated at action_source_index (next virtual time)",
+          "images_and_flags": "nearest source_index; source_timestamp_ns preserves that frame's exact integer",
+          "gripper_descriptor": "disabled; continuous hand commands already included in native-dimensional motion",
+          "video_encoding": "h264 yuv420p CRF 18; nearest input frame; uniform original fps"
+        },
+        "remote_logical": "/home/mengxiang/workspace/data/sharpa/A/36_36_data_lerobot--batch-000001--3d759d4dab973a89"
+      },
+      {
+        "robot": "wuji",
+        "episode": "23_23_data_lerobot",
+        "state": "uploaded",
+        "local": "/home/user/convert_data_job-worker-normal-speedup/outputs/training-real-20261022-143354/datasets/wuji/A/23_23_data_lerobot--batch-000001--d3c57a4672c18942",
+        "normal": {
+          "episodes": 1,
+          "frames": 1298,
+          "videos": 3,
+          "native_dimensions": [
+            108,
+            54
+          ],
+          "all_values_and_video_bytes_checked": true,
+          "full_video_decode_and_pts": true
+        },
+        "speedup": {
+          "method": "adatempo",
+          "input_frames": 1298,
+          "output_frames": 905,
+          "episodes": 1,
+          "cmin": 1.0,
+          "cmax": 3.0,
+          "fps": 30,
+          "validation": {
+            "episodes": 1,
+            "frames": 905,
+            "videos": 3,
+            "all_tables_mappings_stats_and_video_pts_checked": true
+          },
+          "implementation": "joint-command AdaTempo prototype; no robot evaluation",
+          "observations": "continuous state interpolated at source_index; recorded velocity interpolated without time scaling",
+          "actions": "recorded commands interpolated at action_source_index (next virtual time)",
+          "images_and_flags": "nearest source_index; source_timestamp_ns preserves that frame's exact integer",
+          "gripper_descriptor": "disabled; continuous hand commands already included in native-dimensional motion",
+          "video_encoding": "h264 yuv420p CRF 18; nearest input frame; uniform original fps"
+        },
+        "remote_logical": "/home/mengxiang/workspace/data/wuji/A/23_23_data_lerobot--batch-000001--d3c57a4672c18942"
+      }
+    ],
+    "source_datasets_unchanged": true,
+    "natural_24h_wait_tested": false,
+    "sealed_trial_batches": true,
+    "actual_ssh_upload_and_server_sha256": true,
+    "training_started": false,
+    "existing_capture_service_changed": false,
+    "config": "/home/user/convert_data_job-worker-normal-speedup/outputs/training-real-20261022-143354/training.yaml"
+  },
+  "live_handoff": {
+    "status": "passed",
+    "capture_fingerprint": "f2df16d0f64a7c0673208e1afbb385b5037fd54841d047bf5f8eb8225d664c2f",
+    "existing_capture_queue_owner_matches": true,
+    "capture_state_root": "/home/user/convert_data_job-worker/outputs/capture-daily/state",
+    "source_outputs": [
+      "/home/user/convert_data_job-worker/outputs/capture-daily/batches/sharpa/A",
+      "/home/user/convert_data_job-worker/outputs/capture-daily/batches/sharpa/B",
+      "/home/user/convert_data_job-worker/outputs/capture-daily/batches/wuji/A",
+      "/home/user/convert_data_job-worker/outputs/capture-daily/batches/wuji/B"
+    ],
+    "upstream_modules_changed": false,
+    "ssh": {
+      "host": "47.116.73.163",
+      "port": 28,
+      "dataset_root": "/home/mengxiang/workspace/data"
+    }
+  },
+  "deployment": {
+    "unit": "capture-normal-speedup.service",
+    "active": true,
+    "enabled": true,
+    "pid": 3151519,
+    "restarts": 0,
+    "upstream_unit": "capture-convert-transfer.service",
+    "upstream_pid_unchanged": 3386559,
+    "upstream_active": true,
+    "source_batch_state": "waiting_batch for all four routes; no formal batch exists yet",
+    "training_started": false
+  },
+  "limits": [
+    "Real acceptance used one Sharpa and one Wuji completed source-verified job, not a natural 24-hour production run.",
+    "Earlier in-development mixed-recipe trial is preserved in outputs/training-real-20261022-142732 and excluded from final acceptance. No original source dataset or upstream queue was changed."
+  ]
+}

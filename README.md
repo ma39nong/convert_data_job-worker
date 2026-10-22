@@ -60,6 +60,8 @@ systemctl --user status capture-normal-speedup.service
 训练端整对normal/speedup先暂存、完整SHA256回读校验后原子发布，目标冲突不覆盖；上传失败可续传，不重新加工。
 两版均只上传，不自动启动训练；选择一个固定版本并使用对应数据重新计算训练norm_stats。详见[部署与语义说明](docs/normal_speedup.md)。
 
+本次回归244项通过、7项跳过；真实Sharpa/Wuji各一条样本已完成本地两步加工、SSH上传及训练服务器全文件SHA256校验，原生维度保持。见[验收记录](docs/normal_speedup_validation.json)。24小时封存以受控试验时钟验证，不代表已运行满自然24小时。
+
 ## 继承的采集电脑本地处理与排队上传
 
 以下为原 `Auto-convert-transfer-data` 的采集功能，本分支完整保留：发现本机新生成的 rosbag，确认录制完成并通过稳定性及完整性检查后，在本机清洗、转换和校验，最后将原始 rosbag 与通过校验的 LeRobot 数据加入上传队列，传到data服务器对应目录。

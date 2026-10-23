@@ -80,7 +80,7 @@ def export(cfg,queue):
         for row in rows:
             route=routes[row['route']]
             row['local_original']=str(Path(route['source'])/row['episode'])
-            row['remote_original']=str(Path(cfg['remote_raw_root'])/route['robot']/route['group']/row['episode'])
+            row['remote_original']=str(Path(cfg.get('route_targets',{}).get(route['id'],{}).get('raw',str(Path(cfg['remote_raw_root'])/route['robot']/route['group'])))/row['episode'])
             for src,dest in [('converted_ns','converted_at'),('raw_uploaded_ns','raw_uploaded_at'),('raw_deleted_ns','raw_deleted_at'),('deadline_ns','batch_deadline_at'),('batch_uploaded_ns','batch_uploaded_at')]:
                 row[dest]=datetime.datetime.fromtimestamp(row[src]/1e9).astimezone().isoformat(timespec='seconds') if row.get(src) else ''
         durable_json(state/'recordings.json',{'updated_ns':time.time_ns(),'recordings':rows,'batches':batches})

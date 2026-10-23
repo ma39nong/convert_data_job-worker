@@ -1,0 +1,81 @@
+# 工作机 GUI · 第一版
+
+GUI 使用已有 ROSbag 清洗、30Hz LeRobot v2.1 和原生维度 normal/AdaTempo speedup 引擎。新代码在 `convest.gui`，不迁移旧队列、不重传历史训练数据、不启动训练。
+
+## 启动
+
+在工程目录安装好原有环境后：
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[conversion,training,test]'
+./scripts/start_gui.sh
+```
+
+打开 `http://127.0.0.1:8765`。无需 Node、Qt 或 tkinter。也可以指定 `--port 8766` 或 `--no-browser`。界面仅监听本机回环地址，禁止从局域网直接访问；带有同源和请求令牌校验。
+
+安装应用菜单/桌面启动器：
+
+```bash
+.venv/bin/python scripts/install_gui_launcher.py --desktop
+```
+
+如果本机原来装有两个后台服务，可明确接管：
+
+```bash
+.venv/bin/python scripts/install_gui_launcher.py --desktop --take-over
+```
+
+接管会正常停止并等待旧服务当前作业完成，再禁用 `capture-convert-transfer.service` 和 `capture-normal-speedup.service` 自启动。原配置、数据与队列保留，先前状态记录在 `outputs/gui/legacy-service-backup.json`。不应同时让旧后台服务和 GUI 监听相同录制目录。需要回退时，先在 GUI 停止全部任务并等收尾，再恢复原分支/服务；不要直接切换运行中的源码。
+
+## 使用
+
+1. 选择任务，或添加新任务；设置项目、Sharpa/Wuji、场景和本机录制目录。可选含 `A/`、`B/` 的父目录，也可单选 A 或 B。新任务默认创建独立空测试输入目录，用户自己的目录不会被重建。
+2. 浏览并选择 202 原始 ROSbag / 完整 LeRobot 路径，以及 28 normal / speedup 路径。界面不限于 tomato 目录浏览；当前转换器仅实现 Sharpa、Wuji，其他机器人类型需后续适配。默认路径只是可编辑初值。
+3. “按项目 / 手型 / 场景生成默认目标路径”只填表单；“新建场景”才会在选定服务器创建目录，默认自动带 A、B。
+4. 保存设置，再开始全部启用任务或单独开始一个任务。已有录制是否纳入、上传校验后是否释放原包，都可在任务中设置。
+5. 停止会暂停新作业，等待当前清洗、转换、校验或上传安全收尾。停止中仍显示进度，不能强杀后假报已停止。重新开始会继续原队列，不重复转换已完成成品。
+6. “重试失败项”需先停止任务；仅重置可重试的处理/上传项，质量排除、文件冲突不自动清除。
+
+关闭网页或本机 GUI 服务不会强杀已启动工作流。重新打开 GUI 会接管已有工作进程；要停止请使用界面停止按钮。机器重启后工作流默认不自动启动，队列保留，打开 GUI 后手动开始。
+
+## 路径布局
+
+每个任务的四个目标字段选择到 **场景目录**，后端只追加分组和包名：
+
+```text
+202 原包：<raw_root>/{A,B}/episodeN/
+202 完整包：<lerobot_root>/{A,B}/N_M_data_lerobot/
+28 normal：<normal_root>/{A,B}/<范围>--<批次>--<版本>/
+28 speedup：<speedup_root>/{A,B}/<范围>--<批次>--<版本>/
+```
+
+例如初值采用 `/data/data-demo/real/tomato/data/{rosbag,lerobot}/{sharpa,wuji}/<场景>`，训练侧采用 `/mnt/data/train_platform/datasets/tomato_<手型>/{normal,speedup}/<场景>`。登录用户名和存储目录相互独立；不会迁移个人 `workspace/data` 下的旧结果。
+
+SSH 使用本机已有配置和密钥，不读取或保存私钥/密码。需先通过普通 SSH 连接核实主机指纹；两服务器需有 `python3` 与 `rsync`，本机也需 `ssh`、`rsync`。连接测试会指出缺失工具。端口、用户、地址可编辑。
+
+## 数据规则
+
+- 原有 v3 双臂 100ms/1e-4rad 静止区间、图像 Header 拍摄时间、30Hz、质量阈值不变。
+- 稳定观察至少 60 秒，已结束录制才进入处理。转换和上传独立运行。
+- 24 小时滚动批次从该批首条处理开始计时，封存、完整校验后才上传完整 LeRobot，并交给 normal/speedup 引擎。GUI 没有提前封存正式批次的按钮。
+- Sharpa 116/58、Wuji 108/54，维数不映射。normal 保持全部轨迹/帧和 RGB 原字节；speedup 保持 30Hz/分辨率，减少轨迹帧，不承诺磁盘更小。
+- 上传通过 rsync 暂存、整目录全 SHA256 校验、刷盘、原子发布和凭据回读。不同内容的已有目录绝不覆盖。断线只重试上传。
+- 新布局将 normal 和 speedup 放在两个根下，因此两个根**分别原子发布**；训练队列只有两版都完成后才标记“已发布”。跨目录并非一次原子 rename；两版都通过后，会在两侧场景 A/B 下的 `.workflow-pairs/<批次>/` 发布 `completion.json`、完整来源与验证记录；消费端应以此双版本完成凭据为准。
+- 只有质量验证、202 原包完整 SHA256 和持久化凭据通过后，才按开关走原有隔离删除策略；备份失败保留原包。GUI 示例验收配置关闭删除，方便检查。
+- 202 的 `.workflow-transfer` 保存每个包的凭据；`.workflow-ledgers` 保存不可变 CSV/JSON 台账快照。上传失败不抹除记录。
+
+## 状态与记录
+
+- 本机配置：`outputs/gui/settings.json`。
+- 每任务/配置版本：`outputs/gui/runs/<任务ID>/<配置版本>/`。
+- 内含四个独立角色日志、capture/training SQLite 队列、实时 JSON、完整验收和上传凭据。
+- 修改输入、目标或关键选项会新建配置版本，旧版本原样保留；改任务显示名称不会开新队列。不能在任务运行或收尾时保存设置。
+- 当前传输显示已传/总字节、速度及估算剩余时间。校验或无可信速度时显示未知，持续监听没有伪造的“整体完成百分比”。批次显示真实封存倒计时。详细异常可展开日志。
+- 第一版页面显示当前配置版本，旧版本可通过界面记录路径查阅，暂未增加历史版本切换器。
+
+## 第一版验证与边界
+
+自动化测试覆盖原生维度、A/B 及场景路径、部分上传失败后续传、已有目标冲突不删原包、目录创建与路径拒绝、同源保护、进程接管与正常停止/恢复。另使用生成的测试录制，在独立隐藏场景中验证真实 SSH 到 202 和 28；具体证据在 `outputs/gui/acceptance/`。
+
+验收的 24h 阶段使用**仅测试代码注入的时钟**推动封存，不是自然连续 24 小时验收；正式 GUI 仍使用真实时钟与 24h。所有假设、现场结果和剩余项见 `docs/gui_v1_validation.md`。尚未针对真实 TB 级连续录制或机器断电开展长时间压力验证。

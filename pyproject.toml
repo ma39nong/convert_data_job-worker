@@ -19,6 +19,7 @@ preview = ["opencv-python-headless>=4.8"]
 bag-worker = "bag_worker.cli:main"
 convert-worker = "convest.cli:main"
 ingest-worker = "convest.ingest.cli:main"
+workflow-gui = "convest.gui.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -26,3 +27,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.setuptools.package-data]
+"convest.gui" = ["static/*.html", "static/*.css", "static/*.js"]

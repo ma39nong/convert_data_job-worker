@@ -1,0 +1,235 @@
+{
+  "status": "passed",
+  "scope": "synthetic 4-route GUI / real SSH acceptance",
+  "test_clock_only_for_24h_seal": true,
+  "scene": ".gui-validation-20261023-cebb99",
+  "tasks": [
+    {
+      "task": "task-8184dd4a1ebd",
+      "robot": "sharpa",
+      "runtime": "outputs/gui/runs/task-8184dd4a1ebd/8b578ed1bcdf6697f480",
+      "groups": [
+        "A",
+        "B"
+      ],
+      "jobs": 2,
+      "raw_uploads": 2,
+      "full_batch_uploads": 2,
+      "training_pairs": 2,
+      "processing_attempts": [
+        1,
+        1
+      ],
+      "stop_exit_codes": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "task": "task-623395c36b75",
+      "robot": "wuji",
+      "runtime": "outputs/gui/runs/task-623395c36b75/b5f5759f4b58ed5f3153",
+      "groups": [
+        "A",
+        "B"
+      ],
+      "jobs": 2,
+      "raw_uploads": 2,
+      "full_batch_uploads": 2,
+      "training_pairs": 2,
+      "processing_attempts": [
+        1,
+        1
+      ],
+      "stop_exit_codes": [
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "remote": [
+    {
+      "path": "/data/data-demo/real/tomato/data/rosbag/sharpa/.gui-validation-20261023-cebb99/A/episode900001",
+      "kind": "raw",
+      "receipt": "completed",
+      "files": 3
+    },
+    {
+      "path": "/data/data-demo/real/tomato/data/rosbag/sharpa/.gui-validation-20261023-cebb99/B/episode900001",
+      "kind": "raw",
+      "receipt": "completed",
+      "files": 3
+    },
+    {
+      "path": "/data/data-demo/real/tomato/data/lerobot/sharpa/.gui-validation-20261023-cebb99/A/900001_900001_data_lerobot",
+      "kind": "batch",
+      "receipt": "completed",
+      "files": 31,
+      "episodes": 1,
+      "frames": 17,
+      "dimensions": [
+        116,
+        58
+      ]
+    },
+    {
+      "path": "/data/data-demo/real/tomato/data/lerobot/sharpa/.gui-validation-20261023-cebb99/B/900001_900001_data_lerobot",
+      "kind": "batch",
+      "receipt": "completed",
+      "files": 31,
+      "episodes": 1,
+      "frames": 17,
+      "dimensions": [
+        116,
+        58
+      ]
+    },
+    {
+      "path": "/mnt/data/train_platform/datasets/tomato_sharpa/normal/.gui-validation-20261023-cebb99/A/900001_900001_data_lerobot--batch-000001--7e1f8fc5061bfbd7",
+      "kind": "normal",
+      "receipt": "completed",
+      "files": 10,
+      "episodes": 1,
+      "frames": 17,
+      "dimensions": [
+        116,
+        58
+      ],
+      "pair_completion_verified": true
+    },
+    {
+      "path": "/mnt/data/train_platform/datasets/tomato_sharpa/speedup/.gui-validation-20261023-cebb99/A/900001_900001_data_lerobot--batch-000001--7e1f8fc5061bfbd7",
+      "kind": "speedup",
+      "receipt": "completed",
+      "files": 11,
+      "episodes": 1,
+      "frames": 15,
+      "dimensions": [
+        116,
+        58
+      ],
+      "pair_completion_verified": true
+    },
+    {
+      "path": "/mnt/data/train_platform/datasets/tomato_sharpa/normal/.gui-validation-20261023-cebb99/B/900001_900001_data_lerobot--batch-000001--48ad08802c8d681f",
+      "kind": "normal",
+      "receipt": "completed",
+      "files": 10,
+      "episodes": 1,
+      "frames": 17,
+      "dimensions": [
+        116,
+        58
+      ],
+      "pair_completion_verified": true
+    },
+    {
+      "path": "/mnt/data/train_platform/datasets/tomato_sharpa/speedup/.gui-validation-20261023-cebb99/B/900001_900001_data_lerobot--batch-000001--48ad08802c8d681f",
+      "kind": "speedup",
+      "receipt": "completed",
+      "files": 11,
+      "episodes": 1,
+      "frames": 15,
+      "dimensions": [
+        116,
+        58
+      ],
+      "pair_completion_verified": true
+    },
+    {
+      "path": "/data/data-demo/real/tomato/data/rosbag/wuji/.gui-validation-20261023-cebb99/A/episode900001",
+      "kind": "raw",
+      "receipt": "completed",
+      "files": 3
+    },
+    {
+      "path": "/data/data-demo/real/tomato/data/rosbag/wuji/.gui-validation-20261023-cebb99/B/episode900001",
+      "kind": "raw",
+      "receipt": "completed",
+      "files": 3
+    },
+    {
+      "path": "/data/data-demo/real/tomato/data/lerobot/wuji/.gui-validation-20261023-cebb99/A/900001_900001_data_lerobot",
+      "kind": "batch",
+      "receipt": "completed",
+      "files": 31,
+      "episodes": 1,
+      "frames": 17,
+      "dimensions": [
+        108,
+        54
+      ]
+    },
+    {
+      "path": "/data/data-demo/real/tomato/data/lerobot/wuji/.gui-validation-20261023-cebb99/B/900001_900001_data_lerobot",
+      "kind": "batch",
+      "receipt": "completed",
+      "files": 31,
+      "episodes": 1,
+      "frames": 17,
+      "dimensions": [
+        108,
+        54
+      ]
+    },
+    {
+      "path": "/mnt/data/train_platform/datasets/tomato_wuji/normal/.gui-validation-20261023-cebb99/A/900001_900001_data_lerobot--batch-000001--502b031aee217b88",
+      "kind": "normal",
+      "receipt": "completed",
+      "files": 10,
+      "episodes": 1,
+      "frames": 17,
+      "dimensions": [
+        108,
+        54
+      ],
+      "pair_completion_verified": true
+    },
+    {
+      "path": "/mnt/data/train_platform/datasets/tomato_wuji/speedup/.gui-validation-20261023-cebb99/A/900001_900001_data_lerobot--batch-000001--502b031aee217b88",
+      "kind": "speedup",
+      "receipt": "completed",
+      "files": 11,
+      "episodes": 1,
+      "frames": 15,
+      "dimensions": [
+        108,
+        54
+      ],
+      "pair_completion_verified": true
+    },
+    {
+      "path": "/mnt/data/train_platform/datasets/tomato_wuji/normal/.gui-validation-20261023-cebb99/B/900001_900001_data_lerobot--batch-000001--74ba30e18ef78e43",
+      "kind": "normal",
+      "receipt": "completed",
+      "files": 10,
+      "episodes": 1,
+      "frames": 17,
+      "dimensions": [
+        108,
+        54
+      ],
+      "pair_completion_verified": true
+    },
+    {
+      "path": "/mnt/data/train_platform/datasets/tomato_wuji/speedup/.gui-validation-20261023-cebb99/B/900001_900001_data_lerobot--batch-000001--74ba30e18ef78e43",
+      "kind": "speedup",
+      "receipt": "completed",
+      "files": 11,
+      "episodes": 1,
+      "frames": 15,
+      "dimensions": [
+        108,
+        54
+      ],
+      "pair_completion_verified": true
+    }
+  ],
+  "originals_preserved": true,
+  "existing_production_data_untouched": true,
+  "training_started": false
+}

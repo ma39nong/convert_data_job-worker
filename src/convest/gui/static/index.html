@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>数据工作流 · 自动清洗与上传</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand-icon">↗</div>
+      <div><strong>数据工作流</strong><small>采集数据，准备就绪。</small></div>
+      <span class="branch">工作机控制台 · V1</span>
+      <div class="header-right">
+        <span id="server-state" class="pill">连接本机…</span
+        ><span id="disk" class="muted"></span>
+      </div>
+    </header>
+    <main>
+      <div class="page-title">
+        <div>
+          <p class="eyebrow">DATA PREPARATION WORKSPACE</p>
+          <h1>从录制，到可训练。</h1>
+          <p class="muted">
+            选择数据源和存储目录，清洗、转换、校验与上传在这里完成。
+          </p>
+        </div>
+        <div class="actions">
+          <span id="dirty" class="dirty hidden">有未保存设置</span
+          ><button id="save">保存设置</button
+          ><button id="stop" class="danger-outline">■ 停止工作流</button
+          ><button id="start" class="primary">▶ 开始工作流</button>
+        </div>
+      </div>
+      <details class="connections">
+        <summary>
+          <span>服务器连接</span
+          ><span id="data-chip" class="connection-chip">202 数据服务器</span
+          ><span id="train-chip" class="connection-chip">28 训练服务器</span
+          ><span class="summary-hint">SSH 密钥认证 · 展开修改</span>
+        </summary>
+        <div class="connection-grid">
+          <div>
+            <h3>202 · 数据服务器</h3>
+            <div class="three-fields">
+              <label
+                >地址<input data-server="data_server" data-key="host" /></label
+              ><label
+                >SSH 用户<input
+                  data-server="data_server"
+                  data-key="user" /></label
+              ><label
+                >端口<input
+                  type="number"
+                  data-server="data_server"
+                  data-key="port"
+              /></label>
+            </div>
+            <button data-check="data_server">测试连接</button
+            ><span id="data-result" class="connection-result"></span>
+          </div>
+          <div>
+            <h3>28 · 训练服务器</h3>
+            <div class="three-fields">
+              <label
+                >地址<input
+                  data-server="training_server"
+                  data-key="host" /></label
+              ><label
+                >SSH 用户<input
+                  data-server="training_server"
+                  data-key="user" /></label
+              ><label
+                >端口<input
+                  type="number"
+                  data-server="training_server"
+                  data-key="port"
+              /></label>
+            </div>
+            <button data-check="training_server">测试连接</button
+            ><span id="training-result" class="connection-result"></span>
+          </div>
+        </div>
+      </details>
+      <p id="demo-notice" class="demo-notice hidden">
+        示例输入目录 ·
+        当前使用本机生成的测试路径。正式使用前，请重新选择录制目录和目标场景。
+      </p>
+      <section class="workspace">
+        <article class="card sources">
+          <div class="card-head">
+            <div>
+              <span class="step">01</span>
+              <h2>本机读取</h2>
+            </div>
+            <span class="tag">自动识别 A / B</span>
+          </div>
+          <div id="task-list" class="task-list"></div>
+          <button id="add-task" class="add-task">＋ 添加任务</button>
+          <div class="task-editor">
+            <div class="editor-title">
+              <h3>当前任务</h3>
+              <button id="remove-task" class="text-button">移除</button>
+            </div>
+            <label
+              >任务名称<input
+                id="name"
+                data-task="name"
+                placeholder="例如：番茄 · Sharpa · 场景一"
+            /></label>
+            <div class="two-fields">
+              <label>项目<input id="project" data-task="project" /></label
+              ><label
+                >手型<select id="robot" data-task="robot">
+                  <option value="sharpa">Sharpa · 116 / 58</option>
+                  <option value="wuji">Wuji · 108 / 54</option>
+                </select></label
+              >
+            </div>
+            <label>场景名称<input id="scene" data-task="scene" /></label
+            ><label
+              >录制父目录
+              <div class="path-field">
+                <input id="source" data-task="source" /><button
+                  data-browse="source"
+                  aria-label="浏览本机输入目录"
+                >
+                  浏览
+                </button>
+              </div></label
+            >
+            <p class="hint">
+              选择包含 A、B 的父目录，也可以单独选择 A 或 B。仅处理完整且稳定的
+              episode 录制。
+            </p>
+            <label class="checkbox"
+              ><input
+                type="checkbox"
+                data-task="include_existing"
+              />包含目录中已有的录制</label
+            ><label class="checkbox"
+              ><input type="checkbox" data-task="delete_raw" />202
+              备份校验后释放本机原包</label
+            ><label class="checkbox"
+              ><input type="checkbox" data-task="enabled" />启用此任务</label
+            >
+          </div>
+        </article>
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <span class="step">02</span>
+              <h2>202 · 完整数据</h2>
+            </div>
+            <span class="tag blue">SSH</span>
+          </div>
+          <div class="server-illustration">
+            <span>⌁</span>
+            <div>
+              <strong>备份与保留</strong>
+              <p>原始录制 + 完整 LeRobot 数据</p>
+            </div>
+          </div>
+          <label
+            >原始 ROSbag 存储目录
+            <div class="path-field">
+              <input id="raw_root" data-task="raw_root" /><button
+                data-browse="raw_root"
+              >
+                浏览
+              </button>
+            </div></label
+          >
+          <p class="hint">
+            按 A / B 保存。备份与校验完成后，再按设置释放本机原包。
+          </p>
+          <label
+            >完整 LeRobot 存储目录
+            <div class="path-field">
+              <input id="lerobot_root" data-task="lerobot_root" /><button
+                data-browse="lerobot_root"
+              >
+                浏览
+              </button>
+            </div></label
+          >
+          <p class="hint">本机清洗、转换并校验，累计 24 小时封存后上传。</p>
+          <div class="destination-preview" id="data-preview"></div>
+          <div class="note">
+            <span>✓</span>
+            <p>原包与成品逐文件校验<br />中断后保留队列，可继续上传</p>
+          </div>
+        </article>
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <span class="step">03</span>
+              <h2>28 · 训练数据</h2>
+            </div>
+            <span class="tag violet">normal + speedup</span>
+          </div>
+          <div class="server-illustration purple">
+            <span>◈</span>
+            <div>
+              <strong>两版成品，分别存储</strong>
+              <p>保留各手型的原生维度</p>
+            </div>
+          </div>
+          <label
+            >normal 存储目录
+            <div class="path-field">
+              <input id="normal_root" data-task="normal_root" /><button
+                data-browse="normal_root"
+              >
+                浏览
+              </button>
+            </div></label
+          >
+          <p class="hint">
+            保留全部轨迹与帧，移除训练暂不使用的深度和触觉字段。
+          </p>
+          <label
+            >speedup 存储目录
+            <div class="path-field">
+              <input id="speedup_root" data-task="speedup_root" /><button
+                data-browse="speedup_root"
+              >
+                浏览
+              </button>
+            </div></label
+          >
+          <p class="hint">在本机做轨迹时间压缩，同步处理图像，保持原始帧率。</p>
+          <div class="destination-preview" id="train-preview"></div>
+          <div class="note violet-note">
+            <span>✓</span>
+            <p>
+              等待本机 24h 批次封存后自动衔接<br />上传完成后保留两版，不自动训练
+            </p>
+          </div>
+        </article>
+      </section>
+      <div class="under-workspace">
+        <span>所有路径均可重新浏览和选择，设置仅保存在本机。</span
+        ><button id="generate-paths" class="text-button">
+          按项目 / 手型 / 场景生成默认目标路径 ↗
+        </button>
+      </div>
+      <section class="card progress-card">
+        <div class="progress-heading">
+          <div>
+            <p class="eyebrow">LIVE WORKFLOW</p>
+            <h2 id="progress-title">任务进度</h2>
+          </div>
+          <div class="actions">
+            <span id="run-state" class="pill">尚未开始</span
+            ><button id="retry-one">重试失败项</button
+            ><button id="start-one">仅开始此任务</button
+            ><button id="stop-one">停止此任务</button>
+          </div>
+        </div>
+        <div id="metrics" class="metrics"></div>
+        <div class="pipeline">
+          <span>稳定检查</span><b>→</b><span>清洗 · 转换 · 校验</span><b>→</b
+          ><span>24h 批次封存</span><b>→</b><span>normal / speedup</span><b>→</b
+          ><span>上传并校验</span>
+        </div>
+        <div id="current-phase" class="current-phase"></div>
+        <div
+          id="workflow-error"
+          class="workflow-error hidden"
+          role="alert"
+        ></div>
+        <div id="transfer-grid" class="transfer-grid"></div>
+        <div class="record-head">
+          <h3>录制与批次记录</h3>
+          <span id="batch-clock" class="hint"></span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>录制 / 批次</th>
+                <th>分组</th>
+                <th>本机处理</th>
+                <th>上传状态</th>
+                <th>详情</th>
+              </tr>
+            </thead>
+            <tbody id="records"></tbody>
+          </table>
+        </div>
+        <details class="logs">
+          <summary>运行日志与详细记录<span>自动刷新</span></summary>
+          <pre id="log-output">尚未开始</pre>
+          <div id="runtime-path" class="hint"></div>
+        </details>
+        <p class="hint" id="last-updated"></p>
+      </section>
+      <footer>
+        本机处理 · 24 小时滚动批次 · 全文件 SHA256 校验 · 断点续传
+        <span>所有测试和运行记录保存在工程 outputs/gui 下</span>
+      </footer>
+    </main>
+    <dialog id="browser-dialog">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow" id="browser-host">LOCAL FILES</p>
+          <h2>选择目录</h2>
+        </div>
+        <button
+          id="close-browser"
+          class="icon-button"
+          aria-label="关闭目录浏览"
+        >
+          ×
+        </button>
+      </div>
+      <div class="browser-navigation">
+        <button id="browser-up" aria-label="上一级">↑</button
+        ><input id="browser-path" aria-label="目录路径" /><button
+          id="browser-go"
+        >
+          跳转
+        </button>
+      </div>
+      <div id="browser-error" class="browser-error"></div>
+      <div id="browser-entries" class="browser-entries"></div>
+      <div id="mkdir-area">
+        <input id="folder-name" placeholder="新场景目录名称" /><label
+          class="checkbox"
+          ><input id="with-ab" type="checkbox" checked />自动创建 A / B</label
+        ><button id="mkdir">新建场景</button>
+      </div>
+      <div class="dialog-footer">
+        <span class="hint">可浏览其他项目；仅在点击“新建场景”时创建目录。</span
+        ><button id="choose-folder" class="primary">选择当前目录</button>
+      </div>
+    </dialog>
+    <div id="toast" role="status"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

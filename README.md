@@ -596,3 +596,13 @@ python scripts/check_rgb_source.py --dataset /path/to/dataset --output outputs/n
 ```
 
 该抽查报告 MAE/PSNR，不新增质量门槛，也不将有损 RGB 宣称为逐像素无损。清洗与 30 Hz 对齐本来就会删除等待段、丢弃未选中的高频消息或重复低频图像；LeRobot 不是所有 ROS 话题的逐消息备份，原始 rosbag 的服务器备份保留；采集端daily模式在备份核验后释放本机副本。执行来源比较需要当时的清洗包仍可访问；自动接收器在删除中间包前完成比较并归档结果。
+
+## 工作机 GUI（auto-convert-transfer-ui）
+
+```bash
+./scripts/start_gui.sh
+```
+
+本机浏览器打开 `http://127.0.0.1:8765`。可配置多任务、本机 A/B 输入、202 原包与完整 LeRobot 目录、28 normal/speedup 独立目录；支持 SSH 文件夹浏览、新建场景自动带 A/B、保存、开始、正常停止、断点续传与实时日志。沿用既有清洗和 24h 批次逻辑，保留 Sharpa 116/58、Wuji 108/54，不自动训练。
+
+默认创建空测试输入，不自动启动任务。新 GUI 配置和队列独立放在 `outputs/gui/`，不接管旧队列或迁移旧结果。目录、用户和端口都可编辑。安装与旧服务接管、路径层级、正常停止行为和验收边界见 [GUI 使用文档](docs/gui.md)。

@@ -245,6 +245,7 @@ h3 {
 .workspace {
   display: grid;
   grid-template-columns: 1.05fr 1fr 1fr;
+  grid-template-rows: minmax(0, 1fr) max-content;
   gap: 12px;
   align-items: stretch;
   margin-bottom: 14px;
@@ -261,8 +262,8 @@ h3 {
   grid-row: 2;
   display: grid;
   grid-template-columns: minmax(85px, 0.7fr) minmax(0, 1.3fr) minmax(0, 1fr);
-  gap: 20px;
-  padding: 18px 20px;
+  gap: 0;
+  padding: 10px 0;
   align-content: center;
 }
 .control-heading {
@@ -271,7 +272,7 @@ h3 {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 6px 12px;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
   font-size: 12px;
   color: #65748a;
   overflow-wrap: anywhere;
@@ -281,48 +282,49 @@ h3 {
 }
 .workflow-controls .actions {
   flex-wrap: nowrap;
-  justify-content: flex-end;
+  justify-content: center;
 }
 .workflow-controls .control-group {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  justify-content: center;
+  align-items: center;
+  padding: 0 16px;
 }
 .workflow-controls .control-heading {
-  justify-content: flex-end;
+  justify-content: center;
 }
 .save-controls {
-  align-items: flex-start;
+  align-items: center;
 }
 .save-controls .dirty {
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 .workflow-controls button {
   white-space: nowrap;
 }
 .workflow-controls button {
   font-size: 12px;
-  padding: 9px 12px;
+  padding: 7px 12px;
 }
 .workflow-controls .control-group + .control-group {
   border-left: 1px solid var(--border);
-  padding-left: 20px;
 }
 @media (min-width: 781px) and (max-width: 1200px) {
   .workspace > .workflow-controls {
     grid-template-columns: minmax(72px, 1fr) auto auto;
-    gap: 8px;
-    padding: 12px;
+    gap: 0;
+    padding: 10px 0;
   }
-  .workflow-controls .control-group + .control-group {
-    padding-left: 8px;
+  .workflow-controls .control-group {
+    padding: 0 8px;
   }
   .workflow-controls .actions {
     gap: 5px;
   }
   .workflow-controls button {
     font-size: 11px;
-    padding: 8px 4px;
+    padding: 7px 4px;
   }
   .workflow-controls .control-heading {
     font-size: 11px;
@@ -990,6 +992,7 @@ dialog::backdrop {
   }
   .workspace {
     grid-template-columns: 1fr;
+    grid-template-rows: none;
   }
   .workspace > .sources,
   .workspace > .destination-card,
@@ -999,13 +1002,16 @@ dialog::backdrop {
   }
   .workspace > .workflow-controls {
     grid-template-columns: 1fr;
-    gap: 16px;
-    padding: 16px;
+    gap: 0;
+    padding: 10px 0;
+  }
+  .workflow-controls .control-group {
+    padding: 8px 16px;
   }
   .workflow-controls .control-group + .control-group {
     border-left: 0;
     border-top: 1px solid var(--border);
-    padding: 14px 0 0;
+    padding: 14px 16px 8px;
   }
   .header-right #disk {
     display: none;

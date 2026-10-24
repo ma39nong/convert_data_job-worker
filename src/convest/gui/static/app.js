@@ -348,8 +348,18 @@ function renderProgress() {
       false,
       uploads.filter((u) => u.dataset_done).length + " 批完成",
     ) +
-    transferCard("normal → 28", s.normal_upload, true, trained + " 批完成") +
-    transferCard("speedup → 28", s.speedup_upload, true, trained + " 批完成");
+    transferCard(
+      "normal → 训练服务器",
+      s.normal_upload,
+      true,
+      trained + " 批完成",
+    ) +
+    transferCard(
+      "speedup → 训练服务器",
+      s.speedup_upload,
+      true,
+      trained + " 批完成",
+    );
   const errors = [
     s.error,
     s.training_processing?.error,
@@ -417,7 +427,7 @@ function renderProgress() {
             ? "两版已就绪"
             : label(j.state),
         ) +
-        "</td><td>28 · " +
+        "</td><td>训练端 · " +
         esc(label(j.state)) +
         '</td><td class="' +
         (j.error ? "error" : "") +
@@ -502,14 +512,39 @@ async function action(path, id) {
     toast(e.message, true);
   }
 }
+const checkVersions = new Map();
+function syncTrainingPort() {
+  const port = String(draft.training_server.port);
+  const select = $("training-port-select");
+  const custom = select.querySelector("option[data-custom-port]");
+  if (custom) custom.remove();
+  if (!["26", "28"].includes(port)) {
+    const option = document.createElement("option");
+    option.value = option.textContent = port;
+    option.dataset.customPort = "true";
+    select.append(option);
+  }
+  document
+    .querySelectorAll('[data-server="training_server"][data-key="port"]')
+    .forEach((el) => {
+      el.value = port;
+    });
+}
 async function check(server) {
   const prefix = server === "data_server" ? "data" : "training",
     chip = server === "data_server" ? "data-chip" : "train-chip";
+  const target = clone(draft[server]);
+  const serial = (checkVersions.get(server) || 0) + 1;
+  checkVersions.set(server, serial);
+  const currentCheck = () =>
+    checkVersions.get(server) === serial &&
+    JSON.stringify(draft[server]) === JSON.stringify(target);
   $(prefix + "-result").textContent = "连接中…";
   $(chip).textContent = "连接中…";
   $(chip).className = "connection-chip";
   try {
-    const v = await api("/api/check", { server: draft[server] });
+    const v = await api("/api/check", { server: target });
+    if (!currentCheck()) return;
     $(prefix + "-result").textContent = v.rsync
       ? "SSH / rsync 已就绪"
       : "SSH 已连接，但远端缺少 rsync";
@@ -517,6 +552,7 @@ async function check(server) {
     $(chip).textContent = v.rsync ? "已连接" : "缺少 rsync";
     $(chip).title = $(prefix + "-result").textContent;
   } catch (e) {
+    if (!currentCheck()) return;
     $(prefix + "-result").textContent = e.message;
     $(chip).className = "connection-chip bad";
     $(chip).textContent = "未连接";
@@ -624,17 +660,24 @@ async function init() {
     snapshot = b.snapshot;
     draft = clone(snapshot.settings);
     selected = draft.tasks[0]?.id;
+    syncTrainingPort();
     document.querySelectorAll("[data-server]").forEach((el) => {
       el.value = draft[el.dataset.server][el.dataset.key];
       el.oninput = () => {
         draft[el.dataset.server][el.dataset.key] =
-          el.type === "number" ? Number(el.value) : el.value;
+          el.dataset.key === "port" ? Number(el.value) : el.value;
+        checkVersions.set(
+          el.dataset.server,
+          (checkVersions.get(el.dataset.server) || 0) + 1,
+        );
+        if (el.dataset.server === "training_server") syncTrainingPort();
         const chip =
           el.dataset.server === "data_server" ? "data-chip" : "train-chip";
         $(chip).className = "connection-chip";
         $(chip).textContent = "待测试";
         $(chip).title = "连接设置已修改，请重新测试";
         mark();
+        if (el.id === "training-port-select") check("training_server");
       };
     });
     document.querySelectorAll("[data-task]").forEach(
@@ -666,10 +709,11 @@ async function init() {
       try {
         const v = await api("/api/save", draft);
         draft = clone(v.settings);
+        syncTrainingPort();
         renderEditor();
         dirty = false;
         $("dirty").classList.add("hidden");
-        toast("设置已保存。路径变化会使用独立队列，历史结果会保留。");
+        toast("设置已保存。路径或服务器变化会使用独立队列，历史结果会保留。");
         await refresh();
       } catch (e) {
         toast(e.message, true);

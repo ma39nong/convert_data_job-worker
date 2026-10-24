@@ -177,6 +177,10 @@ def test_upload_path_mode_save_reload_and_legacy_migration(tmp_path, monkeypatch
     saved = manager.save(settings)
     assert all(saved['tasks'][0][k] == v for k, v in generated.items())
     assert saved == Manager().settings
+    original_server = copy.deepcopy(settings['training_server'])
+    settings['training_server']['port'] = 26
+    saved = manager.save(settings)
+    assert Manager().settings['training_server'] == {**original_server, 'port': 26}
     task['auto_upload_paths'] = False
     for key in generated:
         task[key] = str(tmp_path / key / '手选父目录')

@@ -54,7 +54,7 @@ python3 -m venv .venv
 
 例如初值采用 `/data/data-demo/real/tomato/data/{rosbag,lerobot}/{sharpa,wuji}/<场景>`，训练侧采用 `/mnt/data/train_platform/datasets/tomato_<手型>/{normal,speedup}/<场景>`。登录用户名和存储目录相互独立；不会迁移个人 `workspace/data` 下的旧结果。
 
-SSH 使用本机已有配置和密钥，不读取或保存私钥/密码。需先通过普通 SSH 连接核实主机指纹；两服务器需有 `python3` 与 `rsync`，本机也需 `ssh`、`rsync`。连接测试会指出缺失工具。端口、用户、地址可编辑。
+SSH 使用本机已有配置和密钥，不读取或保存私钥/密码。需先通过普通 SSH 连接核实主机指纹；两服务器需有 `python3` 与 `rsync`，本机也需 `ssh`、`rsync`。连接测试会指出缺失工具。端口、用户、地址可编辑。训练数据卡片标题的端口下拉可选择 26 或 28，切换只修改端口，保留地址、SSH 用户和存储路径，并与底部 SSH 设置同步；切换后自动测试连接，保存设置后工作流才使用新端口。底部仍可手动填写其他端口。
 
 ## 数据规则
 

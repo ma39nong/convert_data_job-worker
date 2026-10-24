@@ -10,19 +10,13 @@
     <header>
       <div class="brand-icon">↗</div>
       <div><strong>数据工作流</strong><small>采集数据，准备就绪。</small></div>
-      <span class="branch">工作机控制台 · V1</span>
+      <h1 class="console-title">工作站清洗与上传控制台</h1>
       <div class="header-right">
         <span id="server-state" class="pill">连接本机…</span
         ><span id="disk" class="muted"></span>
       </div>
     </header>
     <main>
-      <div class="page-title">
-        <div>
-          <p class="eyebrow">DATA PREPARATION WORKSPACE</p>
-          <h1>数据清洗与上传控制台</h1>
-        </div>
-      </div>
       <section class="workspace">
         <article class="card sources">
           <div class="card-head">
@@ -184,7 +178,17 @@
           <div class="card-head">
             <div>
               <span class="step">03</span>
-              <h2>28 · 训练数据</h2>
+              <h2 class="training-title">
+                <select
+                  id="training-port-select"
+                  aria-label="训练服务器端口"
+                  data-server="training_server"
+                  data-key="port"
+                >
+                  <option value="26">26</option>
+                  <option value="28">28</option></select
+                ><span>· 训练数据</span>
+              </h2>
             </div>
             <span id="train-chip" class="connection-chip">连接中…</span>
           </div>

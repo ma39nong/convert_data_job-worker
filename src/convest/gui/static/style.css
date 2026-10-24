@@ -244,9 +244,9 @@ h3 {
 .workspace {
   display: grid;
   grid-template-columns: 1.05fr 1fr 1fr;
-  gap: 19px;
+  gap: 12px;
   align-items: stretch;
-  margin-bottom: 24px;
+  margin-bottom: 14px;
 }
 .card {
   background: white;
@@ -352,8 +352,8 @@ h3 {
 }
 .task-actions button {
   min-width: 0;
-  border: 1px dashed #d4dff0;
-  background: #fcfdff;
+  border: 1px dashed #9badc5;
+  background: #edf2f8;
   font-size: 12px;
   color: #6a84ae;
   padding: 8px 4px;
@@ -398,7 +398,7 @@ h3 {
 }
 #remove-task {
   color: #c44d5c;
-  border-color: #ebcdd2;
+  border-color: #d59aa4;
 }
 .text-button {
   padding: 2px 0;
@@ -563,7 +563,7 @@ h3 {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 8px;
 }
 .metric {
   border-right: 1px solid var(--border);
@@ -576,7 +576,7 @@ h3 {
   border: 0;
 }
 .metric .value {
-  font-size: 25px;
+  font-size: 21px;
   font-weight: 650;
   line-height: 1.2;
   color: #344963;
@@ -589,8 +589,8 @@ h3 {
 .current-phase {
   font-size: 11px;
   color: #7285a2;
-  padding: 13px 0;
-  min-height: 42px;
+  padding: 8px 0;
+  min-height: 34px;
 }
 .transfer-grid {
   display: grid;
@@ -872,7 +872,7 @@ dialog::backdrop {
     flex-direction: column;
   }
   .workspace {
-    gap: 12px;
+    gap: 8px;
   }
   .card {
     padding: 16px;

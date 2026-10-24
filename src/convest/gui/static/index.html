@@ -58,12 +58,15 @@
             <div class="editor-title">
               <h3>当前任务</h3>
             </div>
-            <label
-              >任务名称<input
-                id="name"
-                data-task="name"
-                placeholder="例如：番茄 · Sharpa · 场景一"
-            /></label>
+            <div class="name-fields">
+              <label
+                >任务名称<input
+                  id="name"
+                  data-task="name"
+                  placeholder="例如：番茄 · Sharpa · 场景一"
+              /></label>
+              <label>场景名称<input id="scene" data-task="scene" /></label>
+            </div>
             <div class="two-fields">
               <label>项目<input id="project" data-task="project" /></label
               ><label
@@ -73,8 +76,7 @@
                 </select></label
               >
             </div>
-            <label>场景名称<input id="scene" data-task="scene" /></label
-            ><label
+            <label
               >本地读取父目录
               <div class="path-field">
                 <input id="source" data-task="source" /><button
@@ -116,7 +118,7 @@
           <div class="destination-first">
             <div class="destination-content">
               <label
-                >原始 ROSbag 存储目录
+                >原始 ROSbag 存储父目录
                 <div class="path-field">
                   <input id="raw_root" data-task="raw_root" /><button
                     data-browse="raw_root"
@@ -139,7 +141,7 @@
             </div>
           </div>
           <label
-            >完整 LeRobot 存储目录
+            >完整 LeRobot 存储父目录
             <div class="path-field">
               <input id="lerobot_root" data-task="lerobot_root" /><button
                 data-browse="lerobot_root"
@@ -186,7 +188,7 @@
           <div class="destination-first">
             <div class="destination-content">
               <label
-                >normal 存储目录
+                >normal 存储父目录
                 <div class="path-field">
                   <input id="normal_root" data-task="normal_root" /><button
                     data-browse="normal_root"
@@ -209,7 +211,7 @@
             </div>
           </div>
           <label
-            >speedup 存储目录
+            >speedup 存储父目录
             <div class="path-field">
               <input id="speedup_root" data-task="speedup_root" /><button
                 data-browse="speedup_root"
@@ -248,9 +250,6 @@
           </details>
         </article>
       </section>
-      <div class="under-workspace">
-        <span>取消生成默认上传路径后，可手动浏览和选择上传目录。</span>
-      </div>
       <section class="card progress-card">
         <div class="progress-heading">
           <div>

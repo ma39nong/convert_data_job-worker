@@ -246,6 +246,7 @@ h3 {
   grid-template-columns: 1.05fr 1fr 1fr;
   gap: 19px;
   align-items: stretch;
+  margin-bottom: 24px;
 }
 .card {
   background: white;
@@ -415,6 +416,11 @@ h3 {
   border: 0;
   font-size: 11px;
 }
+.name-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
 .two-fields {
   display: grid;
   grid-template-columns: 1fr 1.2fr;
@@ -522,13 +528,6 @@ h3 {
 .destination-preview strong {
   color: #6c81a3;
   font-weight: 500;
-}
-.under-workspace {
-  display: flex;
-  justify-content: space-between;
-  margin: 12px 3px 24px;
-  color: #a0aab9;
-  font-size: 10px;
 }
 .progress-card {
   padding: 23px;
@@ -860,9 +859,6 @@ dialog::backdrop {
   .transfer-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-  .under-workspace {
-    gap: 12px;
-  }
   .branch {
     display: none;
   }
@@ -917,7 +913,6 @@ dialog::backdrop {
   .transfer-grid {
     grid-template-columns: 1fr 1fr;
   }
-  .under-workspace,
   footer {
     flex-direction: column;
     gap: 10px;

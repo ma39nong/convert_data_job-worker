@@ -96,11 +96,13 @@
             <span class="tag">自动识别 A / B</span>
           </div>
           <div id="task-list" class="task-list"></div>
-          <button id="add-task" class="add-task">＋ 添加任务</button>
+          <div class="task-actions">
+            <button id="add-task">＋ 添加任务</button>
+            <button id="remove-task">移除任务</button>
+          </div>
           <div class="task-editor">
             <div class="editor-title">
               <h3>当前任务</h3>
-              <button id="remove-task" class="text-button">移除</button>
             </div>
             <label
               >任务名称<input
@@ -154,13 +156,6 @@
             </div>
             <span class="tag blue">SSH</span>
           </div>
-          <div class="server-illustration">
-            <span>⌁</span>
-            <div>
-              <strong>备份与保留</strong>
-              <p>原始录制 + 完整 LeRobot 数据</p>
-            </div>
-          </div>
           <label
             >原始 ROSbag 存储目录
             <div class="path-field">
@@ -174,6 +169,7 @@
           <p class="hint">
             按 A / B 保存。备份与校验完成后，再按设置释放本机原包。
           </p>
+          <div class="destination-preview" id="raw-preview"></div>
           <label
             >完整 LeRobot 存储目录
             <div class="path-field">
@@ -199,13 +195,6 @@
             </div>
             <span class="tag violet">normal + speedup</span>
           </div>
-          <div class="server-illustration purple">
-            <span>◈</span>
-            <div>
-              <strong>两版成品，分别存储</strong>
-              <p>保留各手型的原生维度</p>
-            </div>
-          </div>
           <label
             >normal 存储目录
             <div class="path-field">
@@ -219,6 +208,7 @@
           <p class="hint">
             保留全部轨迹与帧，移除训练暂不使用的深度和触觉字段。
           </p>
+          <div class="destination-preview" id="normal-preview"></div>
           <label
             >speedup 存储目录
             <div class="path-field">

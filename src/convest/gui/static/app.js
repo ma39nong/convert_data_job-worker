@@ -130,27 +130,22 @@ function renderEditor() {
 }
 function renderPreviews() {
   const t = current();
-  if (!t) {
-    $("data-preview").textContent = "添加任务后配置存储路径";
-    $("train-preview").textContent = "";
-    return;
-  }
-  $("data-preview").innerHTML =
-    "<strong>" +
-    esc(t.robot) +
-    " / " +
-    esc(t.scene) +
-    "</strong><br>├ A / episode… 或 24h 批次<br>└ B / episode… 或 24h 批次";
-  $("train-preview").innerHTML =
-    "<strong>" +
-    esc(t.project) +
-    "_" +
-    esc(t.robot) +
-    "</strong><br>├ normal / " +
-    esc(t.scene) +
-    " / A 或 B / 批次版本<br>└ speedup / " +
-    esc(t.scene) +
-    " / A 或 B / 批次版本";
+  const previews = [
+    ["raw-preview", "raw_root", "episode…"],
+    ["data-preview", "lerobot_root", "24h 批次"],
+    ["normal-preview", "normal_root", "批次版本"],
+    ["train-preview", "speedup_root", "批次版本"],
+  ];
+  previews.forEach(([id, field, child]) => {
+    $(id).innerHTML = t
+      ? "<strong>" +
+        esc(t[field] || "请选择存储目录") +
+        "</strong><br>├ A / " +
+        child +
+        "<br>└ B / " +
+        child
+      : "添加任务后配置存储路径";
+  });
 }
 function renderTasks() {
   if (!draft) return;

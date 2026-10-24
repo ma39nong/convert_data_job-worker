@@ -21,9 +21,6 @@
         <div>
           <p class="eyebrow">DATA PREPARATION WORKSPACE</p>
           <h1>数据清洗与上传控制台</h1>
-          <p class="muted">
-            选择数据源和存储目录，清洗、转换、校验与上传在这里完成。
-          </p>
         </div>
         <div class="actions">
           <span id="dirty" class="dirty hidden">有未保存设置</span
@@ -101,9 +98,6 @@
                   data-task="include_existing"
                 />包含目录中已有的录制</label
               ><label class="checkbox"
-                ><input type="checkbox" data-task="delete_raw" />202
-                备份校验后释放本机原包</label
-              ><label class="checkbox"
                 ><input
                   type="checkbox"
                   data-task="auto_upload_paths"
@@ -145,23 +139,33 @@
               </details>
             </div>
           </div>
-          <label
-            >完整 LeRobot 存储父目录
-            <div class="path-field">
-              <input id="lerobot_root" data-task="lerobot_root" /><button
-                data-browse="lerobot_root"
+          <div class="destination-second">
+            <div class="destination-content">
+              <label
+                >完整 LeRobot 存储父目录
+                <div class="path-field">
+                  <input id="lerobot_root" data-task="lerobot_root" /><button
+                    data-browse="lerobot_root"
+                  >
+                    浏览
+                  </button>
+                </div></label
               >
-                浏览
-              </button>
-            </div></label
-          >
-          <p class="hint">本机清洗、转换并校验，累计 24 小时封存后上传。</p>
-          <details class="destination-preview" open>
-            <summary aria-label="完整 LeRobot目录预览">
-              完整目录<span class="preview-arrow" aria-hidden="true">▸</span>
-            </summary>
-            <div id="data-preview" class="preview-content"></div>
-          </details>
+              <p class="hint">本机清洗、转换并校验，累计 24 小时封存后上传。</p>
+              <details class="destination-preview" open>
+                <summary aria-label="完整 LeRobot目录预览">
+                  完整目录<span class="preview-arrow" aria-hidden="true"
+                    >▸</span
+                  >
+                </summary>
+                <div id="data-preview" class="preview-content"></div>
+              </details>
+              <label class="checkbox release-option"
+                ><input type="checkbox" data-task="delete_raw" />202
+                备份校验后释放本机原包</label
+              >
+            </div>
+          </div>
           <details class="server-settings">
             <summary>SSH 连接设置</summary>
             <div class="three-fields">
@@ -215,23 +219,31 @@
               </details>
             </div>
           </div>
-          <label
-            >speedup 存储父目录
-            <div class="path-field">
-              <input id="speedup_root" data-task="speedup_root" /><button
-                data-browse="speedup_root"
+          <div class="destination-second">
+            <div class="destination-content">
+              <label
+                >speedup 存储父目录
+                <div class="path-field">
+                  <input id="speedup_root" data-task="speedup_root" /><button
+                    data-browse="speedup_root"
+                  >
+                    浏览
+                  </button>
+                </div></label
               >
-                浏览
-              </button>
-            </div></label
-          >
-          <p class="hint">在本机做轨迹时间压缩，同步处理图像，保持原始帧率。</p>
-          <details class="destination-preview" open>
-            <summary aria-label="speedup目录预览">
-              完整目录<span class="preview-arrow" aria-hidden="true">▸</span>
-            </summary>
-            <div id="train-preview" class="preview-content"></div>
-          </details>
+              <p class="hint">
+                在本机做轨迹时间压缩，同步处理图像，保持原始帧率。
+              </p>
+              <details class="destination-preview" open>
+                <summary aria-label="speedup目录预览">
+                  完整目录<span class="preview-arrow" aria-hidden="true"
+                    >▸</span
+                  >
+                </summary>
+                <div id="train-preview" class="preview-content"></div>
+              </details>
+            </div>
+          </div>
           <details class="server-settings">
             <summary>SSH 连接设置</summary>
             <div class="three-fields">
@@ -276,15 +288,20 @@
           role="alert"
         ></div>
         <div id="transfer-grid" class="transfer-grid"></div>
-        <div class="record-head">
-          <h3>录制与批次记录</h3>
-          <span id="batch-clock" class="hint"></span>
-        </div>
         <div class="table-scroll">
           <table>
             <thead>
               <tr>
-                <th>录制 / 批次</th>
+                <th>
+                  <button
+                    id="toggle-records"
+                    aria-expanded="true"
+                    aria-controls="records"
+                  >
+                    <span class="records-arrow" aria-hidden="true">▸</span>录制
+                    / 批次
+                  </button>
+                </th>
                 <th>分组</th>
                 <th>本机处理</th>
                 <th>上传状态</th>
@@ -293,6 +310,9 @@
             </thead>
             <tbody id="records"></tbody>
           </table>
+        </div>
+        <div class="record-foot">
+          <span id="batch-clock" class="hint"></span>
         </div>
         <details class="logs">
           <summary>运行日志与详细记录<span>自动刷新</span></summary>

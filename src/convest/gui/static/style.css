@@ -348,7 +348,7 @@ h3 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
-  margin: 11px 0 17px;
+  margin: 11px 0 25px;
 }
 .task-actions button {
   min-width: 0;
@@ -627,18 +627,39 @@ h3 {
   font-size: 10px;
   color: #9ba8b9;
 }
-.record-head {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 25px;
-  align-items: center;
-}
-.record-head h3 {
-  margin-bottom: 11px;
-}
 .table-scroll {
+  margin-top: 25px;
   max-height: 255px;
   overflow: auto;
+}
+.record-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.record-foot .hint {
+  margin: 0;
+  text-align: right;
+}
+.table-scroll.collapsed {
+  max-height: none;
+  overflow: visible;
+}
+#toggle-records {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.records-arrow {
+  display: inline-block;
+}
+#toggle-records[aria-expanded="true"] .records-arrow {
+  transform: rotate(90deg);
 }
 table {
   border-collapse: collapse;

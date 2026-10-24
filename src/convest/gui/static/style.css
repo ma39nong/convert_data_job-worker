@@ -716,8 +716,18 @@ h3 {
 }
 .record-foot {
   display: flex;
+  align-items: center;
+  gap: 10px;
   justify-content: flex-end;
   margin-top: 8px;
+}
+#clear-records {
+  padding: 3px 9px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+#clear-records[hidden] {
+  display: none;
 }
 .record-foot .hint {
   margin: 0;

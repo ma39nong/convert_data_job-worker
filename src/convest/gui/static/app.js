@@ -17,6 +17,27 @@ let token = "",
   polling = false,
   browser = null,
   toastTimer;
+// Display-only masks: polling and task switches must not restore cleared rows.
+const clearedRecords = new Map();
+const recordKey = (kind, row) =>
+  JSON.stringify([
+    kind,
+    row.route || "",
+    row.id ?? row.batch_id ?? row.episode ?? row.name,
+  ]);
+function clearRecordDisplay() {
+  const s = state();
+  const hidden = clearedRecords.get(selected) || new Set();
+  for (const [kind, rows] of [
+    ["job", s.jobs],
+    ["batch", s.batches],
+    ["training", s.training],
+  ]) {
+    for (const row of rows || []) hidden.add(recordKey(kind, row));
+  }
+  clearedRecords.set(selected, hidden);
+  renderProgress();
+}
 const names = {
   stopped: "已停止",
   starting: "正在启动",
@@ -373,7 +394,11 @@ function renderProgress() {
   $("workflow-error").classList.toggle("hidden", !errors.length);
   $("workflow-error").textContent = [...new Set(errors)].slice(0, 5).join("\n");
   const uploadMap = new Map(uploads.map((u) => [u.route + "/" + u.episode, u]));
+  const hiddenRecords = clearedRecords.get(selected);
+  const visibleRecord = (kind) => (row) =>
+    !hiddenRecords?.has(recordKey(kind, row));
   let html = jobs
+    .filter(visibleRecord("job"))
     .slice(-150)
     .map((j) => {
       const u = uploadMap.get(j.route + "/" + j.episode);
@@ -395,6 +420,7 @@ function renderProgress() {
     })
     .join("");
   html += batches
+    .filter(visibleRecord("batch"))
     .map(
       (b) =>
         "<tr><td>24h · " +
@@ -413,6 +439,7 @@ function renderProgress() {
     )
     .join("");
   html += training
+    .filter(visibleRecord("training"))
     .map(
       (j) =>
         "<tr><td>训练 · " +
@@ -438,7 +465,12 @@ function renderProgress() {
     .join("");
   $("records").innerHTML =
     html ||
-    '<tr><td class="empty" colspan="5">还没有录制进入队列。可以先选择测试输入目录，再开始工作流。</td></tr>';
+    (hiddenRecords
+      ? '<tr><td class="empty" colspan="5">显示已清空，等待新录制 / 批次。</td></tr>'
+      : '<tr><td class="empty" colspan="5">还没有录制进入队列。可以先选择测试输入目录，再开始工作流。</td></tr>');
+  $("clear-records").hidden =
+    $("toggle-records").getAttribute("aria-expanded") !== "true";
+  $("clear-records").disabled = !t;
   const deadlines = batches
     .filter((b) => b.state === "active" && b.deadline_ns)
     .map((b) => b.deadline_ns / 1e9 - Date.now() / 1000);
@@ -719,11 +751,13 @@ async function init() {
         toast(e.message, true);
       }
     };
+    $("clear-records").onclick = clearRecordDisplay;
     $("toggle-records").onclick = () => {
       const expanded =
         $("toggle-records").getAttribute("aria-expanded") !== "true";
       $("toggle-records").setAttribute("aria-expanded", String(expanded));
       $("records").hidden = !expanded;
+      $("clear-records").hidden = !expanded;
       document
         .querySelector(".table-scroll")
         .classList.toggle("collapsed", !expanded);

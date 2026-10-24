@@ -292,6 +292,11 @@ h3 {
   flex-shrink: 0;
   font-size: 13px;
   padding: 7px 12px;
+  width: 122px;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 @media (min-width: 781px) and (max-width: 1200px) {
   .workspace > .workflow-controls {
@@ -304,6 +309,7 @@ h3 {
   .workflow-controls button {
     font-size: 11.5px;
     padding: 7px 4px;
+    width: 86px;
   }
 }
 
@@ -538,13 +544,16 @@ h3 {
 .card > p.hint,
 .destination-content > p.hint {
   margin-top: 0;
-  margin-bottom: 25px;
+  margin-bottom: 6px;
+}
+.task-editor > .hint {
+  margin-bottom: 0;
 }
 .destination-preview {
-  margin: 20px 0 22px;
+  margin: 6px 0 24px;
   padding: 13px 14px;
-  background: #fafbfd;
-  border: 1px solid #eef1f6;
+  background: #f3f6fa;
+  border: 1px solid #e1e7f0;
   border-radius: 8px;
   font:
     10px/1.9 ui-monospace,
@@ -553,8 +562,8 @@ h3 {
   overflow-wrap: anywhere;
 }
 .destination-preview:not([open]) {
-  margin-top: 12px;
-  margin-bottom: 14px;
+  margin-top: 6px;
+  margin-bottom: 24px;
   padding-top: 6px;
   padding-bottom: 6px;
 }
@@ -724,8 +733,12 @@ h3 {
   align-items: center;
   gap: 6px;
 }
-.records-arrow {
+.records-arrow,
+.logs-arrow {
   display: inline-block;
+  width: 8px;
+  flex: 0 0 8px;
+  text-align: left;
 }
 #toggle-records[aria-expanded="true"] .records-arrow {
   transform: rotate(90deg);
@@ -743,6 +756,9 @@ th {
   position: sticky;
   top: 0;
   padding: 10px 12px;
+}
+th:first-child {
+  padding-left: 0;
 }
 td {
   padding: 10px 12px;
@@ -766,12 +782,22 @@ td.error {
   padding-top: 13px;
 }
 .logs summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
   cursor: pointer;
   font-size: 11px;
   color: #7f90a7;
 }
-.logs summary span {
-  float: right;
+.logs summary::-webkit-details-marker {
+  display: none;
+}
+.logs[open] .logs-arrow {
+  transform: rotate(90deg);
+}
+.logs .log-refresh {
+  margin-left: auto;
   font-size: 10px;
   color: #a4afbe;
 }

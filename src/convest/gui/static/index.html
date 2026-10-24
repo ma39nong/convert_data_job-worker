@@ -321,8 +321,8 @@
                     aria-expanded="true"
                     aria-controls="records"
                   >
-                    <span class="records-arrow" aria-hidden="true">▸</span>录制
-                    / 批次
+                    <span class="records-arrow" aria-hidden="true">▸</span
+                    ><span class="records-title">录制 / 批次</span>
                   </button>
                 </th>
                 <th>分组</th>
@@ -338,7 +338,11 @@
           <span id="batch-clock" class="hint"></span>
         </div>
         <details class="logs">
-          <summary>运行日志与详细记录<span>自动刷新</span></summary>
+          <summary>
+            <span class="logs-arrow" aria-hidden="true">▸</span
+            ><span class="logs-title">运行日志与详细记录</span
+            ><span class="log-refresh">自动刷新</span>
+          </summary>
           <pre id="log-output">尚未开始</pre>
           <div id="runtime-path" class="hint"></div>
         </details>

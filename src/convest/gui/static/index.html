@@ -20,7 +20,7 @@
       <div class="page-title">
         <div>
           <p class="eyebrow">DATA PREPARATION WORKSPACE</p>
-          <h1>从录制，到可训练。</h1>
+          <h1>数据清洗与上传控制台</h1>
           <p class="muted">
             选择数据源和存储目录，清洗、转换、校验与上传在这里完成。
           </p>
@@ -42,22 +42,7 @@
             <span class="tag">自动识别 A / B</span>
           </div>
           <div id="task-list" class="task-list"></div>
-          <div class="task-actions">
-            <button id="add-task" aria-label="添加任务">＋ 添加</button>
-            <button
-              id="enable-task"
-              role="switch"
-              aria-checked="false"
-              aria-label="启用当前任务"
-            >
-              启用<span class="switch-track" aria-hidden="true"></span>
-            </button>
-            <button id="remove-task" aria-label="移除任务">移除</button>
-          </div>
           <div class="task-editor">
-            <div class="editor-title">
-              <h3>当前任务</h3>
-            </div>
             <div class="two-fields">
               <label>项目<input id="project" data-task="project" /></label
               ><label
@@ -91,20 +76,40 @@
               选择包含 A、B 的父目录，也可以单独选择 A 或 B。仅处理完整且稳定的
               episode 录制。
             </p>
-            <label class="checkbox"
-              ><input
-                type="checkbox"
-                data-task="include_existing"
-              />包含目录中已有的录制</label
-            ><label class="checkbox"
-              ><input type="checkbox" data-task="delete_raw" />202
-              备份校验后释放本机原包</label
-            ><label class="checkbox"
-              ><input
-                type="checkbox"
-                data-task="auto_upload_paths"
-              />生成默认上传路径</label
-            >
+            <details class="destination-preview" open>
+              <summary aria-label="本地读取目录预览">
+                完整目录<span class="preview-arrow" aria-hidden="true">▸</span>
+              </summary>
+              <div id="source-preview" class="preview-content"></div>
+            </details>
+            <div class="task-actions">
+              <button id="add-task" aria-label="添加任务">＋ 添加</button>
+              <button
+                id="enable-task"
+                role="switch"
+                aria-checked="false"
+                aria-label="启用当前任务"
+              >
+                启用<span class="switch-track" aria-hidden="true"></span>
+              </button>
+              <button id="remove-task" aria-label="移除任务">移除</button>
+            </div>
+            <div class="task-options">
+              <label class="checkbox"
+                ><input
+                  type="checkbox"
+                  data-task="include_existing"
+                />包含目录中已有的录制</label
+              ><label class="checkbox"
+                ><input type="checkbox" data-task="delete_raw" />202
+                备份校验后释放本机原包</label
+              ><label class="checkbox"
+                ><input
+                  type="checkbox"
+                  data-task="auto_upload_paths"
+                />生成默认上传路径</label
+              >
+            </div>
           </div>
         </article>
         <article class="card destination-card">
@@ -264,11 +269,6 @@
           </div>
         </div>
         <div id="metrics" class="metrics"></div>
-        <div class="pipeline">
-          <span>稳定检查</span><b>→</b><span>清洗 · 转换 · 校验</span><b>→</b
-          ><span>24h 批次封存</span><b>→</b><span>normal / speedup</span><b>→</b
-          ><span>上传并校验</span>
-        </div>
         <div id="current-phase" class="current-phase"></div>
         <div
           id="workflow-error"

@@ -400,15 +400,6 @@ h3 {
   color: #c44d5c;
   border-color: #ebcdd2;
 }
-.editor-title {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 7px;
-}
-.editor-title h3 {
-  margin: 0;
-}
 .text-button {
   padding: 2px 0;
   color: #7490bc;
@@ -416,14 +407,13 @@ h3 {
   border: 0;
   font-size: 11px;
 }
-.name-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+.task-editor {
+  margin-top: 17px;
 }
+.name-fields,
 .two-fields {
   display: grid;
-  grid-template-columns: 1fr 1.2fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 .path-field {
@@ -432,6 +422,7 @@ h3 {
   margin-top: 7px;
 }
 .path-field input {
+  border-color: #000;
   margin: 0;
   font-family: ui-monospace, "Noto Sans Mono CJK SC", monospace;
   font-size: 11px;
@@ -453,6 +444,20 @@ h3 {
 }
 .checkbox input {
   margin: 0;
+}
+.task-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+.task-options .checkbox {
+  gap: 4px;
+  align-items: flex-start;
+  margin: 0;
+}
+.task-options .checkbox input {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 .task-editor > .hint {
   margin-top: -7px;
@@ -477,6 +482,12 @@ h3 {
     monospace;
   color: #97a4b7;
   overflow-wrap: anywhere;
+}
+.destination-preview:not([open]) {
+  margin-top: 12px;
+  margin-bottom: 14px;
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 .destination-content {
   display: flow-root;
@@ -568,20 +579,6 @@ h3 {
   font-size: 10px;
   color: #91a0b3;
   margin-bottom: 7px;
-}
-.pipeline {
-  display: flex;
-  gap: 11px;
-  align-items: center;
-  background: #f7f9fc;
-  border-radius: 8px;
-  padding: 10px 15px;
-  font-size: 10px;
-  color: #8797af;
-}
-.pipeline b {
-  color: #c3ccda;
-  font-weight: 400;
 }
 .current-phase {
   font-size: 11px;
@@ -906,9 +903,6 @@ dialog::backdrop {
   }
   .metric {
     padding: 0 8px;
-  }
-  .pipeline {
-    flex-wrap: wrap;
   }
   .transfer-grid {
     grid-template-columns: 1fr 1fr;

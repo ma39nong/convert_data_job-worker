@@ -178,6 +178,16 @@ function renderPreviews() {
         child
       : "添加任务后配置存储路径";
   });
+  const source = (t?.source || "").replace(/\/+$/, "");
+  const group = source.split("/").pop();
+  $("source-preview").innerHTML = t
+    ? "<strong>" +
+      esc(source || "请选择本地读取目录") +
+      "</strong><br>" +
+      (["A", "B"].includes(group)
+        ? "└ episode…"
+        : "├ A / episode…<br>└ B / episode…")
+    : "添加任务后配置读取路径";
 }
 function renderTasks() {
   if (!draft) return;

@@ -22,12 +22,6 @@
           <p class="eyebrow">DATA PREPARATION WORKSPACE</p>
           <h1>数据清洗与上传控制台</h1>
         </div>
-        <div class="actions">
-          <span id="dirty" class="dirty hidden">有未保存设置</span
-          ><button id="save">保存设置</button
-          ><button id="stop" class="danger-outline">■ 停止工作流</button
-          ><button id="start" class="primary">▶ 开始工作流</button>
-        </div>
       </div>
       <section class="workspace">
         <article class="card sources">
@@ -266,6 +260,28 @@
             ><span id="training-result" class="connection-result"></span>
           </details>
         </article>
+        <section class="card workflow-controls" aria-label="工作流控制">
+          <div class="control-group">
+            <div class="control-heading">
+              <strong>全部已启用任务</strong
+              ><span id="dirty" class="dirty hidden">有未保存设置</span>
+            </div>
+            <div class="actions">
+              <button id="save">保存设置</button>
+              <button id="stop" class="danger-outline">■ 停止工作流</button>
+              <button id="start" class="primary">▶ 开始工作流</button>
+            </div>
+          </div>
+          <div class="control-group current-task-controls">
+            <div class="control-heading">
+              <strong id="control-task-name">当前任务</strong>
+            </div>
+            <div class="actions">
+              <button id="start-one" class="primary">▶ 仅开始此任务</button>
+              <button id="stop-one" class="danger-outline">■ 停止此任务</button>
+            </div>
+          </div>
+        </section>
       </section>
       <section class="card progress-card">
         <div class="progress-heading">
@@ -274,9 +290,7 @@
           </div>
           <div class="actions">
             <span id="run-state" class="pill">尚未开始</span
-            ><button id="retry-one">重试失败项</button
-            ><button id="start-one">仅开始此任务</button
-            ><button id="stop-one">停止此任务</button>
+            ><button id="retry-one">重试失败项</button>
           </div>
         </div>
         <div id="metrics" class="metrics"></div>

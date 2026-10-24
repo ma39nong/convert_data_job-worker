@@ -248,6 +248,59 @@ h3 {
   align-items: stretch;
   margin-bottom: 14px;
 }
+.workspace > .sources {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+.workspace > .destination-card {
+  grid-row: 1;
+}
+.workspace > .workflow-controls {
+  grid-column: 2 / span 2;
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 20px;
+  padding: 18px 20px;
+  align-content: center;
+}
+.control-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #65748a;
+  overflow-wrap: anywhere;
+}
+.control-heading strong {
+  font-weight: 600;
+}
+.workflow-controls .actions {
+  flex-wrap: wrap;
+}
+.workflow-controls button {
+  font-size: 12px;
+  padding: 9px 12px;
+}
+.current-task-controls {
+  border-left: 1px solid var(--border);
+  padding-left: 20px;
+}
+@media (min-width: 781px) and (max-width: 1200px) {
+  .workspace > .workflow-controls {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px;
+  }
+  .current-task-controls {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding: 14px 0 0;
+  }
+}
 .card {
   background: white;
   border: 1px solid var(--border);
@@ -910,6 +963,22 @@ dialog::backdrop {
   }
   .workspace {
     grid-template-columns: 1fr;
+  }
+  .workspace > .sources,
+  .workspace > .destination-card,
+  .workspace > .workflow-controls {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .workspace > .workflow-controls {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px;
+  }
+  .current-task-controls {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding: 14px 0 0;
   }
   .header-right #disk {
     display: none;

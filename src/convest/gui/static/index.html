@@ -261,24 +261,24 @@
           </details>
         </article>
         <section class="card workflow-controls" aria-label="工作流控制">
-          <div class="control-group">
-            <div class="control-heading">
-              <strong>全部已启用任务</strong
-              ><span id="dirty" class="dirty hidden">有未保存设置</span>
-            </div>
-            <div class="actions">
-              <button id="save">保存设置</button>
-              <button id="stop" class="danger-outline">■ 停止工作流</button>
-              <button id="start" class="primary">▶ 开始工作流</button>
-            </div>
+          <div class="control-group save-controls">
+            <span id="dirty" class="dirty hidden">有未保存设置</span>
+            <button id="save">保存设置</button>
           </div>
           <div class="control-group current-task-controls">
             <div class="control-heading">
               <strong id="control-task-name">当前任务</strong>
             </div>
             <div class="actions">
-              <button id="start-one" class="primary">▶ 仅开始此任务</button>
               <button id="stop-one" class="danger-outline">■ 停止此任务</button>
+              <button id="start-one" class="primary">▶ 开始此任务</button>
+            </div>
+          </div>
+          <div class="control-group all-task-controls">
+            <div class="control-heading"><strong>全部已启用任务</strong></div>
+            <div class="actions">
+              <button id="stop" class="danger-outline">■ 停止全部</button>
+              <button id="start" class="primary">▶ 开始全部</button>
             </div>
           </div>
         </section>

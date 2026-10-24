@@ -32,10 +32,6 @@
           ><button id="start" class="primary">▶ 开始工作流</button>
         </div>
       </div>
-      <p id="demo-notice" class="demo-notice hidden">
-        示例输入目录 ·
-        当前使用本机生成的测试路径。正式使用前，请重新选择录制目录和目标场景。
-      </p>
       <section class="workspace">
         <article class="card sources">
           <div class="card-head">
@@ -47,8 +43,16 @@
           </div>
           <div id="task-list" class="task-list"></div>
           <div class="task-actions">
-            <button id="add-task">＋ 添加任务</button>
-            <button id="remove-task">移除任务</button>
+            <button id="add-task" aria-label="添加任务">＋ 添加</button>
+            <button
+              id="enable-task"
+              role="switch"
+              aria-checked="false"
+              aria-label="启用当前任务"
+            >
+              启用<span class="switch-track" aria-hidden="true"></span>
+            </button>
+            <button id="remove-task" aria-label="移除任务">移除</button>
           </div>
           <div class="task-editor">
             <div class="editor-title">
@@ -93,8 +97,6 @@
             ><label class="checkbox"
               ><input type="checkbox" data-task="delete_raw" />202
               备份校验后释放本机原包</label
-            ><label class="checkbox"
-              ><input type="checkbox" data-task="enabled" />启用此任务</label
             >
           </div>
         </article>
@@ -148,10 +150,6 @@
             </summary>
             <div id="data-preview" class="preview-content"></div>
           </details>
-          <div class="note">
-            <span>✓</span>
-            <p>原包与成品逐文件校验<br />中断后保留队列，可继续上传</p>
-          </div>
           <details class="server-settings">
             <summary>SSH 连接设置</summary>
             <div class="three-fields">
@@ -222,12 +220,6 @@
             </summary>
             <div id="train-preview" class="preview-content"></div>
           </details>
-          <div class="note violet-note">
-            <span>✓</span>
-            <p>
-              等待本机 24h 批次封存后自动衔接<br />上传完成后保留两版，不自动训练
-            </p>
-          </div>
           <details class="server-settings">
             <summary>SSH 连接设置</summary>
             <div class="three-fields">

@@ -113,10 +113,6 @@ function mark() {
 }
 function renderEditor() {
   const t = current();
-  $("demo-notice").classList.toggle(
-    "hidden",
-    !t?.source.includes("/outputs/gui/demo-input/"),
-  );
   document.querySelectorAll("[data-task]").forEach((el) => {
     el.disabled = !t;
     if (!t) {
@@ -126,6 +122,9 @@ function renderEditor() {
     if (el.type === "checkbox") el.checked = t[el.dataset.task];
     else el.value = t[el.dataset.task];
   });
+  $("enable-task").disabled = !t;
+  $("enable-task").setAttribute("aria-checked", String(Boolean(t?.enabled)));
+  $("remove-task").disabled = !t;
   renderPreviews();
 }
 function renderPreviews() {
@@ -645,6 +644,15 @@ async function init() {
       } catch (e) {
         toast(e.message, true);
       }
+    };
+    $("enable-task").onclick = () => {
+      const t = current();
+      if (!t) return;
+      t.enabled = !t.enabled;
+      mark();
+      renderEditor();
+      renderTasks();
+      renderProgress();
     };
     $("remove-task").onclick = () => {
       if (["running", "starting", "stopping"].includes(state().state)) {

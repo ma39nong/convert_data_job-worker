@@ -73,18 +73,6 @@
               </summary>
               <div id="source-preview" class="preview-content"></div>
             </details>
-            <div class="task-actions">
-              <button id="add-task" aria-label="添加任务">＋ 添加</button>
-              <button
-                id="enable-task"
-                role="switch"
-                aria-checked="false"
-                aria-label="启用当前任务"
-              >
-                启用<span class="switch-track" aria-hidden="true"></span>
-              </button>
-              <button id="remove-task" aria-label="移除任务">移除</button>
-            </div>
             <div class="task-options">
               <label class="checkbox"
                 ><input
@@ -97,6 +85,18 @@
                   data-task="auto_upload_paths"
                 />生成默认上传路径</label
               >
+            </div>
+            <div class="task-actions">
+              <button id="add-task" aria-label="添加任务">＋ 添加</button>
+              <button
+                id="enable-task"
+                role="switch"
+                aria-checked="false"
+                aria-label="启用当前任务"
+              >
+                启用<span class="switch-track" aria-hidden="true"></span>
+              </button>
+              <button id="remove-task" aria-label="移除任务">移除</button>
             </div>
           </div>
         </article>
@@ -265,20 +265,30 @@
             <span id="dirty" class="dirty hidden">有未保存设置</span>
             <button id="save">保存设置</button>
           </div>
+          <span class="control-divider" aria-hidden="true"></span>
           <div class="control-group current-task-controls">
-            <div class="control-heading">
-              <strong id="control-task-name">当前任务</strong>
-            </div>
             <div class="actions">
-              <button id="stop-one" class="danger-outline">■ 停止此任务</button>
-              <button id="start-one" class="primary">▶ 开始此任务</button>
+              <button id="stop-one" class="danger-outline">
+                <span class="control-symbol" aria-hidden="true">■</span>
+                停止当前任务
+              </button>
+              <button id="start-one" class="primary">
+                <span class="control-symbol" aria-hidden="true">▶</span>
+                开始当前任务
+              </button>
             </div>
           </div>
+          <span class="control-divider" aria-hidden="true"></span>
           <div class="control-group all-task-controls">
-            <div class="control-heading"><strong>全部已启用任务</strong></div>
             <div class="actions">
-              <button id="stop" class="danger-outline">■ 停止全部</button>
-              <button id="start" class="primary">▶ 开始全部</button>
+              <button id="stop" class="danger-outline">
+                <span class="control-symbol" aria-hidden="true">■</span>
+                停止全部任务
+              </button>
+              <button id="start" class="primary">
+                <span class="control-symbol" aria-hidden="true">▶</span>
+                开始全部任务
+              </button>
             </div>
           </div>
         </section>

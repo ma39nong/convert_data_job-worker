@@ -251,6 +251,9 @@ h3 {
   margin-bottom: 14px;
 }
 .workspace > .sources {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 8px;
   grid-column: 1;
   grid-row: 1 / span 2;
 }
@@ -260,76 +263,50 @@ h3 {
 .workspace > .workflow-controls {
   grid-column: 2 / span 2;
   grid-row: 2;
-  display: grid;
-  grid-template-columns: minmax(85px, 0.7fr) minmax(0, 1.3fr) minmax(0, 1fr);
-  gap: 0;
-  padding: 10px 0;
-  align-content: center;
-}
-.control-heading {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  margin-bottom: 6px;
-  font-size: 12px;
-  color: #65748a;
-  overflow-wrap: anywhere;
+  justify-content: space-evenly;
+  gap: 16px;
+  padding: 8px 12px;
 }
-.control-heading strong {
-  font-weight: 600;
-}
+.workflow-controls .control-group,
 .workflow-controls .actions {
-  flex-wrap: nowrap;
-  justify-content: center;
+  display: contents;
 }
-.workflow-controls .control-group {
+.workflow-controls .save-controls {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  padding: 0 16px;
-}
-.workflow-controls .control-heading {
-  justify-content: center;
-}
-.save-controls {
   align-items: center;
 }
 .save-controls .dirty {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+}
+.control-divider {
+  width: 1px;
+  height: 28px;
+  flex-shrink: 0;
+  background: var(--border);
 }
 .workflow-controls button {
   white-space: nowrap;
-}
-.workflow-controls button {
-  font-size: 12px;
+  flex-shrink: 0;
+  font-size: 13px;
   padding: 7px 12px;
-}
-.workflow-controls .control-group + .control-group {
-  border-left: 1px solid var(--border);
 }
 @media (min-width: 781px) and (max-width: 1200px) {
   .workspace > .workflow-controls {
-    grid-template-columns: minmax(72px, 1fr) auto auto;
-    gap: 0;
-    padding: 10px 0;
+    gap: 4px;
+    padding: 8px;
   }
-  .workflow-controls .control-group {
-    padding: 0 8px;
-  }
-  .workflow-controls .actions {
-    gap: 5px;
+  .workflow-controls .control-symbol {
+    display: none;
   }
   .workflow-controls button {
-    font-size: 11px;
+    font-size: 11.5px;
     padding: 7px 4px;
   }
-  .workflow-controls .control-heading {
-    font-size: 11px;
-  }
 }
+
 .card {
   background: white;
   border: 1px solid var(--border);
@@ -430,7 +407,7 @@ h3 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
-  margin: 11px 0 25px;
+  margin: 22px 0 0;
 }
 .task-actions button {
   min-width: 0;
@@ -490,6 +467,9 @@ h3 {
   font-size: 11px;
 }
 .task-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
   margin-top: 17px;
 }
 .name-fields,
@@ -534,6 +514,7 @@ h3 {
   margin: 0;
 }
 .task-options {
+  margin-top: auto;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 12px;
@@ -1001,17 +982,29 @@ dialog::backdrop {
     grid-row: auto;
   }
   .workspace > .workflow-controls {
+    display: grid;
     grid-template-columns: 1fr;
-    gap: 0;
-    padding: 10px 0;
+    gap: 8px;
+    padding: 8px 12px;
   }
   .workflow-controls .control-group {
-    padding: 8px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 4px 0;
   }
-  .workflow-controls .control-group + .control-group {
-    border-left: 0;
+  .workflow-controls .actions {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+  }
+  .workflow-controls .current-task-controls,
+  .workflow-controls .all-task-controls {
     border-top: 1px solid var(--border);
-    padding: 14px 16px 8px;
+    padding-top: 12px;
+  }
+  .control-divider {
+    display: none;
   }
   .header-right #disk {
     display: none;

@@ -265,9 +265,6 @@ function renderProgress() {
     training = s.training || [],
     batches = s.batches || [];
   $("progress-title").textContent = t ? t.name + " · 任务进度" : "任务进度";
-  $("control-task-name").textContent = t
-    ? "当前任务 · " + t.name
-    : "当前任务 · 尚未选择";
   $("run-state").textContent = label(s.state);
   $("run-state").className =
     "pill " +

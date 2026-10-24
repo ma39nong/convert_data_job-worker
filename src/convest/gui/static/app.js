@@ -468,7 +468,7 @@ function renderProgress() {
     (hiddenRecords
       ? '<tr><td class="empty" colspan="5">显示已清空，等待新录制 / 批次。</td></tr>'
       : '<tr><td class="empty" colspan="5">还没有录制进入队列。可以先选择测试输入目录，再开始工作流。</td></tr>');
-  $("clear-records").hidden =
+  $("record-foot").hidden =
     $("toggle-records").getAttribute("aria-expanded") !== "true";
   $("clear-records").disabled = !t;
   const deadlines = batches
@@ -757,7 +757,7 @@ async function init() {
         $("toggle-records").getAttribute("aria-expanded") !== "true";
       $("toggle-records").setAttribute("aria-expanded", String(expanded));
       $("records").hidden = !expanded;
-      $("clear-records").hidden = !expanded;
+      $("record-foot").hidden = !expanded;
       document
         .querySelector(".table-scroll")
         .classList.toggle("collapsed", !expanded);

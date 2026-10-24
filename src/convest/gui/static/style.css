@@ -726,7 +726,7 @@ h3 {
   font-size: 11px;
   flex-shrink: 0;
 }
-#clear-records[hidden] {
+#record-foot[hidden] {
   display: none;
 }
 .record-foot .hint {
@@ -1098,4 +1098,13 @@ dialog::backdrop {
   padding: 12px 14px;
   font-size: 11px;
   margin-bottom: 14px;
+}
+
+#save {
+  background: #f3f6fa;
+  border-color: #c5d0df;
+}
+#save:hover {
+  background: #edf2f8;
+  border-color: #aebdd1;
 }

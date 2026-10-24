@@ -97,6 +97,11 @@
             ><label class="checkbox"
               ><input type="checkbox" data-task="delete_raw" />202
               备份校验后释放本机原包</label
+            ><label class="checkbox"
+              ><input
+                type="checkbox"
+                data-task="auto_upload_paths"
+              />生成默认上传路径</label
             >
           </div>
         </article>
@@ -244,10 +249,7 @@
         </article>
       </section>
       <div class="under-workspace">
-        <span>所有路径均可重新浏览和选择，设置仅保存在本机。</span
-        ><button id="generate-paths" class="text-button">
-          按项目 / 手型 / 场景生成默认目标路径 ↗
-        </button>
+        <span>取消生成默认上传路径后，可手动浏览和选择上传目录。</span>
       </div>
       <section class="card progress-card">
         <div class="progress-heading">

@@ -30,6 +30,16 @@ def path(value):
     return str(p)
 
 
+def default_upload_paths(task):
+    project, robot, scene = task['project'], task['robot'], task['scene']
+    base = f'/data/data-demo/real/{project}/data'
+    train = f'/mnt/data/train_platform/datasets/{project}_{robot}'
+    return {'raw_root': f'{base}/rosbag/{robot}/{scene}',
+            'lerobot_root': f'{base}/lerobot/{robot}/{scene}',
+            'normal_root': f'{train}/normal/{scene}',
+            'speedup_root': f'{train}/speedup/{scene}'}
+
+
 def new_task(index=1):
     tid = 'task-' + uuid.uuid4().hex[:12]
     return {'id': tid, 'name': f'任务 {index}', 'robot': 'sharpa',
@@ -39,7 +49,7 @@ def new_task(index=1):
             'lerobot_root': '/data/data-demo/real/tomato/data/lerobot/sharpa/full-block-more',
             'normal_root': '/mnt/data/train_platform/datasets/tomato_sharpa/normal/full-block-more',
             'speedup_root': '/mnt/data/train_platform/datasets/tomato_sharpa/speedup/full-block-more',
-            'include_existing': True, 'delete_raw': True}
+            'include_existing': True, 'delete_raw': True, 'auto_upload_paths': True}
 
 
 def defaults():
@@ -63,8 +73,12 @@ def validate(settings):
         ids.add(t['id'])
         t['name'] = component(t.get('name')); t['project'] = component(t.get('project')); t['scene'] = component(t.get('scene'))
         if t.get('robot') not in ('sharpa', 'wuji'): raise ValueError('当前仅支持 Sharpa 和 Wuji')
-        for key in ('enabled', 'include_existing', 'delete_raw'):
+        generated = default_upload_paths(t)
+        # Older custom destinations remain manual; never silently redirect old data.
+        t.setdefault('auto_upload_paths', all(t.get(k) == v for k, v in generated.items()))
+        for key in ('enabled', 'include_existing', 'delete_raw', 'auto_upload_paths'):
             if type(t.get(key)) is not bool: raise ValueError('任务开关无效')
+        if t['auto_upload_paths']: t.update(generated)
         for key in ('source', 'raw_root', 'lerobot_root', 'normal_root', 'speedup_root'): t[key] = path(t.get(key))
         source = Path(t['source']).resolve()
         if source == WORKSPACE or WORKSPACE.is_relative_to(source) or source.is_relative_to(ROOT / 'runs'):
@@ -96,7 +110,7 @@ def load_settings():
 
 
 def runtime(settings, task):
-    semantic = {k: v for k, v in task.items() if k not in ('name', 'enabled')}
+    semantic = {k: v for k, v in task.items() if k not in ('name', 'enabled', 'auto_upload_paths')}
     version = digest({'task': semantic, 'data_server': settings['data_server'], 'training_server': settings['training_server'],
                       'protocol': 'gui-workflow-v1'})[:20]
     root = ROOT / 'runs' / task['id'] / version

@@ -111,6 +111,9 @@ def test_settings_duplicate_roots_and_paths_have_independent_versions(tmp_path,m
     settings=config.validate(settings);root,a=config.runtime(settings,task)
     same,b=config.runtime(settings,{**task,'name':'renamed'})
     assert root==same and a['capture']['fingerprint']==b['capture']['fingerprint']
+    manual_same, manual_spec = config.runtime(settings, {**task, 'auto_upload_paths': False})
+    assert manual_same == root
+    assert manual_spec['training']['fingerprint'] == a['training']['fingerprint']
     task2={**task,'normal_root':str(tmp_path/'other-normal')}
     changed,c=config.runtime(settings,task2);assert changed!=root
     bad=copy.deepcopy(settings);bad['tasks'].append({**task,'id':config.new_task()['id']})
@@ -160,3 +163,38 @@ def test_manager_restart_reattach_graceful_stop_and_resume(monkeypatch):
     finally:
         manager.stop(tid)
         if manager.state(tid)['state']=='stopped':shutil.rmtree(root_test)
+
+
+def test_upload_path_mode_save_reload_and_legacy_migration(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, 'ROOT', tmp_path / 'gui')
+    manager = Manager()
+    settings = copy.deepcopy(manager.settings)
+    task = settings['tasks'][0]
+    assert task['auto_upload_paths'] is True
+    task.update(project='grape', robot='wuji', scene='场景二')
+    # Server saving enforces the same path rule as the live editor.
+    generated = config.default_upload_paths(task)
+    saved = manager.save(settings)
+    assert all(saved['tasks'][0][k] == v for k, v in generated.items())
+    assert saved == Manager().settings
+    task['auto_upload_paths'] = False
+    for key in generated:
+        task[key] = str(tmp_path / key / '手选父目录')
+    manual = {key: task[key] for key in generated}
+    task.update(project='lemon', scene='新场景')
+    saved = manager.save(settings)
+    assert all(saved['tasks'][0][k] == v for k, v in manual.items())
+    assert Manager().settings == saved
+    # Missing legacy flag must preserve previously chosen custom directories.
+    legacy = copy.deepcopy(saved)
+    del legacy['tasks'][0]['auto_upload_paths']
+    assert config.validate(legacy)['tasks'][0]['auto_upload_paths'] is False
+    task['auto_upload_paths'] = True
+    saved = manager.save(settings)
+    expected = config.default_upload_paths(task)
+    assert all(saved['tasks'][0][k] == v for k, v in expected.items())
+    del saved['tasks'][0]['auto_upload_paths']
+    assert config.validate(saved)['tasks'][0]['auto_upload_paths'] is True
+    settings['tasks'][0]['auto_upload_paths'] = 'true'
+    with pytest.raises(ValueError, match='任务开关无效'):
+        config.validate(settings)

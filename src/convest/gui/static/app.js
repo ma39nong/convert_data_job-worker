@@ -111,6 +111,39 @@ function mark() {
   $("dirty").classList.remove("hidden");
   renderPreviews();
 }
+const uploadFields = [
+  "raw_root",
+  "lerobot_root",
+  "normal_root",
+  "speedup_root",
+];
+function generateUploadPaths(t) {
+  const base = "/data/data-demo/real/" + t.project.trim() + "/data/";
+  const suffix = t.robot + "/" + t.scene.trim();
+  const train =
+    "/mnt/data/train_platform/datasets/" +
+    t.project.trim() +
+    "_" +
+    t.robot +
+    "/";
+  t.raw_root = base + "rosbag/" + suffix;
+  t.lerobot_root = base + "lerobot/" + suffix;
+  t.normal_root = train + "normal/" + t.scene.trim();
+  t.speedup_root = train + "speedup/" + t.scene.trim();
+}
+function renderUploadPaths() {
+  const t = current();
+  uploadFields.forEach((field) => {
+    $(field).value = t?.[field] || "";
+    $(field).disabled = !t || t.auto_upload_paths;
+    $(field).title = t?.auto_upload_paths
+      ? "由项目、手型和场景自动生成；取消生成默认上传路径后可手动选择"
+      : "手动选择上传父目录，上传时追加 A / B 和包名";
+    document.querySelector('[data-browse="' + field + '"]').disabled =
+      !t || t.auto_upload_paths;
+  });
+  renderPreviews();
+}
 function renderEditor() {
   const t = current();
   document.querySelectorAll("[data-task]").forEach((el) => {
@@ -125,7 +158,7 @@ function renderEditor() {
   $("enable-task").disabled = !t;
   $("enable-task").setAttribute("aria-checked", String(Boolean(t?.enabled)));
   $("remove-task").disabled = !t;
-  renderPreviews();
+  renderUploadPaths();
 }
 function renderPreviews() {
   const t = current();
@@ -595,6 +628,15 @@ async function init() {
           if (!current()) return;
           current()[el.dataset.task] =
             el.type === "checkbox" ? el.checked : el.value;
+          if (
+            current().auto_upload_paths &&
+            ["project", "robot", "scene", "auto_upload_paths"].includes(
+              el.dataset.task,
+            )
+          ) {
+            generateUploadPaths(current());
+          }
+          renderUploadPaths();
           mark();
           renderTasks();
         }),
@@ -609,6 +651,7 @@ async function init() {
       try {
         const v = await api("/api/save", draft);
         draft = clone(v.settings);
+        renderEditor();
         dirty = false;
         $("dirty").classList.add("hidden");
         toast("设置已保存。路径变化会使用独立队列，历史结果会保留。");
@@ -665,20 +708,6 @@ async function init() {
       renderEditor();
       renderTasks();
       renderProgress();
-    };
-    $("generate-paths").onclick = () => {
-      const t = current();
-      if (!t) return;
-      const base = "/data/data-demo/real/" + t.project + "/data/";
-      t.raw_root = base + "rosbag/" + t.robot + "/" + t.scene;
-      t.lerobot_root = base + "lerobot/" + t.robot + "/" + t.scene;
-      const train =
-        "/mnt/data/train_platform/datasets/" + t.project + "_" + t.robot + "/";
-      t.normal_root = train + "normal/" + t.scene;
-      t.speedup_root = train + "speedup/" + t.scene;
-      mark();
-      renderEditor();
-      toast("已填入默认路径，仍可浏览修改。保存前不会写入服务器。");
     };
     $("close-browser").onclick = () => $("browser-dialog").close();
     $("browser-go").onclick = () => browseTo($("browser-path").value);

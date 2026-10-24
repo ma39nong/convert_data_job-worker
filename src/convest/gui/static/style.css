@@ -215,22 +215,9 @@ h3 {
 .hidden {
   display: none !important;
 }
-.connections {
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  margin-bottom: 20px;
-  font-size: 12px;
-}
-.connections summary {
-  cursor: pointer;
-  display: flex;
-  gap: 18px;
-  align-items: center;
-  padding: 12px 17px;
-}
 .connection-chip {
   font-size: 11px;
+  white-space: nowrap;
   border-radius: 5px;
   background: #f3f6fa;
   padding: 3px 9px;
@@ -243,18 +230,6 @@ h3 {
 .connection-chip.bad {
   color: #ba4a5a;
   background: #fff0f0;
-}
-.summary-hint {
-  margin-left: auto;
-  color: #9aa4b4;
-  font-size: 10px;
-}
-.connection-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 40px;
-  padding: 17px;
-  border-top: 1px solid var(--border);
 }
 .three-fields {
   display: grid;
@@ -438,10 +413,12 @@ h3 {
 .task-editor > .hint {
   margin-top: -7px;
 }
-.card > label {
+.card > label,
+.destination-content > label {
   margin-bottom: 7px;
 }
-.card > p.hint {
+.card > p.hint,
+.destination-content > p.hint {
   margin-top: 0;
   margin-bottom: 25px;
 }
@@ -455,6 +432,53 @@ h3 {
     10px/1.9 ui-monospace,
     monospace;
   color: #97a4b7;
+  overflow-wrap: anywhere;
+}
+.destination-content {
+  display: flow-root;
+}
+.destination-preview > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  color: #6c81a3;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.destination-preview > summary::-webkit-details-marker {
+  display: none;
+}
+.preview-arrow {
+  font-size: 13px;
+  transition: transform 0.15s;
+}
+.destination-preview[open] .preview-arrow {
+  transform: rotate(90deg);
+}
+.preview-content {
+  margin-top: 8px;
+}
+.server-settings {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  font-size: 11px;
+}
+.server-settings > summary {
+  cursor: pointer;
+  color: #7490bc;
+}
+.server-settings .three-fields {
+  grid-template-columns: 1fr;
+  margin-top: 12px;
+}
+.server-settings .connection-result {
+  display: block;
+  margin: 8px 0 0;
   overflow-wrap: anywhere;
 }
 .destination-preview strong {

@@ -32,56 +32,6 @@
           ><button id="start" class="primary">▶ 开始工作流</button>
         </div>
       </div>
-      <details class="connections">
-        <summary>
-          <span>服务器连接</span
-          ><span id="data-chip" class="connection-chip">202 数据服务器</span
-          ><span id="train-chip" class="connection-chip">28 训练服务器</span
-          ><span class="summary-hint">SSH 密钥认证 · 展开修改</span>
-        </summary>
-        <div class="connection-grid">
-          <div>
-            <h3>202 · 数据服务器</h3>
-            <div class="three-fields">
-              <label
-                >地址<input data-server="data_server" data-key="host" /></label
-              ><label
-                >SSH 用户<input
-                  data-server="data_server"
-                  data-key="user" /></label
-              ><label
-                >端口<input
-                  type="number"
-                  data-server="data_server"
-                  data-key="port"
-              /></label>
-            </div>
-            <button data-check="data_server">测试连接</button
-            ><span id="data-result" class="connection-result"></span>
-          </div>
-          <div>
-            <h3>28 · 训练服务器</h3>
-            <div class="three-fields">
-              <label
-                >地址<input
-                  data-server="training_server"
-                  data-key="host" /></label
-              ><label
-                >SSH 用户<input
-                  data-server="training_server"
-                  data-key="user" /></label
-              ><label
-                >端口<input
-                  type="number"
-                  data-server="training_server"
-                  data-key="port"
-              /></label>
-            </div>
-            <button data-check="training_server">测试连接</button
-            ><span id="training-result" class="connection-result"></span>
-          </div>
-        </div>
-      </details>
       <p id="demo-notice" class="demo-notice hidden">
         示例输入目录 ·
         当前使用本机生成的测试路径。正式使用前，请重新选择录制目录和目标场景。
@@ -121,7 +71,7 @@
             </div>
             <label>场景名称<input id="scene" data-task="scene" /></label
             ><label
-              >录制父目录
+              >本地读取父目录
               <div class="path-field">
                 <input id="source" data-task="source" /><button
                   data-browse="source"
@@ -148,28 +98,39 @@
             >
           </div>
         </article>
-        <article class="card">
+        <article class="card destination-card">
           <div class="card-head">
             <div>
               <span class="step">02</span>
               <h2>202 · 完整数据</h2>
             </div>
-            <span class="tag blue">SSH</span>
+            <span id="data-chip" class="connection-chip">连接中…</span>
           </div>
-          <label
-            >原始 ROSbag 存储目录
-            <div class="path-field">
-              <input id="raw_root" data-task="raw_root" /><button
-                data-browse="raw_root"
+          <div class="destination-first">
+            <div class="destination-content">
+              <label
+                >原始 ROSbag 存储目录
+                <div class="path-field">
+                  <input id="raw_root" data-task="raw_root" /><button
+                    data-browse="raw_root"
+                  >
+                    浏览
+                  </button>
+                </div></label
               >
-                浏览
-              </button>
-            </div></label
-          >
-          <p class="hint">
-            按 A / B 保存。备份与校验完成后，再按设置释放本机原包。
-          </p>
-          <div class="destination-preview" id="raw-preview"></div>
+              <p class="hint">
+                按 A / B 保存。备份与校验完成后，再按设置释放本机原包。
+              </p>
+              <details class="destination-preview" open>
+                <summary aria-label="原始 ROSbag目录预览">
+                  完整目录<span class="preview-arrow" aria-hidden="true"
+                    >▸</span
+                  >
+                </summary>
+                <div id="raw-preview" class="preview-content"></div>
+              </details>
+            </div>
+          </div>
           <label
             >完整 LeRobot 存储目录
             <div class="path-field">
@@ -181,34 +142,69 @@
             </div></label
           >
           <p class="hint">本机清洗、转换并校验，累计 24 小时封存后上传。</p>
-          <div class="destination-preview" id="data-preview"></div>
+          <details class="destination-preview" open>
+            <summary aria-label="完整 LeRobot目录预览">
+              完整目录<span class="preview-arrow" aria-hidden="true">▸</span>
+            </summary>
+            <div id="data-preview" class="preview-content"></div>
+          </details>
           <div class="note">
             <span>✓</span>
             <p>原包与成品逐文件校验<br />中断后保留队列，可继续上传</p>
           </div>
+          <details class="server-settings">
+            <summary>SSH 连接设置</summary>
+            <div class="three-fields">
+              <label
+                >地址<input data-server="data_server" data-key="host" /></label
+              ><label
+                >SSH 用户<input
+                  data-server="data_server"
+                  data-key="user" /></label
+              ><label
+                >端口<input
+                  type="number"
+                  data-server="data_server"
+                  data-key="port"
+              /></label>
+            </div>
+            <button data-check="data_server">测试连接</button
+            ><span id="data-result" class="connection-result"></span>
+          </details>
         </article>
-        <article class="card">
+        <article class="card destination-card">
           <div class="card-head">
             <div>
               <span class="step">03</span>
               <h2>28 · 训练数据</h2>
             </div>
-            <span class="tag violet">normal + speedup</span>
+            <span id="train-chip" class="connection-chip">连接中…</span>
           </div>
-          <label
-            >normal 存储目录
-            <div class="path-field">
-              <input id="normal_root" data-task="normal_root" /><button
-                data-browse="normal_root"
+          <div class="destination-first">
+            <div class="destination-content">
+              <label
+                >normal 存储目录
+                <div class="path-field">
+                  <input id="normal_root" data-task="normal_root" /><button
+                    data-browse="normal_root"
+                  >
+                    浏览
+                  </button>
+                </div></label
               >
-                浏览
-              </button>
-            </div></label
-          >
-          <p class="hint">
-            保留全部轨迹与帧，移除训练暂不使用的深度和触觉字段。
-          </p>
-          <div class="destination-preview" id="normal-preview"></div>
+              <p class="hint">
+                保留全部轨迹与帧，移除训练暂不使用的深度和触觉字段。
+              </p>
+              <details class="destination-preview" open>
+                <summary aria-label="normal目录预览">
+                  完整目录<span class="preview-arrow" aria-hidden="true"
+                    >▸</span
+                  >
+                </summary>
+                <div id="normal-preview" class="preview-content"></div>
+              </details>
+            </div>
+          </div>
           <label
             >speedup 存储目录
             <div class="path-field">
@@ -220,13 +216,39 @@
             </div></label
           >
           <p class="hint">在本机做轨迹时间压缩，同步处理图像，保持原始帧率。</p>
-          <div class="destination-preview" id="train-preview"></div>
+          <details class="destination-preview" open>
+            <summary aria-label="speedup目录预览">
+              完整目录<span class="preview-arrow" aria-hidden="true">▸</span>
+            </summary>
+            <div id="train-preview" class="preview-content"></div>
+          </details>
           <div class="note violet-note">
             <span>✓</span>
             <p>
               等待本机 24h 批次封存后自动衔接<br />上传完成后保留两版，不自动训练
             </p>
           </div>
+          <details class="server-settings">
+            <summary>SSH 连接设置</summary>
+            <div class="three-fields">
+              <label
+                >地址<input
+                  data-server="training_server"
+                  data-key="host" /></label
+              ><label
+                >SSH 用户<input
+                  data-server="training_server"
+                  data-key="user" /></label
+              ><label
+                >端口<input
+                  type="number"
+                  data-server="training_server"
+                  data-key="port"
+              /></label>
+            </div>
+            <button data-check="training_server">测试连接</button
+            ><span id="training-result" class="connection-result"></span>
+          </details>
         </article>
       </section>
       <div class="under-workspace">

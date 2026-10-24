@@ -464,19 +464,21 @@ async function check(server) {
   const prefix = server === "data_server" ? "data" : "training",
     chip = server === "data_server" ? "data-chip" : "train-chip";
   $(prefix + "-result").textContent = "连接中…";
+  $(chip).textContent = "连接中…";
+  $(chip).className = "connection-chip";
   try {
     const v = await api("/api/check", { server: draft[server] });
     $(prefix + "-result").textContent = v.rsync
       ? "SSH / rsync 已就绪"
       : "SSH 已连接，但远端缺少 rsync";
     $(chip).className = "connection-chip " + (v.rsync ? "ok" : "bad");
-    $(chip).textContent =
-      (server === "data_server" ? "202 数据服务器" : "28 训练服务器") +
-      " · " +
-      (v.rsync ? "已连接" : "缺少 rsync");
+    $(chip).textContent = v.rsync ? "已连接" : "缺少 rsync";
+    $(chip).title = $(prefix + "-result").textContent;
   } catch (e) {
     $(prefix + "-result").textContent = e.message;
     $(chip).className = "connection-chip bad";
+    $(chip).textContent = "未连接";
+    $(chip).title = e.message;
   }
 }
 async function browse(field) {
@@ -538,6 +540,36 @@ async function browseTo(path) {
       '<div class="empty">请修改上方路径，或返回上一级目录</div>';
   }
 }
+function alignDestinationRows() {
+  const sections = [...document.querySelectorAll(".destination-first")];
+  const [left, right] = sections;
+  if (!left || !right) return;
+  const sameExpansion =
+    left.querySelector("details").open === right.querySelector("details").open;
+  const height =
+    window.matchMedia("(min-width: 781px)").matches && sameExpansion
+      ? Math.max(
+          ...sections.map(
+            (section) =>
+              section.firstElementChild.getBoundingClientRect().height,
+          ),
+        )
+      : 0;
+  sections.forEach((section) => {
+    section.style.minHeight = height ? height + "px" : "";
+  });
+}
+function setupDestinationLayout() {
+  const observer = new ResizeObserver(alignDestinationRows);
+  document
+    .querySelectorAll(".destination-content")
+    .forEach((el) => observer.observe(el));
+  document
+    .querySelectorAll(".destination-preview")
+    .forEach((el) => el.addEventListener("toggle", alignDestinationRows));
+  window.addEventListener("resize", alignDestinationRows);
+  alignDestinationRows();
+}
 async function init() {
   try {
     const b = await api("/api/bootstrap");
@@ -553,10 +585,8 @@ async function init() {
         const chip =
           el.dataset.server === "data_server" ? "data-chip" : "train-chip";
         $(chip).className = "connection-chip";
-        $(chip).textContent =
-          (el.dataset.server === "data_server"
-            ? "202 数据服务器"
-            : "28 训练服务器") + " · 待测试";
+        $(chip).textContent = "待测试";
+        $(chip).title = "连接设置已修改，请重新测试";
         mark();
       };
     });
@@ -672,6 +702,7 @@ async function init() {
       }
     };
     document.querySelector(".logs").ontoggle = refreshLogs;
+    setupDestinationLayout();
     renderEditor();
     renderTasks();
     renderProgress();

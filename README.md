@@ -28,6 +28,63 @@ python3 -m venv .venv
 
 本机需要 SSH、rsync 以及转换所需环境；服务器需要 Python 3 和 rsync。SSH 使用本机已有配置和密钥，首次连接须核实主机指纹。若已有旧采集/后处理服务正在监听同一批输入，应先正常停止并等当前作业收尾，再由 GUI 接管，避免两套任务重复处理。安装桌面启动器及接管步骤见 [GUI 使用说明](docs/gui.md)。
 
+### 首次部署：配置工作机到服务器的 SSH 公钥认证
+
+GUI 通过 SSH 浏览目录、校验及上传数据，使用 `BatchMode=yes` 和 `StrictHostKeyChecking=yes`，不会弹窗输入服务器密码。因此，**每台实际运行 GUI 的工作机、运行 GUI 的本机用户，都必须先配置好到目标服务器登录账号的公钥认证，并核实服务器主机指纹**。开发电脑配置成功不代表其他 Sharpa/Wuji 工程机也已配置；服务器上的公钥授权属于具体登录账号，不是整台服务器通用。
+
+私钥保留在工作机，只有对应的 `.pub` 公钥加入服务器账号的 `~/.ssh/authorized_keys`。不要把私钥复制到服务器、工程仓库或发给其他人。GUI 不保存密码、私钥内容或私钥口令。
+
+1. **在实际工作机上准备密钥。** 已有可用密钥可以直接复用，不要覆盖。若没有，可在运行 GUI 的用户终端生成一对专用密钥；以下文件名只是示例，若已存在就跳过生成：
+
+   ```bash
+   mkdir -p ~/.ssh
+   chmod 700 ~/.ssh
+   ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_data_workflow -C "data-workflow-workstation"
+   ```
+
+   私钥为 `~/.ssh/id_ed25519_data_workflow`，公钥为同名 `.pub` 文件。生成时可设置私钥口令；带口令密钥需要在后面的 SSH agent 步骤中解锁。
+
+2. **把公钥授权给两台服务器的实际登录账号。** 以下以数据服务器 `user`、训练服务器 `mengxiang`、训练端口 `28` 为例：
+
+   ```bash
+   ssh-copy-id -i ~/.ssh/id_ed25519_data_workflow.pub -p 22 user@192.168.10.202
+   ssh-copy-id -i ~/.ssh/id_ed25519_data_workflow.pub -p 28 mengxiang@47.116.73.163
+   ```
+
+   首次连接时，先向管理员核实显示的主机指纹，再确认并记录到本机 `known_hosts`。按提示输入对应服务器账号的密码完成授权；如果服务器不允许密码登录，请把 `.pub` 公钥交给管理员，由管理员加入对应账号的 `authorized_keys`，并确认服务器端 `~/.ssh`、`authorized_keys` 的属主和权限正确（通常分别为 `700`、`600`）。
+
+   `mengxiang` 是示例账号；实际使用 `tairan`、`junyu`、`zhiwei` 等账号时，替换为真实 SSH 登录用户，并在 GUI 中填同一个用户。若训练连接改为端口 `26`，也要针对该端口连接到的账号完成授权和验证，不要假定 `28` 的授权一定适用。
+
+3. **让 SSH 能找到密钥，必要时解锁私钥。** 上面的专用文件名不是 SSH 默认密钥文件名，需要在现有 `~/.ssh/config` 对应 Host 配置中指定。例如：
+
+   ```sshconfig
+   Host 192.168.10.202 47.116.73.163
+       IdentityFile ~/.ssh/id_ed25519_data_workflow
+       IdentitiesOnly yes
+   ```
+
+   若已有相关 Host 配置，应合并到现有配置，不覆盖整个文件；复用其他密钥时填写对应私钥路径。`~/.ssh/config` 和私钥权限通常设为 `600`。
+
+   带口令的私钥先加入当前登录会话的 SSH agent：
+
+   ```bash
+   # 当前会话没有可用 agent 时，先执行：eval "$(ssh-agent -s)"
+   ssh-add ~/.ssh/id_ed25519_data_workflow
+   ```
+
+   然后从同一个终端启动 `./scripts/start_gui.sh`。如果使用桌面启动器，GUI 也必须能继承可用的 `SSH_AUTH_SOCK`；另一个终端中解锁密钥，不代表已打开的 GUI 自动获得该 agent。不要把私钥口令写入配置文件。
+
+4. **用与 GUI 一致的非交互方式验证，再配置界面。** 以下两条命令应直接成功，无需输入密码、私钥口令或再次确认主机指纹，并输出服务器上的 Python 3、rsync 路径：
+
+   ```bash
+   ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -p 22 user@192.168.10.202 'command -v python3 && command -v rsync'
+   ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -p 28 mengxiang@47.116.73.163 'command -v python3 && command -v rsync'
+   ```
+
+   之后在 GUI 的两个“SSH 连接设置”中填写相同的地址、用户和端口，点击“测试连接”，再浏览选择实际上传父目录。登录账号还需对目标父目录有读取、创建和写入权限；SSH 认证成功不等于目标目录可写。
+
+常见问题：`Permission denied (publickey)` 通常需要核对公钥是否加入正确账号、私钥是否被 SSH 找到，以及 agent 是否已解锁；`Host key verification failed` 需要先通过普通 SSH 核实主机指纹及 `known_hosts`，不能关闭指纹校验来绕过；更换工作机或运行 GUI 的本机用户后，需要重新确认以上步骤。
+
 ### 01 本机读取：四个字段怎样选择
 
 按“项目＋手型＋场景”配置一个持续任务，不需要每产生一条录制就重新填写。

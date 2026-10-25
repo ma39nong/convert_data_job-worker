@@ -162,7 +162,7 @@
               </details>
               <label class="checkbox release-option"
                 ><input type="checkbox" data-task="delete_raw" />202
-                备份校验后释放本机原包</label
+                备份校验后释放本机原始 ROSbag</label
               >
             </div>
           </div>
@@ -252,6 +252,14 @@
                 </summary>
                 <div id="train-preview" class="preview-content"></div>
               </details>
+              <label
+                class="checkbox release-option"
+                title="默认关闭。等待202完整备份、normal/speedup两版上传及配对校验全部通过后，释放本机完整批次的数据与视频；保留元数据、凭据和两版成品。"
+                ><input
+                  type="checkbox"
+                  data-task="delete_lerobot"
+                />两版上传校验后释放本机完整 LeRobot</label
+              >
             </div>
           </div>
           <details class="server-settings">

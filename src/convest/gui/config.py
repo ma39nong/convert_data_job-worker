@@ -49,7 +49,7 @@ def new_task(index=1):
             'lerobot_root': '/data/data-demo/real/tomato/data/lerobot/sharpa/full-block-more',
             'normal_root': '/mnt/data/train_platform/datasets/tomato_sharpa/normal/full-block-more',
             'speedup_root': '/mnt/data/train_platform/datasets/tomato_sharpa/speedup/full-block-more',
-            'include_existing': True, 'delete_raw': True, 'auto_upload_paths': True}
+            'include_existing': True, 'delete_raw': True, 'auto_upload_paths': True, 'delete_lerobot': False}
 
 
 def defaults():
@@ -76,7 +76,8 @@ def validate(settings):
         generated = default_upload_paths(t)
         # Older custom destinations remain manual; never silently redirect old data.
         t.setdefault('auto_upload_paths', all(t.get(k) == v for k, v in generated.items()))
-        for key in ('enabled', 'include_existing', 'delete_raw', 'auto_upload_paths'):
+        t.setdefault('delete_lerobot', False)
+        for key in ('enabled', 'include_existing', 'delete_raw', 'auto_upload_paths', 'delete_lerobot'):
             if type(t.get(key)) is not bool: raise ValueError('任务开关无效')
         if t['auto_upload_paths']: t.update(generated)
         for key in ('source', 'raw_root', 'lerobot_root', 'normal_root', 'speedup_root'): t[key] = path(t.get(key))
@@ -110,7 +111,7 @@ def load_settings():
 
 
 def runtime(settings, task):
-    semantic = {k: v for k, v in task.items() if k not in ('name', 'enabled', 'auto_upload_paths')}
+    semantic = {k: v for k, v in task.items() if k not in ('name', 'enabled', 'auto_upload_paths', 'delete_lerobot')}
     version = digest({'task': semantic, 'data_server': settings['data_server'], 'training_server': settings['training_server'],
                       'protocol': 'gui-workflow-v1'})[:20]
     root = ROOT / 'runs' / task['id'] / version

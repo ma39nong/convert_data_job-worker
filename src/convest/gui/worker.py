@@ -189,7 +189,10 @@ def role(spec, name):
             elif name=='training-process':
                 training.discover(cfg,q)
                 if not stop[0]:training.process_once(cfg,q)
-            else: training_upload(spec,q)
+            else:
+                training_upload(spec,q)
+                from .retention import release_complete_batches
+                release_complete_batches(spec,q,training_destination_name)
             for _ in range(cfg['poll_seconds']*4):
                 if stop[0]:break
                 time.sleep(.25)

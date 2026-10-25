@@ -128,6 +128,12 @@ def test_settings_duplicate_roots_and_paths_have_independent_versions(tmp_path,m
     manual_same, manual_spec = config.runtime(settings, {**task, 'auto_upload_paths': False})
     assert manual_same == root
     assert manual_spec['training']['fingerprint'] == a['training']['fingerprint']
+    release_root, release_spec = config.runtime(settings, {**task, 'delete_lerobot': True})
+    assert release_root == root
+    assert release_spec['training']['fingerprint'] == a['training']['fingerprint']
+    legacy = copy.deepcopy(settings)
+    del legacy['tasks'][0]['delete_lerobot']
+    assert config.validate(legacy)['tasks'][0]['delete_lerobot'] is False
     task2={**task,'normal_root':str(tmp_path/'other-normal')}
     changed,c=config.runtime(settings,task2);assert changed!=root
     bad=copy.deepcopy(settings);bad['tasks'].append({**task,'id':config.new_task()['id']})
@@ -214,5 +220,107 @@ def test_upload_path_mode_save_reload_and_legacy_migration(tmp_path, monkeypatch
     del saved['tasks'][0]['auto_upload_paths']
     assert config.validate(saved)['tasks'][0]['auto_upload_paths'] is True
     settings['tasks'][0]['auto_upload_paths'] = 'true'
+    with pytest.raises(ValueError, match='任务开关无效'):
+        config.validate(settings)
+
+
+def test_gui_lerobot_release_requires_all_backups_and_recovers(gui_spec, monkeypatch):
+    from convest.gui import retention
+    from convest.ingest.batches import durable_json
+    s = gui_spec; c = s['capture']; cfg = s['training']
+    # Build real native normal/speedup pairs and completed remote receipts.
+    test_gui_native_pipeline_two_groups_separate_targets_and_retry(s, monkeypatch, True)
+    monkeypatch.setattr(retention, 'verify_backup', local_verify)
+    with training.context(cfg) as db:
+        rows = db.execute('SELECT * FROM tasks').fetchall()
+        sources = [Path(json.loads(r['spec'])['source']) for r in rows]
+        retention.release_complete_batches(s, db, worker.training_destination_name)
+        assert all((p/'data').exists() for p in sources)  # default off
+        s['task']['delete_lerobot'] = True
+        def retry_now():
+            for f in (Path(cfg['state_root'])/'retention').glob('*.json'):
+                report=json.loads(f.read_text());report['retry_after_ns']=0;durable_json(f,report)
+        # A failed/missing upstream completed upload keeps all payloads.
+        import sqlite3
+        with sqlite3.connect(Path(c['state_root'])/'queue.sqlite3') as cap:
+            cap.execute("UPDATE uploads SET dataset_done=0 WHERE dataset_done=1")
+        retention.release_complete_batches(s, db, worker.training_destination_name)
+        assert all((p/'data').exists() for p in sources)
+        with sqlite3.connect(Path(c['state_root'])/'queue.sqlite3') as cap:
+            cap.execute("UPDATE uploads SET dataset_done=1 WHERE state='completed' AND episode LIKE 'batch-%'")
+        retry_now()
+        # Fresh remote verification failure also keeps all local complete data.
+        def unavailable(*args, **kwargs): raise OSError('remote unavailable')
+        monkeypatch.setattr(retention, 'verify_backup', unavailable)
+        retention.release_complete_batches(s, db, worker.training_destination_name)
+        assert all((p/'data').exists() for p in sources)
+        monkeypatch.setattr(retention, 'verify_backup', local_verify)
+        retry_now()
+        # Crash after a quarantined tree is removed but before final state write.
+        original_rmtree=retention.shutil.rmtree
+        once=[False]
+        def interrupted(path, *args, **kwargs):
+            original_rmtree(path, *args, **kwargs)
+            if not once[0]:once[0]=True;raise OSError('simulated power loss')
+        interrupted.avoids_symlink_attacks=True
+        monkeypatch.setattr(retention.shutil, 'rmtree', interrupted)
+        retention.release_complete_batches(s, db, worker.training_destination_name)
+        monkeypatch.setattr(retention.shutil, 'rmtree', original_rmtree)
+        retry_now()
+        retention.release_complete_batches(s, db, worker.training_destination_name)
+        reports=[json.loads(f.read_text()) for f in (Path(cfg['state_root'])/'retention').glob('*.json')]
+        assert len(reports)==2 and all(r['status']=='released' for r in reports), reports
+        assert all(not (p/'data').exists() and not (p/'videos').exists() for p in sources)
+        assert all((p/'meta/info.json').exists() and (p/'ingest/generation.json').exists() for p in sources)
+        # Restarts continue discovery, catalogue recovery and upload idempotently.
+        for row in rows:
+            spec=json.loads(row['spec']);training.sealed(cfg,spec)
+        training.discover(cfg,db)
+        assert db.execute('SELECT count(*) FROM tasks').fetchone()[0]==2
+        for route in c['routes']:
+            assert daily.publisher(c,route).status()[0]['state']=='sealed'
+        for row in rows:
+            pair=Path(json.loads(row['payload'])['source'])
+            assert (pair/'normal/meta/info.json').exists() and (pair/'speedup/meta/info.json').exists()
+        retention.release_complete_batches(s, db, worker.training_destination_name)
+
+
+def test_gui_release_old_generations_preserves_next_batch(gui_spec, monkeypatch):
+    from convest.gui import retention
+    s=gui_spec;c=s['capture'];cfg=s['training']
+    c['routes']=c['routes'][:1]
+    monkeypatch.setattr(retention,'verify_backup',local_verify)
+    with capture_context(c) as queue:
+        bag(c,0,1);ready(c,queue)
+        bag(c,0,2);ready(c,queue)
+        daily.maintain(c,queue,due(c))
+        while worker.capture_upload(s,queue): pass
+    with training.context(cfg) as db:
+        training.discover(cfg,db);assert training.process_once(cfg,db)
+        assert worker.training_upload(s,db)
+        row=db.execute('SELECT * FROM tasks').fetchone()
+        source=Path(json.loads(row['spec'])['source'])
+        parent=Path(json.loads((source/'ingest/generation.json').read_text())['parent'])
+        assert (parent/'videos').exists()
+        s['task']['delete_lerobot']=True
+        retention.release_complete_batches(s,db,worker.training_destination_name)
+        report=json.loads((Path(cfg['state_root'])/'retention'/(row['id']+'.json')).read_text())
+        assert report['status']=='released', report
+        assert len(report['trees'])==4  # data/videos from both immutable generations
+        assert not (parent/'videos').exists() and not (source/'videos').exists()
+    with capture_context(c) as queue:
+        bag(c,0,3);ready(c,queue)
+        batches=daily.publisher(c,c['routes'][0]).status()
+        assert len(batches)==2 and batches[0]['state']=='sealed' and batches[1]['state']=='active'
+
+
+def test_gui_lerobot_release_option_is_saved_and_defaults_off(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, 'ROOT', tmp_path/'ui')
+    manager=Manager();settings=copy.deepcopy(manager.settings)
+    assert settings['tasks'][0]['delete_lerobot'] is False
+    settings['tasks'][0]['delete_lerobot']=True
+    manager.save(settings)
+    assert Manager().settings['tasks'][0]['delete_lerobot'] is True
+    settings['tasks'][0]['delete_lerobot']='yes'
     with pytest.raises(ValueError, match='任务开关无效'):
         config.validate(settings)

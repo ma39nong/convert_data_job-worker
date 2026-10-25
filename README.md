@@ -85,6 +85,31 @@ GUI 通过 SSH 浏览目录、校验及上传数据，使用 `BatchMode=yes` 和
 
 常见问题：`Permission denied (publickey)` 通常需要核对公钥是否加入正确账号、私钥是否被 SSH 找到，以及 agent 是否已解锁；`Host key verification failed` 需要先通过普通 SSH 核实主机指纹及 `known_hosts`，不能关闭指纹校验来绕过；更换工作机或运行 GUI 的本机用户后，需要重新确认以上步骤。
 
+### 工作机原始录制保存路径
+
+先在录制软件中设置本机 ROSbag 的实际保存位置，再让 GUI 读取相同位置。GUI 的“本地读取父目录”只决定监听哪里，不会替录制软件修改保存位置。
+
+本机当前使用以下布局；其他工作机可以更换磁盘、用户名和根目录，但需要保留 `场景/A或B/episode数字/` 层级：
+
+| 手型 | 本机原始录制根目录 |
+| --- | --- |
+| Sharpa | `/home/user/franka_teleop_data/bags/tomato-sharpa` |
+| Wuji | `/home/user/franka_teleop_data/bags/tomato-wuji` |
+
+例如 Sharpa 的 `no-block-one` 场景：
+
+```text
+录制软件写入 A：/home/user/franka_teleop_data/bags/tomato-sharpa/no-block-one/A/episode100/
+录制软件写入 B：/home/user/franka_teleop_data/bags/tomato-sharpa/no-block-one/B/episode200/
+GUI 本地读取父目录：/home/user/franka_teleop_data/bags/tomato-sharpa/no-block-one
+```
+
+其他场景把 `no-block-one` 换成 `full-block-more`、`full-block-one` 或 `no-block-more`；Wuji 把 `tomato-sharpa` 换成 `tomato-wuji`。选择父目录同时读取 A/B，选择其中的 A 或 B 则只读取该组。
+
+同事电脑上的用户名或录制路径可能不同，应在其录制软件与 GUI 中填写同事电脑的实际路径，不直接照抄 `/home/user/`。同时检查该磁盘的可用空间，以及运行录制程序和 GUI 的本机账号是否有对应读写权限。
+
+原始录制与本地转换输出分开保存。以工程位于 `/home/user/convert_data_job-worker` 为例，GUI 转换产物位于 `/home/user/convert_data_job-worker/outputs/gui/runs/<任务ID>/<运行版本>/`：`capture/batches/` 保存完整 LeRobot，`training/datasets/` 保存 normal/speedup，`capture/work/` 为处理中间目录。转换输出由程序管理，不需要填进“本地读取父目录”；它占用工程所在磁盘的空间。
+
 ### 01 本机读取：四个字段怎样选择
 
 按“项目＋手型＋场景”配置一个持续任务，不需要每产生一条录制就重新填写。

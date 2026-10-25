@@ -210,3 +210,38 @@ def test_interrupted_first_publication_recovers_original_batch_start_timestamp(s
     with worker_context(cfg) as q:
         assert scan(cfg,q)['counts']=={'published':1}
         assert pub.current()==root and pub.status()[0]['opened_ns']==committed
+
+
+def test_dated_batch_uses_last_completed_generation_beijing_date_and_keeps_legacy(service, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    import convest.ingest.publish as generation
+    cfg=service
+    route=cfg['routes'][2]
+    route['batch_name_format']='completion-mmdd-v1'
+    stamps=iter(int(datetime.fromisoformat(d).replace(tzinfo=ZoneInfo('Asia/Shanghai')).timestamp()*1e9)
+                for d in ('2026-10-26T23:59:59','2026-10-27T00:00:01'))
+    original=generation.atomic_json
+    def dated_marker(path, value):
+        if path.name=='generation.json':value={**value,'created_ns':next(stamps)}
+        return original(path,value)
+    monkeypatch.setattr(generation,'atomic_json',dated_marker)
+    bag(cfg,2,100);bag(cfg,2,200)
+    with worker_context(cfg) as q:
+        assert ready_scan(cfg,q)['counts']=={'published':2}
+        pub=publisher(cfg);batch=pub.status()[0]
+        assert batch['name']=='1027_100_200_data_lerobot'
+        assert batch['last_completed_ns']==int(datetime(2026,10,27,0,0,1,tzinfo=ZoneInfo('Asia/Shanghai')).timestamp()*1e9)
+        # Restart/seal on a later day must retain the final append date.
+        pub.published(now_ns=batch['deadline_ns']+10**15)
+        assert pub.status()[0]['name']==batch['name']
+        assert pub.status()[0]['state']=='sealed'
+    # Existing catalogue entries without a naming policy stay unchanged on upgrade.
+    catalogue=json.loads((pub.store/'batches.json').read_text())
+    catalogue['batches'][0].pop('name_format')
+    old_alias=pub.output/'100_200_data_lerobot'
+    (pub.output/batch['name']).rename(old_alias)
+    catalogue['batches'][0]['name']=old_alias.name
+    atomic_json(pub.store/'batches.json',catalogue)
+    pub.published(now_ns=batch['deadline_ns']+10**15)
+    assert pub.status()[0]['name']=='100_200_data_lerobot'

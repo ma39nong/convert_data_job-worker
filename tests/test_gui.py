@@ -48,8 +48,11 @@ def gui_spec(daily_cfg,tmp_path,monkeypatch):
     return {'capture':cfg,'training':train,'task':task,'data_server':{},'training_server':{}}
 
 
-def test_gui_native_pipeline_two_groups_separate_targets_and_retry(gui_spec,monkeypatch):
+@pytest.mark.parametrize('dated', [False, True])
+def test_gui_native_pipeline_two_groups_separate_targets_and_retry(gui_spec,monkeypatch,dated):
     s=gui_spec;c=s['capture'];t=s['task']
+    if dated:
+        for r in c['routes']:r['batch_name_format']='completion-mmdd-v1'
     for i in range(2):bag(c,i,1)
     with capture_context(c) as q:
         ready(c,q)
@@ -75,11 +78,21 @@ def test_gui_native_pipeline_two_groups_separate_targets_and_retry(gui_spec,monk
         db.execute('update tasks set next_ns=0');db.commit()
         assert worker.training_upload(s,db);assert worker.training_upload(s,db)
         assert all(r['state']=='uploaded' for r in db.execute('select state from tasks'))
+        monkeypatch.setattr(training,'recipe',lambda cfg:'changed-code-recipe')
+        training.discover(s['training'],db)
+        assert db.execute('select count(*) from tasks').fetchone()[0]==2
         assert [dict(r) for r in db.execute('select id,attempts,payload from tasks')]==before
     for v in ('normal','speedup'):
         assert len(list(Path(t[v+'_root']).glob('*/.workflow-pairs/*/completion.json')))==2
         for group in ('A','B'):
-            info=json.loads(next((Path(t[v+'_root'])/group).glob('*/meta/info.json')).read_text())
+            info_path=next((Path(t[v+'_root'])/group).glob('*/meta/info.json'))
+            if dated:
+                import re
+                assert re.fullmatch(r'[0-9]{4}_1_1_'+v+'_lerobot', info_path.parent.parent.name)
+                upstream=daily.publisher(c,next(r for r in c['routes'] if r['group']==group)).status()[0]
+                assert info_path.parent.parent.name==upstream['name'].replace('_data_lerobot','_'+v+'_lerobot')
+                assert (Path(t['lerobot_root'])/group/upstream['name']/'meta/info.json').exists()
+            info=json.loads(info_path.read_text())
             assert info['features']['observation.state']['shape']==[116]
             assert info['features']['action']['shape']==[58]
             assert info['total_episodes']==1
@@ -111,6 +124,7 @@ def test_settings_duplicate_roots_and_paths_have_independent_versions(tmp_path,m
     settings=config.validate(settings);root,a=config.runtime(settings,task)
     same,b=config.runtime(settings,{**task,'name':'renamed'})
     assert root==same and a['capture']['fingerprint']==b['capture']['fingerprint']
+    assert all(r['batch_name_format']=='completion-mmdd-v1' for r in a['capture']['routes'])
     manual_same, manual_spec = config.runtime(settings, {**task, 'auto_upload_paths': False})
     assert manual_same == root
     assert manual_spec['training']['fingerprint'] == a['training']['fingerprint']

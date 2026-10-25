@@ -133,6 +133,9 @@ def runtime(settings, task):
     file = root/'capture.yaml'
     if not file.exists(): file.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
     capture = load_capture(file)
+    # Naming is prospective metadata, not a new input/transfer queue. Existing
+    # catalogued batches keep their own format; only newly opened batches opt in.
+    for route in capture['routes']:route['batch_name_format']='completion-mmdd-v1'
     training = {'capture': capture, 'state_root': str(root/'training/state'), 'output_root': str(root/'training/datasets'),
                 'poll_seconds': 5, 'retry_seconds': 30, 'workers': 2, 'cmax': 3.0, 'min_free_gib': 8,
                 'training_target': settings['training_server']}

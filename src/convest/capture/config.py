@@ -38,6 +38,8 @@ def load(path):
         for key in ('delete_raw_after_upload','cleanup_intermediates'):
             cfg.setdefault(key,True)
             if type(cfg[key]) is not bool:raise ValueError('Invalid '+key)
+        if cfg.get('batch_name_format', 'range-v1') not in ('range-v1', 'completion-mmdd-v1'):
+            raise ValueError('Invalid batch_name_format')
         cfg['local_batch_root']=resolve(cfg.get('local_batch_root','outputs/capture-daily/batches'))
         if not Path(cfg['local_batch_root']).is_relative_to(WORKSPACE/'outputs') or Path(cfg['local_batch_root'])==WORKSPACE/'outputs':
             raise ValueError('Local batches must be below project outputs/')
@@ -58,6 +60,7 @@ def load(path):
                        'conversion': conversion, 'history': history_policy(raw.get('initial_history', cfg.get('initial_history')))})
         if mode=='daily':
             routes[-1].update(output=str(Path(cfg['local_batch_root'])/robot/group),batch_hours=cfg['batch_hours'])
+            if 'batch_name_format' in cfg:routes[-1]['batch_name_format']=cfg['batch_name_format']
         roots.append(Path(source))
     if not routes:
         raise ValueError('No capture routes')

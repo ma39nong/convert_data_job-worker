@@ -1,5 +1,7 @@
 """Independent timed batches built with the existing immutable publisher."""
 from contextlib import contextmanager
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 import fcntl
 import os
@@ -91,9 +93,13 @@ class BatchPublisher:
             if not alias.is_symlink() or os.readlink(alias)!=self._alias_target(batch):
                 raise ValueError(f'Batch range name already occupied: {name}')
 
-    def _range(self,names):
+    def _range(self,names,completed_ns=None,name_format=None):
         numbers=[int(n[7:]) for n in names]
-        return f'{min(numbers)}_{max(numbers)}_data_lerobot'
+        stem=f'{min(numbers)}_{max(numbers)}_data_lerobot'
+        if (name_format or self.route.get('batch_name_format'))=='completion-mmdd-v1':
+            stamp=time.time_ns() if completed_ns is None else completed_ns
+            return datetime.fromtimestamp(stamp/1e9,ZoneInfo('Asia/Shanghai')).strftime('%m%d')+'_'+stem
+        return stem
 
     def _sync(self,catalog):
         """Recover a committed generation even if the catalogue write was interrupted."""
@@ -113,7 +119,13 @@ class BatchPublisher:
                 while marker.get('parent'):marker=read(Path(marker['parent'])/'ingest/generation.json')
                 batch['opened_ns']=marker['created_ns']
                 batch['deadline_ns']=batch['opened_ns']+self.duration_ns
-            desired=self._range(names);self._check_alias(desired,batch)
+            # The newest immutable generation records the final successful append.
+            # Recover from this durable timestamp, never from seal/upload/restart time.
+            completed_ns=read(root/'ingest/generation.json')['created_ns']
+            name_format=batch.get('name_format','range-v1')
+            desired=self._range(names,completed_ns,name_format);self._check_alias(desired,batch)
+            if name_format=='completion-mmdd-v1':
+                batch['last_completed_ns']=completed_ns
             alias=self.output/desired
             if not alias.is_symlink():
                 old=self.output/batch['name'] if batch.get('name') else None
@@ -195,9 +207,10 @@ class BatchPublisher:
             self._seal_due(catalog,started_ns)
             batch=next((b for b in catalog['batches'] if b['state']=='active'),None)
             if batch is None:
-                batch={'id':f"batch-{len(catalog['batches'])+1:06d}",'state':'active','opened_ns':None,'name':None}
+                batch={'id':f"batch-{len(catalog['batches'])+1:06d}",'state':'active','opened_ns':None,'name':None,
+                       'name_format':self.route.get('batch_name_format','range-v1')}
                 catalog['batches'].append(batch);self._save(catalog)
-            self._check_alias(self._range([*batch.get('sources',[]),episode]),batch)
+            self._check_alias(self._range([*batch.get('sources',[]),episode],name_format=batch.get('name_format','range-v1')),batch)
             root=self._publisher(batch).publish(job_dataset,proof,episode,audit_dir,precommit)
             self._sync(catalog)
             self._seal_due(catalog,time.time_ns())

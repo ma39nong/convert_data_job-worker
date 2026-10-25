@@ -44,3 +44,20 @@ test('clearing masks existing rows across refresh and task switches, then shows 
   assert.match(elements.get('records').innerHTML, /new-training/);
   assert.doesNotMatch(elements.get('records').innerHTML, /old-episode|old-batch|old-training/);
 });
+
+test('standard local scene and A/B selections infer the scene without changing manual targets', () => {
+  const context = vm.createContext({});
+  const source = fs.readFileSync(path.join(__dirname, '../src/convest/gui/static/app.js'), 'utf8');
+  vm.runInContext(source.replace(/init\(\);\s*$/, ''), context);
+  vm.runInContext(`
+    var task = {source:'/bags/no-block-one/B',scene:'old',project:'tomato',robot:'sharpa',auto_upload_paths:true};
+    inferSourceScene(task);
+  `, context);
+  assert.equal(vm.runInContext('task.scene', context), 'no-block-one');
+  assert.equal(vm.runInContext('task.raw_root', context), '/data/data-demo/real/tomato/data/rosbag/sharpa/no-block-one');
+  vm.runInContext(`task.auto_upload_paths=false; task.source='/bags/full-block-more/'; inferSourceScene(task);`, context);
+  assert.equal(vm.runInContext('task.scene', context), 'full-block-more');
+  assert.equal(vm.runInContext('task.raw_root', context), '/data/data-demo/real/tomato/data/rosbag/sharpa/no-block-one');
+  vm.runInContext(`task.source='/bags/unknown/A'; inferSourceScene(task);`, context);
+  assert.equal(vm.runInContext('task.scene', context), 'full-block-more');
+});

@@ -19,7 +19,7 @@ def run(request):
         raise ValueError('Training workspace/data root is unavailable')
     robot, group, name, task, fp = [request[k] for k in ('robot', 'group', 'name', 'task', 'fingerprint')]
     if (robot not in ('sharpa', 'wuji') or group not in ('A', 'B')
-            or not re.fullmatch(r'[0-9]+_[0-9]+_data_lerobot--batch-[0-9]{6,}--[0-9a-f]{16}', name)
+            or not re.fullmatch(r'(?:[0-9]{4}_)?[0-9]+_[0-9]+_data_lerobot--batch-[0-9]{6,}--[0-9a-f]{16}', name)
             or not re.fullmatch(r'[0-9a-f]{64}', task) or not re.fullmatch(r'[0-9a-f]{64}', fp)):
         raise ValueError('Invalid training identity')
     files = request['files']

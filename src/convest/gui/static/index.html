@@ -42,9 +42,21 @@
                 >任务名称<input
                   id="name"
                   data-task="name"
+                  title="仅用于区分界面中的任务，不影响数据和目录命名"
                   placeholder="例如：番茄 · Sharpa · 场景一"
               /></label>
-              <label>场景名称<input id="scene" data-task="scene" /></label>
+              <label
+                >场景名称<input
+                  id="scene"
+                  data-task="scene"
+                  list="scene-options"
+              /></label>
+              <datalist id="scene-options">
+                <option value="full-block-more"></option>
+                <option value="full-block-one"></option>
+                <option value="no-block-more"></option>
+                <option value="no-block-one"></option>
+              </datalist>
             </div>
             <label
               >本地读取父目录
@@ -58,8 +70,8 @@
               </div></label
             >
             <p class="hint">
-              选择包含 A、B 的父目录，也可以单独选择 A 或 B。仅处理完整且稳定的
-              episode 录制。
+              选择场景目录（内含 A / B），或单独选择 A /
+              B。启动后持续读取完整且稳定的 episode 录制。
             </p>
             <details class="destination-preview" open>
               <summary aria-label="本地读取目录预览">

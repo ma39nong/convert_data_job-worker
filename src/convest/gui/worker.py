@@ -3,6 +3,7 @@ import argparse
 import fcntl
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -106,6 +107,15 @@ def capture_upload(spec, queue):
     return True
 
 
+def training_destination_name(payload, variant):
+    if variant not in ('normal', 'speedup'):raise ValueError('Invalid training variant')
+    batch=payload.get('batch_name', '')
+    if re.fullmatch(r'[0-9]{4}_[0-9]+_[0-9]+_data_lerobot', batch):
+        return batch.removesuffix('_data_lerobot')+'_'+variant+'_lerobot'
+    # Existing queued payloads retain their original destination and receipt identity.
+    return payload['name']
+
+
 def training_upload(spec, db):
     cfg=spec['training'];task=spec['task']
     row=db.execute("SELECT * FROM tasks WHERE state IN ('local_ready','upload_retry','uploading') AND next_ns<=? ORDER BY updated_ns,id LIMIT 1",(time.time_ns(),)).fetchone()
@@ -121,7 +131,7 @@ def training_upload(spec, db):
                 durable_json(Path(cfg['state_root'])/('upload_progress_'+variant+'.json'),value)
             files=[{**f,'path':f['path'][len(variant)+1:]} for f in p['files'] if f['path'].startswith(variant+'/')]
             if not files: raise ValueError('训练成品文件清单为空')
-            dest=Path(task[variant+'_root'])/p['group']/p['name']
+            dest=Path(task[variant+'_root'])/p['group']/training_destination_name(p,variant)
             results[variant]=transfer(spec['training_server'],Path(p['source'])/variant,dest,files,
                                      digest([cfg['fingerprint'],tid,variant]),progress,guard)
         # The two roots cannot share one atomic rename. Publish paired completion

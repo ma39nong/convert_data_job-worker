@@ -83,7 +83,7 @@ def sealed(cfg, spec):
     batch = matches[0]
     if batch.get('state') != 'sealed' or not batch.get('sealed_ns') or batch.get('seal_error'):
         raise ValueError('waiting_seal: upstream batch is not sealed')
-    if not re.fullmatch(r'[0-9]+_[0-9]+_data_lerobot', batch.get('name', '')):
+    if not re.fullmatch(r'(?:[0-9]{4}_)?[0-9]+_[0-9]+_data_lerobot', batch.get('name', '')):
         raise ValueError('Invalid batch range name')
     generation = Path(batch['generation'])
     if not generation.is_absolute() or not generation.resolve().is_relative_to((root / '.ingest/streams').resolve()):
@@ -131,7 +131,12 @@ def discover(cfg, db):
                         'batch_id': bid, 'name': batch['name'], 'source': batch['generation'],
                         'recipe': code}
                 spec['seal'] = sealed(cfg, spec)
-                task = digest([cfg['fingerprint'], spec])
+                # A code upgrade must not rediscover an already queued/completed
+                # immutable batch as a second conversion merely due to recipe hash.
+                existing=next((r for r in db.execute('SELECT id,spec FROM tasks')
+                               for read_spec in [json.loads(r['spec'])]
+                               if all(read_spec.get(k)==spec[k] for k in ('route','batch_id','name','source','seal'))),None)
+                task = existing['id'] if existing else digest([cfg['fingerprint'], spec])
                 with db:
                     db.execute('INSERT OR IGNORE INTO tasks(id,spec,state,updated_ns) VALUES(?,?,?,?)',
                                (task, json.dumps(spec), 'pending', time.time_ns()))
@@ -263,7 +268,7 @@ def process_once(cfg, db):
             flush_directory(destination.parent)
         files = read(destination.parent / (destination.name + '.manifest.json'))
         payload = {'source': str(destination), 'files': files, 'snapshot': snapshot(destination),
-                   'robot': spec['robot'], 'group': spec['group'], 'name': destination.name}
+                   'robot': spec['robot'], 'group': spec['group'], 'name': destination.name, 'batch_name': spec['name']}
         update(db, task, state='local_ready', payload=json.dumps(payload), next_ns=0, error=None)
         progress('local_ready', output=str(destination))
     except Exception as exc:

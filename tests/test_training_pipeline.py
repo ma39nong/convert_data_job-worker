@@ -196,8 +196,10 @@ def request(tmp_path):
                     'files': manifest(source), 'operation': 'prepare'}
 
 
-def test_ssh_remote_atomic_verified_commit_and_crash_recovery(tmp_path):
+@pytest.mark.parametrize('prefix', ['', '1027_'])
+def test_ssh_remote_atomic_verified_commit_and_crash_recovery(tmp_path, prefix):
     source, req = request(tmp_path)
+    req['name']=prefix+req['name']
     prepared = remote_run(req)
     stage = Path(prepared['staging'])
     shutil.copytree(source, stage, dirs_exist_ok=True)

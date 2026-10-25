@@ -160,8 +160,13 @@ function renderUploadPaths() {
     $(field).title = t?.auto_upload_paths
       ? "由项目、手型和场景自动生成；取消生成默认上传路径后可手动选择"
       : "手动选择上传父目录，上传时追加 A / B 和包名";
-    document.querySelector('[data-browse="' + field + '"]').disabled =
-      !t || t.auto_upload_paths;
+    const browseButton = document.querySelector(
+      '[data-browse="' + field + '"]',
+    );
+    browseButton.disabled = !t;
+    browseButton.title = t?.auto_upload_paths
+      ? "可浏览服务器；选择目录后切换为手动路径"
+      : "选择服务器上的场景父目录（内含 A / B）";
   });
   renderPreviews();
 }
@@ -185,9 +190,9 @@ function renderPreviews() {
   const t = current();
   const previews = [
     ["raw-preview", "raw_root", "episode…"],
-    ["data-preview", "lerobot_root", "24h 批次"],
-    ["normal-preview", "normal_root", "批次版本"],
-    ["train-preview", "speedup_root", "批次版本"],
+    ["data-preview", "lerobot_root", "MMDD_起号_止号_data_lerobot"],
+    ["normal-preview", "normal_root", "MMDD_起号_止号_normal_lerobot"],
+    ["train-preview", "speedup_root", "MMDD_起号_止号_speedup_lerobot"],
   ];
   previews.forEach(([id, field, child]) => {
     $(id).innerHTML = t
@@ -591,6 +596,24 @@ async function check(server) {
     $(chip).title = e.message;
   }
 }
+function inferSourceScene(task) {
+  const parts = task.source.replace(/\/+$/, "").split("/");
+  if (["A", "B"].includes(parts.at(-1))) parts.pop();
+  const scene = parts.at(-1);
+  if (
+    [
+      "full-block-more",
+      "full-block-one",
+      "no-block-more",
+      "no-block-one",
+    ].includes(scene)
+  ) {
+    task.scene = scene;
+    if (task.auto_upload_paths) generateUploadPaths(task);
+    return true;
+  }
+  return false;
+}
 async function browse(field) {
   const t = current();
   if (!t) return;
@@ -818,7 +841,17 @@ async function init() {
     };
     $("browser-up").onclick = () => browseTo(browser.parent);
     $("choose-folder").onclick = () => {
-      current()[browser.field] = browser.path;
+      const task = current();
+      task[browser.field] = browser.path;
+      if (browser.field === "source") {
+        if (inferSourceScene(task))
+          toast("已根据本地目录选定场景：" + task.scene);
+      } else if (task.auto_upload_paths) {
+        task.auto_upload_paths = false;
+        toast(
+          "已切换为手动上传路径，其他目录保留当前值；请核对四个目标目录后保存。",
+        );
+      }
       mark();
       renderEditor();
       $("browser-dialog").close();

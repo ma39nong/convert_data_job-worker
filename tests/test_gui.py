@@ -147,6 +147,9 @@ def test_http_csrf_and_local_directory_browser(tmp_path,monkeypatch):
     base=f'http://127.0.0.1:{server.server_port}'
     try:
         with urllib.request.urlopen(base+'/api/bootstrap') as r:value=json.load(r)
+        with urllib.request.urlopen(base+'/brand-logo.gif') as r:
+            assert r.headers['Content-Type']=='image/gif'
+            assert r.read()==(Path(config.__file__).parent/'static/brand-logo.gif').read_bytes()
         body=json.dumps({'path':str(tmp_path)}).encode()
         request=urllib.request.Request(base+'/api/browse',data=body,headers={'Content-Type':'application/json'})
         with pytest.raises(urllib.error.HTTPError) as e:urllib.request.urlopen(request)

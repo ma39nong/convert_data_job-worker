@@ -101,33 +101,14 @@ header {
   align-items: center;
   gap: 13px;
 }
-header strong {
-  font-size: 17px;
-}
-header small {
+.brand-logo {
   display: block;
-  font-size: 11px;
-  color: var(--muted);
-  letter-spacing: 1px;
-}
-.brand-icon {
-  background: var(--blue);
-  color: white;
-  border-radius: 12px;
-  width: 40px;
-  height: 40px;
-  font-size: 28px;
-  text-align: center;
-  font-weight: bold;
-}
-h1.console-title {
-  margin: 0 0 0 15px;
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: normal;
-  white-space: nowrap;
-  border-left: 1px solid var(--border);
-  padding-left: 24px;
+  width: 320px;
+  max-width: calc(100% - 110px);
+  height: auto;
+  flex: 0 1 320px;
+  min-width: 0;
+  border-radius: 6px;
 }
 .header-right {
   margin-left: auto;
@@ -1005,18 +986,8 @@ dialog::backdrop {
 }
 @media (max-width: 780px) {
   header {
-    height: auto;
-    min-height: 78px;
-    padding: 14px 18px;
-    flex-wrap: wrap;
-  }
-  h1.console-title {
-    order: 1;
-    flex-basis: 100%;
-    margin: 0;
-    padding: 8px 0 0;
-    border-left: 0;
-    border-top: 1px solid var(--border);
+    padding: 0 18px;
+    gap: 12px;
   }
   .workspace {
     grid-template-columns: 1fr;

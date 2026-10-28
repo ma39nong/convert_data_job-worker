@@ -38,10 +38,10 @@ class Handler(BaseHTTPRequestHandler):
             if route.path=='/api/bootstrap':return self.send({'app':'convert-data-workflow','token':self.server.token,'snapshot':self.server.manager.snapshot()})
             if route.path=='/api/status':return self.send(self.server.manager.snapshot())
             if route.path=='/api/logs':return self.send({'text':self.server.manager.logs(query.get('task',[''])[0])})
-            files={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/brand-logo.gif':'brand-logo.gif'}
+            files={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/brand-logo.png':'brand-logo.png'}
             if route.path in files:
                 file=STATIC/files[route.path]
-                mime={'html':'text/html','js':'text/javascript','css':'text/css','gif':'image/gif'}[file.suffix[1:]]
+                mime={'html':'text/html','js':'text/javascript','css':'text/css','png':'image/png'}[file.suffix[1:]]
                 if mime.startswith('text/'):mime+='; charset=utf-8'
                 return self.send(file.read_bytes(),mime=mime)
             return self.send({'error':'Not found'},404)

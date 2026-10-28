@@ -103,12 +103,13 @@ header {
 }
 .brand-logo {
   display: block;
-  width: 320px;
+  width: 228px;
   max-width: calc(100% - 110px);
-  height: auto;
-  flex: 0 1 320px;
+  height: 44px;
+  object-fit: cover;
+  object-position: center;
+  flex: 0 1 228px;
   min-width: 0;
-  border-radius: 6px;
 }
 .header-right {
   margin-left: auto;

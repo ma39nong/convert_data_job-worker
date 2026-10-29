@@ -9,6 +9,7 @@ from convest.config import WORKSPACE, digest
 from convest.ingest.batches import durable_json
 from convest.capture.config import load as load_capture
 from .transport import endpoint
+from .oss_transfer import DEFAULT_DELIVERY
 
 ROOT = WORKSPACE / 'outputs/gui'
 
@@ -55,7 +56,7 @@ def new_task(index=1):
 def defaults():
     return {'schema_version': 1, 'data_server': {'host': '192.168.10.202', 'port': 22, 'user': 'user'},
             'training_server': {'host': '47.116.73.163', 'port': 28, 'user': 'mengxiang'},
-            'tasks': [new_task()]}
+            'training_delivery': deepcopy(DEFAULT_DELIVERY), 'tasks': [new_task()]}
 
 
 def validate(settings):
@@ -63,6 +64,13 @@ def validate(settings):
         raise ValueError('配置格式无效')
     result = {'schema_version': 1, 'data_server': endpoint(settings.get('data_server')),
               'training_server': endpoint(settings.get('training_server')), 'tasks': []}
+    delivery = deepcopy(settings.get('training_delivery', DEFAULT_DELIVERY))
+    if not isinstance(delivery, dict) or delivery.get('mode') not in ('oss', 'direct'):
+        raise ValueError('训练交付方式无效')
+    result['training_delivery'] = {'mode': delivery['mode'],
+        'transit_root': path(delivery.get('transit_root')), 'final_root': path(delivery.get('final_root'))}
+    a, b = (Path(result['training_delivery'][k]) for k in ('transit_root', 'final_root'))
+    if a.is_relative_to(b) or b.is_relative_to(a): raise ValueError('中转目录和最终目录不能重叠')
     ids = set(); sources = []; targets = []
     tasks = settings.get('tasks')
     if not isinstance(tasks, list) or len(tasks) > 12: raise ValueError('最多配置 12 个任务')
@@ -111,6 +119,11 @@ def load_settings():
 
 
 def runtime(settings, task):
+    delivery = deepcopy(settings.get('training_delivery', DEFAULT_DELIVERY))
+    if delivery['mode'] == 'oss':
+        for variant in ('normal', 'speedup'):
+            if not Path(task[variant + '_root']).is_relative_to(delivery['final_root']):
+                raise ValueError('OSS 中转模式下训练目录须位于 ' + delivery['final_root'])
     semantic = {k: v for k, v in task.items() if k not in ('name', 'enabled', 'auto_upload_paths', 'delete_lerobot')}
     version = digest({'task': semantic, 'data_server': settings['data_server'], 'training_server': settings['training_server'],
                       'protocol': 'gui-workflow-v1'})[:20]
@@ -143,6 +156,6 @@ def runtime(settings, task):
     training['fingerprint'] = digest({'capture': capture['fingerprint'], 'task': semantic,
                                       'training_target': settings['training_server'], 'protocol': 'gui-native-training-v1'})
     spec = {'root': str(root), 'capture_file': str(file), 'capture': capture, 'training': training,
-            'task': task, 'data_server': settings['data_server'], 'training_server': settings['training_server']}
+            'training_delivery': delivery, 'task': task, 'data_server': settings['data_server'], 'training_server': settings['training_server']}
     durable_json(root/'spec.json', spec)
     return root, spec

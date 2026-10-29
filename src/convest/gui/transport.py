@@ -26,10 +26,18 @@ def ssh_args(target):
             '-p', str(target['port']), '-l', target['user']]
 
 
-def call(target, request, timeout=120):
+def agent_code(*, transit=False):
     code = Path(__file__).with_name('remote_agent.py').read_text()
+    if transit:
+        # Reuse the final CPFS publication protocol in a standalone SSH program.
+        code = code.split("if __name__ == '__main__':")[0] + '\n' + Path(__file__).with_name('oss_remote.py').read_text()
+    return code
+
+
+def call(target, request, timeout=120, *, transit=False):
+    code = agent_code(transit=transit)
     result = subprocess.run([*ssh_args(target), target['host'], shlex.join(['python3', '-c', code])],
-                            input=json.dumps(request), capture_output=True, text=True, timeout=timeout)
+                            input=json.dumps(request)+'\n', capture_output=True, text=True, timeout=timeout)
     try: response = json.loads(result.stdout)
     except ValueError:
         raise OSError((result.stderr or 'SSH 未返回有效结果').strip()[-2000:]) from None

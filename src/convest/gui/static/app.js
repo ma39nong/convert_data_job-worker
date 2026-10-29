@@ -64,6 +64,9 @@ const names = {
   waiting_seal: "等待 24h 封存",
   blocked: "受阻",
   transferring: "传输中",
+  oss_prepare: "准备 OSS 中转",
+  oss_upload: "上传至 OSS 中转",
+  oss_publish: "搬运至训练目录、校验并清理中转",
   remote_prepare: "准备远端目录",
   remote_sha256: "远端 SHA256 校验",
   deleting_verified_original: "释放已备份原包",
@@ -184,6 +187,10 @@ function renderEditor() {
   $("enable-task").disabled = !t;
   $("enable-task").setAttribute("aria-checked", String(Boolean(t?.enabled)));
   $("remove-task").disabled = !t;
+  const delivery = draft.training_delivery;
+  $("training-delivery-hint").textContent = delivery?.mode === "direct"
+    ? "训练成品直接上传至最终目录。"
+    : "训练成品经 OSS 中转，搬运校验完成后自动清理中转数据。";
   renderUploadPaths();
 }
 function renderPreviews() {
@@ -276,7 +283,7 @@ function transferCard(title, p, violet = false, count = "") {
     "</span><span>" +
     esc(p.eta_seconds != null ? "剩余 " + duration(p.eta_seconds) : "") +
     "</span></div>" +
-    (p.speed_bps && p.phase === "transferring"
+    (p.speed_bps && ["transferring", "oss_upload"].includes(p.phase)
       ? '<div class="hint">' + bytes(p.speed_bps) + "/s · 当前包</div>"
       : "") +
     (p.error ? '<p class="hint error">' + esc(p.error) + "</p>" : "") +

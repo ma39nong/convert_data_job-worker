@@ -188,6 +188,44 @@ GUI 新建批次使用以下对外名称：
 
 normal 保留全部轨迹/帧、原生关节维度及 RGB 视频字节，移除训练不使用的深度、触觉等字段；speedup 做轨迹时间重采样，保留原始帧率及分辨率。两版各自暂存、全文件 SHA256 核验后发布，两版都完成才标记训练批次已发布。两侧 `.workflow-pairs/` 保存整对完成证据。上传完成后不自动启动训练。
 
+### 训练上传：OSS 自动中转与清理
+
+GUI 的训练上传默认使用以下链路，normal、speedup 和双版本配对材料均按此交付：
+
+```text
+工作机本地成品
+  → 28：/mnt/public_data/local-realrobot-train-data/<相对路径>
+  → 28：/mnt/data/train_platform/datasets/<相对路径>
+  → 最终完整校验、持久化完成凭据 → 自动删除本次中转批次
+```
+
+例如同一个 normal 批次先写入
+`/mnt/public_data/local-realrobot-train-data/tomato_sharpa/normal/no-block-one/A/1027_100_200_normal_lerobot/`，
+再由服务器直接搬运到
+`/mnt/data/train_platform/datasets/tomato_sharpa/normal/no-block-one/A/1027_100_200_normal_lerobot/`。
+两处相对目录完全一致，speedup、Wuji、B 同理。界面仍填写和预览**最终训练路径**，不要改填中转路径。
+
+- 复用训练服务器现有的 `fuse.ossfs2` 挂载 `/mnt/public_data`；最终目录位于 CPFS 的 NFS 挂载 `/mnt/data`。任一挂载未就绪会报错并保留数据，不会悄悄写到普通本地目录。实际登录账号须可写两侧目标子目录。切换到 26 时，也需该端口对应环境具备相同挂载和权限。
+- 工控机通过已有 SSH 密钥将文件顺序写入 OSS 挂载；不用给工控机安装 `ossutil` 或配置云密钥，也无需手动执行 DataFlow Import。OSS 不支持 rsync 所需的 `ftruncate`，因此这一步采用流式上传；202 的现有 rsync 逻辑不变。
+- 中转上传关闭文件并回读全 SHA256 后，服务器复制到 CPFS 暂存目录，校验精确文件清单、大小及全 SHA256，刷盘、原子发布并持久化回读最终凭据，之后才删除该批中转文件。两个最终版本和配对材料全部交付后，GUI 才计为已发布。
+- **清理自动执行，无需手工操作，也不受“释放本机”两个开关控制。** 只处理有本次持久化归属和匹配清单的中转批次；不清空公共根，不删除旁边项目。空的项目/场景/A/B 父目录可能保留。最终目录和远端审计凭据保留。
+- 断线、搬运/校验/凭据写入或清理失败会保留数据并进入上传重试。重试跳过已完整校验的中转文件；未完成文件从头重传。最终目录已校验发布时复用最终副本、继续未完成的清理；清理也支持中途重启。发现未知文件或不同内容的同名目录会报冲突并保留数据。
+- 保留原有 24 小时封存规则；成品就绪后立即中转，不再额外等待一个周期。正常停止仍等当前上传/搬运/清理操作收尾；任务停止期间不会后台强行清理，重新开始后恢复。
+
+`outputs/gui/settings.json` 新增独立交付设置（不参与采集/训练队列指纹）：
+
+```json
+"training_delivery": {
+  "mode": "oss",
+  "transit_root": "/mnt/public_data/local-realrobot-train-data",
+  "final_root": "/mnt/data/train_platform/datasets"
+}
+```
+
+旧 GUI 设置缺少此项时自动采用上述 OSS 默认值，下次保存时写入；启停任务会沿用原运行版本、转换结果和队列，不重新处理已上传历史批次。已完成的最终副本不会为了经过 OSS 再传一遍。旧运行中的 spec 不会热改，更新前须正常停止，再重新开始。手选训练目标必须位于 `final_root` 的 `项目/normal或speedup/场景` 层级。需要兼容原先其它位置的目标时，可在任务停止后将交付 `mode` 明确设为 `direct`，保存再启动；禁止自动回退直传来掩盖 OSS 故障。旧命令行配置与历史独立作业仍保持原上传方案。
+
+远端最终目录父级的 `.workflow-transfer/` 保存 SHA256 凭据、`*.oss.json` 中转意图/清理状态以及归属记录，状态依次为 `uploading → cleaning → cleaned`。这些小型记录用于恢复和审计，不随中转对象一起删除。修改中转根前应先让旧任务清理收尾；不要手动删恢复记录。
+
 ### 本机删除范围与状态控制
 
 | 数据 | 本机保留/清理规则 |

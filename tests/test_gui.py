@@ -48,9 +48,21 @@ def gui_spec(daily_cfg,tmp_path,monkeypatch):
     return {'capture':cfg,'training':train,'task':task,'data_server':{},'training_server':{}}
 
 
-@pytest.mark.parametrize('dated', [False, True])
-def test_gui_native_pipeline_two_groups_separate_targets_and_retry(gui_spec,monkeypatch,dated):
+@pytest.mark.parametrize('dated,oss', [(False, False), (True, False), (True, True)])
+def test_gui_native_pipeline_two_groups_separate_targets_and_retry(gui_spec,monkeypatch,dated,oss):
     s=gui_spec;c=s['capture'];t=s['task']
+    if oss:
+        from convest.gui import oss_remote, oss_transfer
+        s['training_delivery'] = {'mode': 'oss', 'final_root': str(Path(t['normal_root']).parents[2]),
+                                  'transit_root': str(Path(t['normal_root']).parents[2].parent / 'oss')}
+        monkeypatch.setattr(oss_remote, 'require_oss_mount', lambda root: None)
+        monkeypatch.setattr(oss_remote, 'require_final_mount', lambda root: None)
+        monkeypatch.setattr(oss_transfer, 'call', lambda target, q, **kw: oss_remote.run(q))
+        def send(target, source, request, pending, total, progress):
+            import io
+            data = b''.join((Path(source) / name).read_bytes() for name in pending)
+            oss_remote.receive({**request, 'paths': pending}, io.BytesIO(data))
+        monkeypatch.setattr(oss_transfer, 'stream_files', send)
     if dated:
         for r in c['routes']:r['batch_name_format']='completion-mmdd-v1'
     for i in range(2):bag(c,i,1)
@@ -68,11 +80,12 @@ def test_gui_native_pipeline_two_groups_separate_targets_and_retry(gui_spec,monk
         training.discover(s['training'],db)
         for _ in range(2):assert training.process_once(s['training'],db)
         before=[dict(r) for r in db.execute('select id,attempts,payload from tasks')]
-        original=worker.transfer;failed=[False]
+        transport = worker.oss_transfer if oss else worker
+        original=transport.transfer;failed=[False]
         def once(*args,**kwargs):
             if '/speedup/' in str(args[2]) and not failed[0]:failed[0]=True;raise OSError('connection lost')
             return original(*args,**kwargs)
-        monkeypatch.setattr(worker,'transfer',once)
+        monkeypatch.setattr(transport,'transfer',once)
         assert worker.training_upload(s,db)
         assert db.execute("select count(*) from tasks where state='upload_retry'").fetchone()[0]==1
         db.execute('update tasks set next_ns=0');db.commit()
@@ -82,6 +95,10 @@ def test_gui_native_pipeline_two_groups_separate_targets_and_retry(gui_spec,monk
         training.discover(s['training'],db)
         assert db.execute('select count(*) from tasks').fetchone()[0]==2
         assert [dict(r) for r in db.execute('select id,attempts,payload from tasks')]==before
+    if oss:
+        assert not list(Path(s['training_delivery']['transit_root']).rglob('*.json'))
+        assert all(json.loads(p.read_text())['state'] == 'cleaned'
+                   for p in Path(s['training_delivery']['final_root']).rglob('*.oss.json'))
     for v in ('normal','speedup'):
         assert len(list(Path(t[v+'_root']).glob('*/.workflow-pairs/*/completion.json')))==2
         for group in ('A','B'):
@@ -134,7 +151,7 @@ def test_settings_duplicate_roots_and_paths_have_independent_versions(tmp_path,m
     legacy = copy.deepcopy(settings)
     del legacy['tasks'][0]['delete_lerobot']
     assert config.validate(legacy)['tasks'][0]['delete_lerobot'] is False
-    task2={**task,'normal_root':str(tmp_path/'other-normal')}
+    task2={**task,'normal_root':task['normal_root']+'-other'}
     changed,c=config.runtime(settings,task2);assert changed!=root
     bad=copy.deepcopy(settings);bad['tasks'].append({**task,'id':config.new_task()['id']})
     with pytest.raises(ValueError):config.validate(bad)
@@ -232,7 +249,7 @@ def test_gui_lerobot_release_requires_all_backups_and_recovers(gui_spec, monkeyp
     from convest.ingest.batches import durable_json
     s = gui_spec; c = s['capture']; cfg = s['training']
     # Build real native normal/speedup pairs and completed remote receipts.
-    test_gui_native_pipeline_two_groups_separate_targets_and_retry(s, monkeypatch, True)
+    test_gui_native_pipeline_two_groups_separate_targets_and_retry(s, monkeypatch, True, False)
     monkeypatch.setattr(retention, 'verify_backup', local_verify)
     with training.context(cfg) as db:
         rows = db.execute('SELECT * FROM tasks').fetchall()

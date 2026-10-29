@@ -17,6 +17,7 @@ from convest.capture.retention import delete_original
 from convest.capture.worker import context as capture_context, scan
 from convest.training import worker as training
 from .transport import transfer, verify_backup
+from . import oss_transfer
 
 
 def read(p): return json.loads(Path(p).read_text())
@@ -118,6 +119,11 @@ def training_destination_name(payload, variant):
 
 def training_upload(spec, db):
     cfg=spec['training'];task=spec['task']
+    delivery=spec.get('training_delivery', {'mode': 'direct'})
+    def deliver(*args, **kwargs):
+        if delivery['mode'] == 'oss':
+            return oss_transfer.transfer(*args, **kwargs, delivery=delivery)
+        return transfer(*args, **kwargs)
     row=db.execute("SELECT * FROM tasks WHERE state IN ('local_ready','upload_retry','uploading') AND next_ns<=? ORDER BY updated_ns,id LIMIT 1",(time.time_ns(),)).fetchone()
     if not row: return False
     p=json.loads(row['payload']); tid=row['id']; results={}
@@ -132,7 +138,7 @@ def training_upload(spec, db):
             files=[{**f,'path':f['path'][len(variant)+1:]} for f in p['files'] if f['path'].startswith(variant+'/')]
             if not files: raise ValueError('训练成品文件清单为空')
             dest=Path(task[variant+'_root'])/p['group']/training_destination_name(p,variant)
-            results[variant]=transfer(spec['training_server'],Path(p['source'])/variant,dest,files,
+            results[variant]=deliver(spec['training_server'],Path(p['source'])/variant,dest,files,
                                      digest([cfg['fingerprint'],tid,variant]),progress,guard)
         # The two roots cannot share one atomic rename. Publish paired completion
         # evidence only after BOTH immutable variants have passed remote SHA checks.
@@ -148,7 +154,7 @@ def training_upload(spec, db):
         report_receipts={}
         for variant in ('normal','speedup'):
             dest=Path(task[variant+'_root'])/p['group']/'.workflow-pairs'/p['name']
-            report_receipts[variant]=transfer(spec['training_server'],audit,dest,manifest(audit),
+            report_receipts[variant]=deliver(spec['training_server'],audit,dest,manifest(audit),
                                            digest([cfg['fingerprint'],tid,'pair-report']),guard=guard)
         durable_json(Path(cfg['state_root'])/'receipts'/(tid+'.json'),
                      {'status':'completed','variants':results,'pair_reports':report_receipts})

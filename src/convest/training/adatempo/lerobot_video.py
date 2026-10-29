@@ -17,6 +17,8 @@ def resample_video(source, destination, positions, source_length, fps):
         stream = writer.add_stream("libx264", rate=Fraction(fps))
         stream.width, stream.height = original.width, original.height
         stream.pix_fmt, stream.thread_count = "yuv420p", 2
+        # Bound random access to 30 frames instead of libx264's default 250.
+        stream.codec_context.gop_size = 30
         stream.options = {"crf": "18", "preset": "veryfast"}
         for i, frame in enumerate(reader.decode(video=0)):
             count += 1

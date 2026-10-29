@@ -266,7 +266,13 @@
               >
             </div>
           </div>
-          <p class="hint" id="training-delivery-hint">训练成品经 OSS 中转，搬运校验完成后自动清理中转数据。</p>
+          <details class="server-settings oss-transit" id="oss-transit">
+            <summary>
+              OSS 中转<span class="transit-badge">校验后自动清理</span>
+            </summary>
+            <p class="hint" id="training-delivery-hint"></p>
+            <div id="oss-transit-content" class="transit-paths"></div>
+          </details>
           <details class="server-settings">
             <summary>SSH 连接设置</summary>
             <div class="three-fields">

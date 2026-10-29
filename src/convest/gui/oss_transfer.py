@@ -24,14 +24,21 @@ def transfer(target, source, destination, files, identity, progress=lambda **kw:
     # Reject impossible mappings before any SSH write.
     Path(destination).relative_to(Path(delivery['final_root']))
     total = sum(r['size'] for r in files)
-    guard(); progress(phase='oss_prepare')
-    result = call(target, {**request, 'operation': 'prepare'}, timeout=1800, transit=True)
+    context = {'bytes_total': total, 'bytes_done': 0, 'transit': str(Path(delivery['transit_root']) / Path(destination).relative_to(delivery['final_root'])),
+               'destination': str(destination)}
+    def report(**kw):
+        # Clear throughput/ETA at phase boundaries; never show a stale upload rate while verifying.
+        context.update(speed_bps=None, eta_seconds=None)
+        context.update(kw)
+        progress(**context)
+    guard(); report(phase='oss_prepare')
+    result = call(target, {**request, 'operation': 'prepare'}, timeout=1800, transit=True, progress=report)
     if result['status'] != 'completed':
-        stream_files(target, source, request, result['pending'], total, progress)
-        guard(); progress(phase='oss_publish', bytes_done=total, bytes_total=total, eta_seconds=None)
-        result = call(target, {**request, 'operation': 'commit'}, timeout=1800, transit=True)
+        stream_files(target, source, request, result['pending'], total, report)
+        guard(); report(phase='oss_check', bytes_done=total, bytes_total=total, eta_seconds=None)
+        result = call(target, {**request, 'operation': 'commit'}, timeout=1800, transit=True, progress=report)
     guard()
-    progress(phase='completed', bytes_done=total, bytes_total=total, **result)
+    report(phase='completed', bytes_done=total, bytes_total=total, **result)
     return {**result, 'token': token}
 
 

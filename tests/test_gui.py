@@ -57,7 +57,7 @@ def test_gui_native_pipeline_two_groups_separate_targets_and_retry(gui_spec,monk
                                   'transit_root': str(Path(t['normal_root']).parents[2].parent / 'oss')}
         monkeypatch.setattr(oss_remote, 'require_oss_mount', lambda root: None)
         monkeypatch.setattr(oss_remote, 'require_final_mount', lambda root: None)
-        monkeypatch.setattr(oss_transfer, 'call', lambda target, q, **kw: oss_remote.run(q))
+        monkeypatch.setattr(oss_transfer, 'call', lambda target, q, **kw: oss_remote.run(q, kw.get('progress', lambda **event: None)))
         def send(target, source, request, pending, total, progress):
             import io
             data = b''.join((Path(source) / name).read_bytes() for name in pending)

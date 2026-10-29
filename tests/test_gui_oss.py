@@ -145,7 +145,7 @@ def test_legacy_already_published_data_not_sent_back_to_oss(setup):
 def test_client_retries_server_cleanup_without_resending(setup, monkeypatch):
     source, q = setup
     sent = []
-    def call(target, request, **kwargs): return oss_remote.run(request)
+    def call(target, request, **kwargs): return oss_remote.run(request, kwargs.get('progress', lambda **kw: None))
     def send(target, src, request, pending, total, progress):
         import io
         sent.append(pending)
@@ -159,7 +159,7 @@ def test_client_retries_server_cleanup_without_resending(setup, monkeypatch):
         r = oss_transfer.transfer({}, source, q['destination'], q['files'], 'integration',
                                   lambda **kw: phases.append(kw['phase']), delivery=delivery)
         assert r['transit_cleaned']
-    assert len(sent) == 1 and 'oss_publish' in phases
+    assert len(sent) == 1 and 'oss_copy' in phases and 'oss_verify' in phases and 'oss_cleanup' in phases
 
 
 def test_delivery_policy_upgrade_keeps_queue_fingerprints(tmp_path, monkeypatch):
@@ -207,3 +207,28 @@ def test_mapping_escape_and_overlapping_roots_rejected(setup):
     with pytest.raises(ValueError): invoke({**q, 'destination': str(Path(q['final_root']).parent / 'outside')}, 'prepare')
     with pytest.raises(ValueError, match='不能重叠'):
         invoke({**q, 'transit_root': q['final_root']}, 'prepare')
+
+
+def test_ssh_progress_events_arrive_before_final_response():
+    import sys
+    from convest.gui.transport import progress_process
+    events = []
+    code = "import json,sys;json.load(sys.stdin);print(json.dumps({'event':'progress','phase':'oss_verify'}),flush=True);print(json.dumps({'status':'completed'}))"
+    result = progress_process([sys.executable, '-c', code], {}, 5, lambda **kw: events.append(kw))
+    assert events == [{'phase': 'oss_verify'}]
+    assert result.returncode == 0 and json.loads(result.stdout)['status'] == 'completed'
+
+
+def test_phase_failure_preserves_stage_and_never_reports_cleanup(setup, monkeypatch):
+    source, q = setup
+    uploaded(source, q)
+    real_copy = oss_remote.shutil.copyfile
+    phases = []
+    def failure(*args): raise OSError('copy failure')
+    monkeypatch.setattr(oss_remote.shutil, 'copyfile', failure)
+    with pytest.raises(OSError, match='copy failure'):
+        oss_remote.run({**q, 'operation': 'commit'}, lambda **kw: phases.append(kw['phase']))
+    assert phases[-1] == 'oss_copy' and 'oss_cleanup' not in phases
+    assert not Path(q['destination']).exists()
+    monkeypatch.setattr(oss_remote.shutil, 'copyfile', real_copy)
+    assert invoke(q, 'commit')['transit_cleaned']

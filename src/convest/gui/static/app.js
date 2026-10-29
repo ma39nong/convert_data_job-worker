@@ -66,6 +66,10 @@ const names = {
   transferring: "传输中",
   oss_prepare: "准备 OSS 中转",
   oss_upload: "上传至 OSS 中转",
+  oss_check: "校验中转文件",
+  oss_copy: "搬运至训练目录",
+  oss_verify: "校验最终数据并保存凭据",
+  oss_cleanup: "清理中转",
   oss_publish: "搬运至训练目录、校验并清理中转",
   remote_prepare: "准备远端目录",
   remote_sha256: "远端 SHA256 校验",
@@ -187,13 +191,49 @@ function renderEditor() {
   $("enable-task").disabled = !t;
   $("enable-task").setAttribute("aria-checked", String(Boolean(t?.enabled)));
   $("remove-task").disabled = !t;
-  const delivery = draft.training_delivery;
-  $("training-delivery-hint").textContent = delivery?.mode === "direct"
-    ? "训练成品直接上传至最终目录。"
-    : "训练成品经 OSS 中转，搬运校验完成后自动清理中转数据。";
   renderUploadPaths();
 }
+function renderTransitPreview() {
+  const t = current();
+  const delivery = draft.training_delivery || {
+    mode: "oss",
+    transit_root: "/mnt/public_data/local-realrobot-train-data",
+    final_root: "/mnt/data/train_platform/datasets",
+  };
+  const direct = delivery.mode === "direct";
+  $("training-delivery-hint").textContent = direct
+    ? "当前使用直传，未启用 OSS 中转。"
+    : "只读说明：上传中转 → 搬运到训练目录 → 最终校验 → 自动清理。完成后中转目录内看不到该批文件是正常的。";
+  if (direct) {
+    $("oss-transit-content").textContent =
+      "最终位置仍以下方上传状态及存储父目录为准。";
+    return;
+  }
+  const root = delivery.transit_root.replace(/\/+$/, "");
+  const finalRoot = delivery.final_root.replace(/\/+$/, "");
+  let html = "<strong>中转根目录</strong><code>" + esc(root) + "</code>";
+  for (const variant of ["normal", "speedup"]) {
+    const final = (t?.[variant + "_root"] || "").replace(/\/+$/, "");
+    const mapped = final.startsWith(finalRoot + "/")
+      ? root +
+        final.slice(finalRoot.length) +
+        "/{A,B}/MMDD_起号_止号_" +
+        variant +
+        "_lerobot/"
+      : "最终目录不在训练根目录下，无法映射中转路径";
+    html +=
+      "<strong>" +
+      variant +
+      " · 当前任务中转路径</strong><code>" +
+      esc(mapped) +
+      "</code>";
+  }
+  $("oss-transit-content").innerHTML =
+    html +
+    '<p class="hint">日期、编号按实际批次生成。最终副本和完成凭据保留，仅自动删除该批中转文件。</p>';
+}
 function renderPreviews() {
+  renderTransitPreview();
   const t = current();
   const previews = [
     ["raw-preview", "raw_root", "episode…"],
@@ -264,6 +304,50 @@ function renderTasks() {
     };
   });
 }
+function transitStages(p) {
+  if (
+    !p.transit &&
+    !String(p.phase || "").startsWith("oss_") &&
+    !String(p.failed_phase || "").startsWith("oss_")
+  )
+    return "";
+  const phase = p.phase === "retry" ? p.failed_phase : p.phase;
+  const keys = [
+    "oss_upload",
+    "oss_copy",
+    "oss_verify",
+    "oss_cleanup",
+    "completed",
+  ];
+  const labels = ["上传中转", "搬运", "校验", "清理", "完成"];
+  const index = keys.indexOf(
+    phase === "oss_prepare"
+      ? "oss_upload"
+      : phase === "oss_check" || phase === "oss_publish"
+        ? "oss_copy"
+        : phase,
+  );
+  return (
+    '<div class="transit-stages" aria-label="OSS 中转阶段">' +
+    keys
+      .map(
+        (key, i) =>
+          '<span class="' +
+          (i === index
+            ? p.phase === "retry"
+              ? "stage-error"
+              : "stage-current"
+            : i < index
+              ? "stage-done"
+              : "") +
+          '">' +
+          labels[i] +
+          "</span>",
+      )
+      .join('<span aria-hidden="true">→</span>') +
+    "</div>"
+  );
+}
 function transferCard(title, p, violet = false, count = "") {
   p = p || {};
   const total = p.bytes_total || 0,
@@ -286,7 +370,28 @@ function transferCard(title, p, violet = false, count = "") {
     (p.speed_bps && ["transferring", "oss_upload"].includes(p.phase)
       ? '<div class="hint">' + bytes(p.speed_bps) + "/s · 当前包</div>"
       : "") +
-    (p.error ? '<p class="hint error">' + esc(p.error) + "</p>" : "") +
+    transitStages(p) +
+    (p.artifact === "pair-report"
+      ? '<div class="hint">' +
+        (p.phase === "completed"
+          ? "双版本配对凭据已交付"
+          : "双版本配对凭据交付") +
+        "</div>"
+      : "") +
+    (p.transit
+      ? '<details class="transfer-location"><summary>本次中转位置</summary><code>' +
+        esc(p.transit) +
+        "</code></details>"
+      : "") +
+    (p.phase === "completed" && p.transit_cleaned
+      ? '<div class="hint">最终数据已校验 · 中转已清理</div>'
+      : "") +
+    (p.error
+      ? '<p class="hint error">' +
+        esc(p.failed_phase ? label(p.failed_phase) + "失败，等待重试：" : "") +
+        esc(p.error) +
+        "</p>"
+      : "") +
     "</div>"
   );
 }

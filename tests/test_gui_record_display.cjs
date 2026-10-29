@@ -61,3 +61,33 @@ test('standard local scene and A/B selections infer the scene without changing m
   vm.runInContext(`task.source='/bags/unknown/A'; inferSourceScene(task);`, context);
   assert.equal(vm.runInContext('task.scene', context), 'full-block-more');
 });
+
+test('OSS preview maps final paths, escapes values and does not offer deletion controls', () => {
+  const elements = new Map();
+  const context = vm.createContext({document:{getElementById(id) {
+    if (!elements.has(id)) elements.set(id, {});
+    return elements.get(id);
+  }}});
+  const source = fs.readFileSync(path.join(__dirname, '../src/convest/gui/static/app.js'), 'utf8');
+  vm.runInContext(source.replace(/init\(\);\s*$/, ''), context);
+  vm.runInContext(`draft={training_delivery:{mode:'oss',transit_root:'/oss',final_root:'/datasets'},tasks:[{id:'a',normal_root:'/datasets/tomato_sharpa/normal/no-block-one',speedup_root:'/datasets/tomato_sharpa/speedup/<scene>'}]}; selected='a'; renderTransitPreview();`,context);
+  const html=elements.get('oss-transit-content').innerHTML;
+  assert.match(html,/\/oss\/tomato_sharpa\/normal\/no-block-one\/\{A,B\}/);
+  assert.match(html,/&lt;scene&gt;/);
+  assert.doesNotMatch(html,/<button|<input/);
+  assert.match(elements.get('training-delivery-hint').textContent,/看不到该批文件是正常/);
+  vm.runInContext(`draft.training_delivery.mode='direct';renderTransitPreview();`,context);
+  assert.match(elements.get('training-delivery-hint').textContent,/未启用/);
+});
+
+test('OSS stage chain highlights real failure and confirms cleanup only on completion', () => {
+  const context=vm.createContext({});
+  const source=fs.readFileSync(path.join(__dirname,'../src/convest/gui/static/app.js'),'utf8');
+  vm.runInContext(source.replace(/init\(\);\s*$/, ''),context);
+  const retry=vm.runInContext(`transferCard('normal',{phase:'retry',failed_phase:'oss_cleanup',error:'access denied',transit:'/oss/batch'})`,context);
+  assert.match(retry,/stage-error">清理/);
+  assert.match(retry,/清理中转失败，等待重试/);
+  assert.doesNotMatch(retry,/中转已清理/);
+  const done=vm.runInContext(`transferCard('normal',{phase:'completed',transit_cleaned:true,transit:'/oss/batch'})`,context);
+  assert.match(done,/最终数据已校验 · 中转已清理/);
+});

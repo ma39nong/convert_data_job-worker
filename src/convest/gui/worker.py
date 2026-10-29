@@ -127,19 +127,25 @@ def training_upload(spec, db):
     row=db.execute("SELECT * FROM tasks WHERE state IN ('local_ready','upload_retry','uploading') AND next_ns<=? ORDER BY updated_ns,id LIMIT 1",(time.time_ns(),)).fetchone()
     if not row: return False
     p=json.loads(row['payload']); tid=row['id']; results={}
+    latest = {}
+    def progress_for(variant, artifact='dataset', announce=True):
+        def progress(**kw):
+            latest.clear()
+            latest.update(task=tid, route=p['robot']+'-'+p['group'], variant=variant, artifact=artifact,
+                          updated_ns=time.time_ns(), **kw)
+            durable_json(Path(cfg['state_root'])/'upload_progress.json', latest)
+            durable_json(Path(cfg['state_root'])/('upload_progress_'+variant+'.json'), latest)
+        if announce: progress(phase='oss_prepare' if delivery['mode']=='oss' else 'remote_prepare')
+        return progress
     def guard(): require_same(p['source'],p['snapshot'])
     try:
         training.update(db,tid,state='uploading',error=None)
         for variant in ('normal','speedup'):
-            def progress(**kw):
-                value={'task':tid,'route':p['robot']+'-'+p['group'],'variant':variant,'updated_ns':time.time_ns(),**kw}
-                durable_json(Path(cfg['state_root'])/'upload_progress.json',value)
-                durable_json(Path(cfg['state_root'])/('upload_progress_'+variant+'.json'),value)
             files=[{**f,'path':f['path'][len(variant)+1:]} for f in p['files'] if f['path'].startswith(variant+'/')]
             if not files: raise ValueError('训练成品文件清单为空')
             dest=Path(task[variant+'_root'])/p['group']/training_destination_name(p,variant)
             results[variant]=deliver(spec['training_server'],Path(p['source'])/variant,dest,files,
-                                     digest([cfg['fingerprint'],tid,variant]),progress,guard)
+                                     digest([cfg['fingerprint'],tid,variant]),progress_for(variant),guard)
         # The two roots cannot share one atomic rename. Publish paired completion
         # evidence only after BOTH immutable variants have passed remote SHA checks.
         import shutil
@@ -155,13 +161,20 @@ def training_upload(spec, db):
         for variant in ('normal','speedup'):
             dest=Path(task[variant+'_root'])/p['group']/'.workflow-pairs'/p['name']
             report_receipts[variant]=deliver(spec['training_server'],audit,dest,manifest(audit),
-                                           digest([cfg['fingerprint'],tid,'pair-report']),guard=guard)
+                                           digest([cfg['fingerprint'],tid,'pair-report']),progress=progress_for(variant,'pair-report'),guard=guard)
         durable_json(Path(cfg['state_root'])/'receipts'/(tid+'.json'),
                      {'status':'completed','variants':results,'pair_reports':report_receipts})
+        for variant in ('normal','speedup'):
+            total=sum(f['size'] for f in p['files'] if f['path'].startswith(variant+'/'))
+            progress_for(variant, announce=False)(phase='completed', bytes_done=total, bytes_total=total, **results[variant])
         training.update(db,tid,state='uploaded',next_ns=0,error=None)
     except Exception as e:
         training.update(db,tid,state='upload_retry',error=f'{type(e).__name__}: {e}',next_ns=time.time_ns()+cfg['retry_seconds']*10**9)
-        durable_json(Path(cfg['state_root'])/'upload_progress.json',{'task':tid,'phase':'retry','error':str(e),'updated_ns':time.time_ns()})
+        failure={**latest,'task':tid,'phase':'retry','failed_phase':latest.get('phase'),
+                 'error':str(e),'updated_ns':time.time_ns()}
+        durable_json(Path(cfg['state_root'])/'upload_progress.json', failure)
+        if latest.get('variant'):
+            durable_json(Path(cfg['state_root'])/('upload_progress_'+latest['variant']+'.json'), failure)
     return True
 
 

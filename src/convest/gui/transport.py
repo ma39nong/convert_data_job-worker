@@ -34,10 +34,13 @@ def agent_code(*, transit=False):
     return code
 
 
-def call(target, request, timeout=120, *, transit=False):
+def call(target, request, timeout=120, *, transit=False, progress=None):
     code = agent_code(transit=transit)
-    result = subprocess.run([*ssh_args(target), target['host'], shlex.join(['python3', '-c', code])],
-                            input=json.dumps(request)+'\n', capture_output=True, text=True, timeout=timeout)
+    command = [*ssh_args(target), target['host'], shlex.join(['python3', '-c', code])]
+    if progress is not None:
+        result = progress_process(command, {**request, 'report_progress': True}, timeout, progress)
+    else:
+        result = subprocess.run(command, input=json.dumps(request)+'\n', capture_output=True, text=True, timeout=timeout)
     try: response = json.loads(result.stdout)
     except ValueError:
         raise OSError((result.stderr or 'SSH 未返回有效结果').strip()[-2000:]) from None
@@ -83,3 +86,39 @@ def verify_backup(target, destination, files, identity):
     token = digest({'destination': str(destination), 'identity': identity, 'files': files})
     return call(target, {'operation': 'verify', 'destination': str(destination), 'token': token,
                          'files': files}, timeout=1800)
+
+
+def progress_process(command, request, timeout, progress):
+    """Read real SSH phase events while preserving the final JSON response."""
+    import queue
+    import tempfile
+    import threading
+    events = queue.Queue()
+    with tempfile.TemporaryFile(mode='w+t') as errors, subprocess.Popen(
+            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors,
+            text=True, bufsize=1) as child:
+        def read_lines():
+            try:
+                for line in child.stdout: events.put(line)
+            finally: events.put(None)
+        reader = threading.Thread(target=read_lines, daemon=True)
+        reader.start(); deadline = time.monotonic() + timeout; response = ''
+        try:
+            child.stdin.write(json.dumps(request) + '\n'); child.stdin.close()
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0: raise subprocess.TimeoutExpired(command, timeout)
+                try: line = events.get(timeout=remaining)
+                except queue.Empty: raise subprocess.TimeoutExpired(command, timeout) from None
+                if line is None: break
+                item = json.loads(line)
+                if item.get('event') == 'progress':
+                    progress(**{k: v for k, v in item.items() if k != 'event'})
+                else: response = line
+            code = child.wait(timeout=max(.01, deadline-time.monotonic()))
+            errors.seek(0)
+            return subprocess.CompletedProcess(command, code, response, errors.read())
+        except BaseException:
+            child.kill(); child.wait()
+            raise
+        finally: reader.join(timeout=2)

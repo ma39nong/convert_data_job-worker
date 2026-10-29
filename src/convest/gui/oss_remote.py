@@ -67,7 +67,7 @@ def check(root, files, *, partial=False, hashes=True):
     return found
 
 
-def run(q):
+def run(q, progress=lambda **kw: None):
     destination = safe(q['destination'])
     final_root = safe(q['final_root'])
     transit_root = safe(q['transit_root'])
@@ -118,19 +118,26 @@ def run(q):
                            or sha(transit / r['path']) != r['sha256']]
                 return {'status': 'staging', 'staging': str(transit), 'pending': pending}
             # Closing the upload stream and reopening every mounted object precedes CPFS copy.
+            progress(phase='oss_check')
             check(transit, q['files'])
+            total = sum(r['size'] for r in q['files']); done = 0
+            progress(phase='oss_copy', bytes_done=0, bytes_total=total)
             stage = safe(prepared['staging'])
             for r in q['files']:
                 source = safe(transit / r['path']); target = safe(stage / r['path'])
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, target)
+                done += r['size']
+                progress(phase='oss_copy', bytes_done=done, bytes_total=total)
             # CPFS publication rechecks exact manifest, SHA, fsyncs and renames.
+        progress(phase='oss_verify')
         result = publish({**final_q, 'operation': 'commit'})
         # Durable final receipt exists and has been read back at this point.
         if intent['state'] == 'cleaned':
             if transit.exists(): raise ValueError('已清理中转目录再次出现，拒绝删除')
             return {**result, 'transit': str(transit), 'transit_cleaned': True}
         # Full check before first delete; subset/hash check allows interrupted cleanup.
+        progress(phase='oss_cleanup')
         check(transit, q['files'], partial=intent['state'] == 'cleaning')
         intent.update(state='cleaning', final_receipt=result['receipt'])
         atomic(intent_path, intent)
@@ -186,7 +193,10 @@ def receive(q, stream):
 if __name__ == '__main__':
     try:
         request = json.loads(sys.stdin.buffer.readline())
-        result = receive(request, sys.stdin.buffer) if request['operation'] == 'receive' else run(request)
+        def progress(**kw):
+            if request.get('report_progress'):
+                print(json.dumps({'event': 'progress', **kw}), flush=True)
+        result = receive(request, sys.stdin.buffer) if request['operation'] == 'receive' else run(request, progress)
         print(json.dumps(result, ensure_ascii=False))
     except Exception as e:
         print(json.dumps({'status': 'error', 'error': str(e)}, ensure_ascii=False))

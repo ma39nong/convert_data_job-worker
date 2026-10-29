@@ -1080,3 +1080,54 @@ dialog::backdrop {
   background: #edf2f8;
   border-color: #aebdd1;
 }
+
+/* Keep OSS guidance folded by default; paths remain readable at narrow widths. */
+.oss-transit {
+  margin-top: 12px;
+}
+.transit-badge {
+  margin-left: 10px;
+  color: #28846d;
+  font-size: 11px;
+}
+.transit-paths strong {
+  display: block;
+  margin-top: 12px;
+  font-size: 12px;
+}
+.transit-paths code,
+.transfer-location code {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font-size: 11px;
+  line-height: 1.7;
+  color: #60799f;
+}
+.transit-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+  color: #94a3b8;
+  font-size: 10px;
+}
+.transit-stages .stage-current {
+  color: #245ce0;
+  font-weight: 700;
+}
+.transit-stages .stage-done {
+  color: #28846d;
+}
+.transit-stages .stage-error {
+  color: #c44a5b;
+  font-weight: 700;
+}
+.transfer-location {
+  margin-top: 6px;
+  font-size: 10px;
+  color: #60799f;
+}
+.transfer-location summary {
+  cursor: pointer;
+}

@@ -9,7 +9,7 @@ from convest.config import atomic_json,digest
 from convest.ingest.batches import BatchPublisher,durable_json
 from convest.ingest.worker import archive_reports
 from convest.ingest.inputs import require_same,InputChanged,snapshot
-from . import ledger
+from . import ledger,group_batches
 from .transfer import enqueue,manifest,copy_tree,verify_tree,check_mount,ensure_real_path,TransferConflict
 from .retention import delete_original
 
@@ -27,6 +27,7 @@ def payload_for(cfg,route,bag,proof,generation):
 
 
 def recover(cfg,route,bag,proof):
+    group_batches.maintain(cfg)
     pub=publisher(cfg,route);known=pub.published()
     if bag.name not in known:return None
     if known[bag.name]['ingest']['content_identity']!=proof['content_identity']:
@@ -39,7 +40,8 @@ def commit(cfg,queue,route,bag,proof,job,guard,started_ns):
     archive=Path(cfg['state_root'])/'audits'/route['id']/bag.name/proof['content_identity']
     archive_reports(job,archive)
     shutil.copyfile(job/'cleaned'/bag.name/'trim_report.json',archive/'trim_report.json')
-    generation=publisher(cfg,route).publish(job/'dataset',proof,bag.name,archive,precommit=guard,started_ns=started_ns)
+    generation=group_batches.publish(cfg,lambda:publisher(cfg,route).publish(
+        job/'dataset',proof,bag.name,archive,precommit=guard,started_ns=started_ns))
     return payload_for(cfg,route,bag,proof,generation)
 
 
@@ -73,6 +75,8 @@ def cleanup_intermediates(cfg,route,bag,proof,root):
 def maintain(cfg,queue,now_ns=None):
     now=time.time_ns() if now_ns is None else now_ns
     errors={}
+    try:group_batches.maintain(cfg)
+    except Exception as exc:errors['batch_group']=f'{type(exc).__name__}: {exc}'
     for route in cfg['routes']:
         pub=publisher(cfg,route)
         try:
@@ -87,7 +91,7 @@ def maintain(cfg,queue,now_ns=None):
                       deadline_ns=excluded.deadline_ns,frames=excluded.frames,sources=excluded.sources''',
                       (route['id'],batch['id'],batch.get('name'),batch.get('generation'),state,batch.get('opened_ns'),
                        batch.get('deadline_ns'),batch.get('frames'),json.dumps(batch.get('sources',[]))))
-                if batch['state']!='sealed':continue
+                if batch['state']!='sealed' or (batch.get('group_id') and not batch.get('group_ready')):continue
                 identity=digest([route['id'],batch['id'],batch['generation'],batch['deadline_ns']])
                 taskid=digest([route['id'],batch['id'],identity])
                 if queue.db.execute('SELECT 1 FROM uploads WHERE id=?',(taskid,)).fetchone():continue

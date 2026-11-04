@@ -112,7 +112,8 @@ def training_destination_name(payload, variant):
     if variant not in ('normal', 'speedup'):raise ValueError('Invalid training variant')
     batch=payload.get('batch_name', '')
     if re.fullmatch(r'[0-9]{4}_[0-9]+_[0-9]+_data_lerobot', batch):
-        return batch.removesuffix('_data_lerobot')+'_'+variant+'_lerobot'
+        suffix=variant if payload.get('destination_name_format')=='variant-short-v1' else variant+'_lerobot'
+        return batch.removesuffix('_data_lerobot')+'_'+suffix
     # Existing queued payloads retain their original destination and receipt identity.
     return payload['name']
 

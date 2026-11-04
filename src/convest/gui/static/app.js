@@ -61,7 +61,7 @@ const names = {
   sealed: "已封存",
   uploading: "上传中",
   waiting_batch: "等待新批次",
-  waiting_seal: "等待 24h 封存",
+  waiting_seal: "等待 A+B 满 100 条封包",
   blocked: "受阻",
   transferring: "传输中",
   oss_prepare: "准备 OSS 中转",
@@ -219,7 +219,7 @@ function renderTransitPreview() {
         final.slice(finalRoot.length) +
         "/{A,B}/MMDD_起号_止号_" +
         variant +
-        "_lerobot/"
+        "/"
       : "最终目录不在训练根目录下，无法映射中转路径";
     html +=
       "<strong>" +
@@ -238,8 +238,8 @@ function renderPreviews() {
   const previews = [
     ["raw-preview", "raw_root", "episode…"],
     ["data-preview", "lerobot_root", "MMDD_起号_止号_data_lerobot"],
-    ["normal-preview", "normal_root", "MMDD_起号_止号_normal_lerobot"],
-    ["train-preview", "speedup_root", "MMDD_起号_止号_speedup_lerobot"],
+    ["normal-preview", "normal_root", "MMDD_起号_止号_normal"],
+    ["train-preview", "speedup_root", "MMDD_起号_止号_speedup"],
   ];
   previews.forEach(([id, field, child]) => {
     $(id).innerHTML = t
@@ -467,7 +467,7 @@ function renderProgress() {
     uploads.every((u) => u.state === "completed")
   ) {
     if (batches.some((b) => b.state === "active"))
-      phase = "原包已完成备份，等待 24h 批次封存；继续监听新录制。";
+      phase = "原包已完成备份，等待 A+B 合计满 100 条封包；继续监听新录制。";
     else if (training.length && training.every((j) => j.state === "uploaded"))
       phase = "已发现的录制与两版成品均已校验上传，继续监听新录制。";
   }
@@ -481,7 +481,7 @@ function renderProgress() {
       backed + " 包备份完成",
     ) +
     transferCard(
-      "24h LeRobot → 202",
+      "完整 LeRobot → 202",
       s.batch_upload,
       false,
       uploads.filter((u) => u.dataset_done).length + " 批完成",
@@ -540,7 +540,7 @@ function renderProgress() {
     .filter(visibleRecord("batch"))
     .map(
       (b) =>
-        "<tr><td>24h · " +
+        (b.group_id ? "<tr><td>100条一轮 · " : "<tr><td>历史批次 · ") +
         esc(b.name || b.batch_id) +
         "</td><td>" +
         esc(b.route) +
@@ -552,7 +552,7 @@ function renderProgress() {
         esc(b.frames || 0) +
         " 帧 · " +
         esc(JSON.parse(b.sources || "[]").length) +
-        " 条轨迹</td></tr>",
+        " 条录制</td></tr>",
     )
     .join("");
   html += training
@@ -588,12 +588,19 @@ function renderProgress() {
   $("record-foot").hidden =
     $("toggle-records").getAttribute("aria-expanded") !== "true";
   $("clear-records").disabled = !t;
-  const deadlines = batches
-    .filter((b) => b.state === "active" && b.deadline_ns)
-    .map((b) => b.deadline_ns / 1e9 - Date.now() / 1000);
-  $("batch-clock").textContent = deadlines.length
-    ? "下一批封存剩余 " + duration(Math.min(...deadlines))
-    : "24 小时滚动封存，封存后自动衔接两版处理";
+  const active = batches.filter((b) => b.state === "active");
+  const count = active.reduce(
+    (n, b) => n + JSON.parse(b.sources || "[]").length,
+    0,
+  );
+  const sealing = batches.some((b) => b.group_id && b.group_ready === false);
+  $("batch-clock").textContent = sealing
+    ? "本轮 A+B 已满 100 条，正在校验封包；通过后衔接两版处理"
+    : "本轮 A+B 已累计 " +
+      count +
+      "/100 条有效录制" +
+      (count < 100 ? " · 还差 " + (100 - count) + " 条" : " · 等待封包校验") +
+      "；不足 100 条继续累计";
   $("runtime-path").textContent = s.root
     ? "运行记录：" +
       s.root +

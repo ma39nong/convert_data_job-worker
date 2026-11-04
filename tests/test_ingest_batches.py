@@ -216,6 +216,13 @@ def test_dated_batch_uses_last_completed_generation_beijing_date_and_keeps_legac
     from datetime import datetime
     from zoneinfo import ZoneInfo
     import convest.ingest.publish as generation
+    # Keep this historical cross-midnight test independent of the real calendar.
+    import convest.ingest.batches as batches_module
+    from types import SimpleNamespace
+    fixed=int(datetime(2026,10,27,0,0,2,tzinfo=ZoneInfo('Asia/Shanghai')).timestamp()*1e9)
+    monkeypatch.setattr(batches_module,'time',SimpleNamespace(time_ns=lambda:fixed))
+    import convest.ingest.worker as ingest_worker
+    monkeypatch.setattr(ingest_worker,'time',SimpleNamespace(time_ns=lambda:fixed))
     cfg=service
     route=cfg['routes'][2]
     route['batch_name_format']='completion-mmdd-v1'
@@ -228,7 +235,7 @@ def test_dated_batch_uses_last_completed_generation_beijing_date_and_keeps_legac
     monkeypatch.setattr(generation,'atomic_json',dated_marker)
     bag(cfg,2,100);bag(cfg,2,200)
     with worker_context(cfg) as q:
-        assert ready_scan(cfg,q)['counts']=={'published':2}
+        assert ready_scan(cfg,q,t=fixed)['counts']=={'published':2}
         pub=publisher(cfg);batch=pub.status()[0]
         assert batch['name']=='1027_100_200_data_lerobot'
         assert batch['last_completed_ns']==int(datetime(2026,10,27,0,0,1,tzinfo=ZoneInfo('Asia/Shanghai')).timestamp()*1e9)

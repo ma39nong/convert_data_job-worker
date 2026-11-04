@@ -120,7 +120,7 @@ class Manager:
             settings=copy.deepcopy(self.settings)
         result=[]
         for task in settings['tasks']:
-            item={'id':task['id'],**self.state(task['id'])}
+            item={'id':task['id'],**self.state(task['id']), 'batch_policy':{'mode':'combined-count','size':100}}
             root=self.current(task['id'])
             if root:
                 capture=root/'capture/state';train=root/'training/state'
@@ -133,6 +133,16 @@ class Manager:
                             discovery=read(train/'discovery.json',{}),videos=read(train/'video_progress.json',{}),
                             raw_upload=read(capture/'upload_progress_raw.json',{}),batch_upload=read(capture/'upload_progress_batch.json',{}),
                             normal_upload=read(train/'upload_progress_normal.json',{}),speedup_upload=read(train/'upload_progress_speedup.json',{}))
+                spec=read(root/'spec.json',{})
+                routes=spec.get('capture',{}).get('routes',[])
+                catalogue={}
+                for route in routes:
+                    for batch in read(Path(route['output'])/'.ingest/batches.json',{}).get('batches',[]):
+                        catalogue[(route['id'],batch['id'])]=batch
+                for batch in item['batches']:
+                    source=catalogue.get((batch['route'],batch['batch_id']),{})
+                    for key in ('group_id','group_size','group_total','group_ready'):
+                        if key in source:batch[key]=source[key]
                 item['capture_status']=read(capture/'status.json',{})
                 for row in item['training']:
                     source=json.loads(row.pop('spec'))
@@ -143,7 +153,7 @@ class Manager:
             result.append(item)
         disk=__import__('shutil').disk_usage(self.root)
         return {'settings':settings,'tasks':result,'updated_ns':time.time_ns(),
-                'disk':{'free':disk.free,'total':disk.total},'batch_hours':24}
+                'disk':{'free':disk.free,'total':disk.total},'batch_policy':{'mode':'combined-count','size':100}}
     def logs(self,tid):
         self.task(tid);root=self.current(tid)
         if not root:return '尚未开始工作流。保存设置后点击“开始工作流”。'

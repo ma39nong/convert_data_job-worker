@@ -48,8 +48,8 @@ def gui_spec(daily_cfg,tmp_path,monkeypatch):
     return {'capture':cfg,'training':train,'task':task,'data_server':{},'training_server':{}}
 
 
-@pytest.mark.parametrize('dated,oss', [(False, False), (True, False), (True, True)])
-def test_gui_native_pipeline_two_groups_separate_targets_and_retry(gui_spec,monkeypatch,dated,oss):
+@pytest.mark.parametrize('dated,oss,counted_mode', [(False, False, False), (True, False, False), (True, True, False), (True, True, True)])
+def test_gui_native_pipeline_two_groups_separate_targets_and_retry(gui_spec,monkeypatch,dated,oss,counted_mode):
     s=gui_spec;c=s['capture'];t=s['task']
     if oss:
         from convest.gui import oss_remote, oss_transfer
@@ -65,17 +65,22 @@ def test_gui_native_pipeline_two_groups_separate_targets_and_retry(gui_spec,monk
         monkeypatch.setattr(oss_transfer, 'stream_files', send)
     if dated:
         for r in c['routes']:r['batch_name_format']='completion-mmdd-v1'
+    if counted_mode:
+        c['batch_group_size']=2
+        for r in c['routes']:r.update(batch_group_size=2,batch_name_format='seal-mmdd-v1')
+        s['training']['destination_name_format']='variant-short-v1'
     for i in range(2):bag(c,i,1)
     with capture_context(c) as q:
         ready(c,q)
-        for _ in range(2):assert worker.capture_upload(s,q)
+        for _ in range(4 if counted_mode else 2):assert worker.capture_upload(s,q)
         assert all(not (Path(r['source'])/'episode1').exists() for r in c['routes'])
         for r in c['routes']:
             assert (Path(t['raw_root'])/r['group']/'episode1/metadata.yaml').is_file()
         ledger=json.loads((Path(c['state_root'])/'recordings.json').read_text())
         assert all('/scene/'+r['route'][-1]+'/episode1' in r['remote_original'] for r in ledger['recordings'])
-        daily.maintain(c,q,due(c))
-        for _ in range(2):assert worker.capture_upload(s,q)
+        if not counted_mode:
+            daily.maintain(c,q,due(c))
+            for _ in range(2):assert worker.capture_upload(s,q)
     with training.context(s['training']) as db:
         training.discover(s['training'],db)
         for _ in range(2):assert training.process_once(s['training'],db)
@@ -105,9 +110,9 @@ def test_gui_native_pipeline_two_groups_separate_targets_and_retry(gui_spec,monk
             info_path=next((Path(t[v+'_root'])/group).glob('*/meta/info.json'))
             if dated:
                 import re
-                assert re.fullmatch(r'[0-9]{4}_1_1_'+v+'_lerobot', info_path.parent.parent.name)
+                assert re.fullmatch(r'[0-9]{4}_1_1_'+v+('' if counted_mode else '_lerobot'), info_path.parent.parent.name)
                 upstream=daily.publisher(c,next(r for r in c['routes'] if r['group']==group)).status()[0]
-                assert info_path.parent.parent.name==upstream['name'].replace('_data_lerobot','_'+v+'_lerobot')
+                assert info_path.parent.parent.name==upstream['name'].replace('_data_lerobot','_'+v+('' if counted_mode else '_lerobot'))
                 assert (Path(t['lerobot_root'])/group/upstream['name']/'meta/info.json').exists()
             info=json.loads(info_path.read_text())
             assert info['features']['observation.state']['shape']==[116]
@@ -141,7 +146,7 @@ def test_settings_duplicate_roots_and_paths_have_independent_versions(tmp_path,m
     settings=config.validate(settings);root,a=config.runtime(settings,task)
     same,b=config.runtime(settings,{**task,'name':'renamed'})
     assert root==same and a['capture']['fingerprint']==b['capture']['fingerprint']
-    assert all(r['batch_name_format']=='completion-mmdd-v1' for r in a['capture']['routes'])
+    assert all(r['batch_name_format']=='seal-mmdd-v1' and r['batch_group_size']==100 for r in a['capture']['routes'])
     manual_same, manual_spec = config.runtime(settings, {**task, 'auto_upload_paths': False})
     assert manual_same == root
     assert manual_spec['training']['fingerprint'] == a['training']['fingerprint']
@@ -244,12 +249,13 @@ def test_upload_path_mode_save_reload_and_legacy_migration(tmp_path, monkeypatch
         config.validate(settings)
 
 
-def test_gui_lerobot_release_requires_all_backups_and_recovers(gui_spec, monkeypatch):
+@pytest.mark.parametrize('counted_mode',[False,True])
+def test_gui_lerobot_release_requires_all_backups_and_recovers(gui_spec, monkeypatch, counted_mode):
     from convest.gui import retention
     from convest.ingest.batches import durable_json
     s = gui_spec; c = s['capture']; cfg = s['training']
     # Build real native normal/speedup pairs and completed remote receipts.
-    test_gui_native_pipeline_two_groups_separate_targets_and_retry(s, monkeypatch, True, False)
+    test_gui_native_pipeline_two_groups_separate_targets_and_retry(s, monkeypatch, True, False, counted_mode)
     monkeypatch.setattr(retention, 'verify_backup', local_verify)
     with training.context(cfg) as db:
         rows = db.execute('SELECT * FROM tasks').fetchall()

@@ -91,3 +91,21 @@ test('OSS stage chain highlights real failure and confirms cleanup only on compl
   const done=vm.runInContext(`transferCard('normal',{phase:'completed',transit_cleaned:true,transit:'/oss/batch'})`,context);
   assert.match(done,/最终数据已校验 · 中转已清理/);
 });
+
+test('batch footer counts A+B valid sources and no longer shows a 24-hour countdown', () => {
+  const elements=new Map();
+  const context=vm.createContext({document:{getElementById(id) {
+    if(!elements.has(id))elements.set(id,{classList:{toggle(){}},getAttribute:()=> 'true'});
+    return elements.get(id);
+  }}});
+  const source=fs.readFileSync(path.join(__dirname,'../src/convest/gui/static/app.js'),'utf8');
+  vm.runInContext(source.replace(/init\(\);\s*$/, ''),context);
+  vm.runInContext(`draft={tasks:[{id:'a',name:'A',enabled:true}]};selected='a';snapshot={tasks:[],updated_ns:0};
+    state=()=>({state:'stopped',jobs:[],uploads:[],training:[],batches:[
+      {route:'sharpa-A',batch_id:'batch-1',state:'active',sources:JSON.stringify(Array.from({length:60},(_,i)=>'episode'+i))},
+      {route:'sharpa-B',batch_id:'batch-2',state:'active',sources:JSON.stringify(Array.from({length:39},(_,i)=>'episode'+i))}
+    ]});renderProgress();`,context);
+  assert.match(elements.get('batch-clock').textContent,/99\/100/);
+  assert.match(elements.get('batch-clock').textContent,/还差 1 条/);
+  assert.doesNotMatch(elements.get('transfer-grid').innerHTML,/24h/);
+});

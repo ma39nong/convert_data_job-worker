@@ -1,4 +1,4 @@
-"""Independent timed batches built with the existing immutable publisher."""
+"""Immutable route batches with timed or coordinated source-count boundaries."""
 from contextlib import contextmanager
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -96,7 +96,7 @@ class BatchPublisher:
     def _range(self,names,completed_ns=None,name_format=None):
         numbers=[int(n[7:]) for n in names]
         stem=f'{min(numbers)}_{max(numbers)}_data_lerobot'
-        if (name_format or self.route.get('batch_name_format'))=='completion-mmdd-v1':
+        if (name_format or self.route.get('batch_name_format')) in ('completion-mmdd-v1','seal-mmdd-v1'):
             stamp=time.time_ns() if completed_ns is None else completed_ns
             return datetime.fromtimestamp(stamp/1e9,ZoneInfo('Asia/Shanghai')).strftime('%m%d')+'_'+stem
         return stem
@@ -112,18 +112,21 @@ class BatchPublisher:
             for name,record in index.items():
                 if name in published:raise ValueError('Source present in multiple batches')
                 published[name]=record
+            if batch['state']=='active' and self.route.get('batch_group_size'):
+                batch['group_size']=self.route['batch_group_size']
+                batch['deadline_ns']=None
             if batch.get('opened_ns') is None:
                 marker=read(root/'ingest/generation.json')
                 # An interrupted first publication may be recovered from its
                 # generation timestamp, never by restarting the 72-hour timer.
                 while marker.get('parent'):marker=read(Path(marker['parent'])/'ingest/generation.json')
                 batch['opened_ns']=marker['created_ns']
-                batch['deadline_ns']=batch['opened_ns']+self.duration_ns
+                batch['deadline_ns']=None if batch.get('group_size') else batch['opened_ns']+self.duration_ns
             # The newest immutable generation records the final successful append.
             # Recover from this durable timestamp, never from seal/upload/restart time.
             completed_ns=read(root/'ingest/generation.json')['created_ns']
             name_format=batch.get('name_format','range-v1')
-            desired=self._range(names,completed_ns,name_format);self._check_alias(desired,batch)
+            desired=self._range(names,batch.get('name_date_ns',completed_ns),name_format);self._check_alias(desired,batch)
             if name_format=='completion-mmdd-v1':
                 batch['last_completed_ns']=completed_ns
             alias=self.output/desired
@@ -170,12 +173,39 @@ class BatchPublisher:
 
     def _seal_due(self,catalog,now):
         for batch in catalog['batches']:
-            if batch['state']!='active' or batch.get('deadline_ns') is None or now<batch['deadline_ns']:continue
+            if batch['state']!='active':continue
+            requested=batch.get('seal_requested_ns')
+            if not requested and (batch.get('group_size') or batch.get('deadline_ns') is None or now<batch['deadline_ns']):continue
             try:result=self._verify_seal(batch)
             except Exception as exc:
                 batch['seal_error']=f'{type(exc).__name__}: {exc}';self._save(catalog);raise
             batch.update(state='sealed',sealed_ns=max(now,result['checked_ns']),verification=result)
             batch.pop('seal_error',None);self._save(catalog)
+
+    def request_group_seal(self,batch_id,prepared_ns,group_id,total):
+        """Persist the shared boundary/date before sealing; safely replay after a crash."""
+        with self._locked():
+            catalog=self._catalog();self._sync(catalog)
+            batch=next(b for b in catalog['batches'] if b['id']==batch_id)
+            if batch['state']=='sealed':
+                if (batch.get('group_id')!=group_id or batch.get('group_total')!=total
+                        or batch.get('name_date_ns')!=prepared_ns):raise ValueError('Group seal identity mismatch')
+                return
+            if batch.get('group_id') not in (None,group_id):raise ValueError('Group seal identity changed')
+            if batch.get('group_id') and (batch.get('name_date_ns')!=prepared_ns or batch.get('group_total')!=total):
+                raise ValueError('Group seal date/boundary changed')
+            batch.update(group_id=group_id,group_total=total,group_ready=False,
+                         name_format='seal-mmdd-v1',name_date_ns=prepared_ns,seal_requested_ns=prepared_ns)
+            self._save(catalog);self._sync(catalog)
+            self._seal_due(catalog,prepared_ns)
+
+    def finish_group_seal(self,batch_id,group_id):
+        with self._locked():
+            catalog=self._catalog()
+            batch=next(b for b in catalog['batches'] if b['id']==batch_id)
+            if batch['state']!='sealed' or batch.get('group_id')!=group_id:
+                raise ValueError('Cannot release an unverified group batch')
+            batch['group_ready']=True;self._save(catalog)
 
     def published(self,now_ns=None):
         if not self._exists():return {}

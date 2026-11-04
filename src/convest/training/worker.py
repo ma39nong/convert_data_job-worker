@@ -81,7 +81,8 @@ def sealed(cfg, spec):
     if len(matches) != 1:
         raise ValueError('Upstream batch missing/ambiguous')
     batch = matches[0]
-    if batch.get('state') != 'sealed' or not batch.get('sealed_ns') or batch.get('seal_error'):
+    if (batch.get('state') != 'sealed' or not batch.get('sealed_ns') or batch.get('seal_error')
+            or (batch.get('group_id') and not batch.get('group_ready'))):
         raise ValueError('waiting_seal: upstream batch is not sealed')
     if not re.fullmatch(r'(?:[0-9]{4}_)?[0-9]+_[0-9]+_data_lerobot', batch.get('name', '')):
         raise ValueError('Invalid batch range name')
@@ -269,6 +270,8 @@ def process_once(cfg, db):
         files = read(destination.parent / (destination.name + '.manifest.json'))
         payload = {'source': str(destination), 'files': files, 'snapshot': snapshot(destination),
                    'robot': spec['robot'], 'group': spec['group'], 'name': destination.name, 'batch_name': spec['name']}
+        if cfg.get('destination_name_format'):
+            payload['destination_name_format']=cfg['destination_name_format']
         update(db, task, state='local_ready', payload=json.dumps(payload), next_ns=0, error=None)
         progress('local_ready', output=str(destination))
     except Exception as exc:

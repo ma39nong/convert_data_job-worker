@@ -149,10 +149,13 @@ def runtime(settings, task):
     capture = load_capture(file)
     # Naming is prospective metadata, not a new input/transfer queue. Existing
     # catalogued batches keep their own format; only newly opened batches opt in.
-    for route in capture['routes']:route['batch_name_format']='completion-mmdd-v1'
+    # Prospective boundary upgrade: retain queue/store identities and existing sealed batches.
+    capture['batch_group_size']=100
+    for route in capture['routes']:
+        route.update(batch_name_format='seal-mmdd-v1',batch_group_size=100)
     training = {'capture': capture, 'state_root': str(root/'training/state'), 'output_root': str(root/'training/datasets'),
                 'poll_seconds': 5, 'retry_seconds': 30, 'workers': 2, 'cmax': 3.0, 'min_free_gib': 8,
-                'training_target': settings['training_server']}
+                'training_target': settings['training_server'], 'destination_name_format': 'variant-short-v1'}
     training['fingerprint'] = digest({'capture': capture['fingerprint'], 'task': semantic,
                                       'training_target': settings['training_server'], 'protocol': 'gui-native-training-v1'})
     spec = {'root': str(root), 'capture_file': str(file), 'capture': capture, 'training': training,

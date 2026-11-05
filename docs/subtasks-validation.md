@@ -169,3 +169,31 @@ Sharpa heldout ep1 v12为27段，6个未证实边界。约189–224秒（5682–
 首轮Wuji additional ep2概览因输出未完成而拒绝发布，完整失败报告在本轮目录first-attempt-report.json，原响应在raw-incomplete。将全局输出限定为9个结构区间、局部仍独立重看逐果动作后重跑成功，62个逻辑请求（含缓存）产出26段；通过--resume仅接续这一条，其他已保存结果不重写。resumed_at与最初started_at均保留。最终报告为quality-review/report.json，逐条proposal/behavior/published、人工reference-boundaries、用户案例user-feedback-verification及final-verification均在1adeebcf5b0e698c目录。逻辑请求数不代表整个调试的实际账单。
 
 8766已正常SIGINT收尾并保留HTTP token，最终PID3985766；8765及原pipeline未动。真实浏览器核实11/11、各版本/疑点/异常、人工参考80.6%/96.6%、speedup帧差和异常定位链接；Sharpa ep2定位2031帧时三路画面均readyState4，选中第10/19段[2031,2346)，七粗阶段、八个主标签选项（含unknown），0段自动人工确认。复查页warn/error为空，完整截图为quality-review/review-all-eleven.png；用户原页面未刷新、未代保存。
+
+## V8：首次提起标准及全11条边界复查
+
+用户明确第1→2段从“开始提起的第一帧”进入，握稳后仍静止的时间留在第1段。V7临时“握稳即切”假设已撤销；手指姿态收敛只作辅助，不能直接充当提起时间。当前策略 `tomato_lift_motion_first_extraction_v8` 要求相邻原帧 `secured+still → secured+lift_onset`。左手从最后有效抓稳后的第一次主动摘脱进入摘下放盘，包含该次连续握持中的持续扭拉，不等最后一下断开。
+
+本轮采用 `--boundaries-only`，保留已有动作循环并重查全部边界，不能视为独立分段准确率测试。run `08bd11b3431afe78` 的11条全部完成，共263个分界、最终97处重点待核、20条待审行为记录。待核包含来源映射与视觉分歧，不等于97处已知错误；行为记录包含历史与同源映射，不能当作20次确定异常。V7临时结果、V8定位流程修正前的停止报告和原始响应均保留；没有把未完成结果认证为成功。
+
+| 片段 | 最终版本 | 细动作数 | 重点待核边界 |
+| --- | --- | --- | --- |
+| Sharpa additional normal 2 | v7 | 19 | 5 |
+| Sharpa additional speedup 2 | v5 | 19 | 15 |
+| Wuji additional normal 2 | v7 | 26 | 9 |
+| Wuji additional normal 3 | v6 | 20 | 2 |
+| Wuji additional normal 6 | v5 | 26 | 2 |
+| Sharpa pilot normal 0（人工参考） | v4 原稿保留 | 27 | 3（另列模型意见） |
+| Sharpa pilot normal-heldout 1 | v13 | 27 | 5 |
+| Sharpa pilot speedup 0 | v5 | 27 | 26 |
+| Wuji pilot normal 0 | v5 | 31 | 3 |
+| Wuji pilot normal-heldout 1 | v3 | 21 | 1 |
+| Wuji pilot speedup 0 | v3 | 31 | 26 |
+
+Sharpa additional normal 2 的提起候选为88帧（约2.93秒），模型逐帧状态为87帧握稳静止、88帧开始提起。17→18曾由模型建议4017帧，但独立查看4016/4017/4050/4209原图后，发现前两帧左手仍较张开，未能证实稳定握持；因此**不能认定4017是正确分界**。已在normal与配对speedup中同步增加独立视觉反对意见，保留原始模型观察与候选位置，等待人工确定；没有用另一个猜测帧替换它。此次补充只改复核元数据，动作区间与人工行为决定逐字段不变，normal版本关联同步更新。
+
+宽范围合法建议可以用于定位下一轮连续原帧窗口，但记录缺失时仍不算证实，最终连续帧要求不放宽。模型把已提供的后续结果帧误放入候选状态时，单独保留上下文并检查连接、持果一致；未提供帧、重复或矛盾状态仍拒绝。此流程防止退回旧候选附近反复检查，也不代表模型视觉判断必然正确。
+
+`quality-review/verify_v8.py` 最终通过：11份来源指纹不变；人工000000整份v4 JSON完全保留；其他10份草稿未勾人工确认；原训练取舍、任务结果和人工行为记录保留；3组speedup按当前normal来源帧重算一致；每个边界都留有连续原帧输入。结论验证结构、来源与记录完整性，不认证逐帧视觉真值，也未导入PI0.5训练。
+
+代码回归356 passed / 7 skipped，定向66 passed，Node、编译与diff检查通过。当前源码本地提交 `ba094c5`，未推送。真实浏览器核对报告11/11及全部版本，Sharpa2 v7第2段88帧、19细动作、7粗阶段、8标签选项及17→18独立疑点提示；未代勾确认或保存用户窗口。截图位于 `quality-review/review-all-eleven-v8.png`、`review-first-lift-v8.png`、`review-extraction-concern-v8.png`。最终记录、补充前备份和 `final-verification.json` 在上述run目录。仅8766审核服务更新，8765、18766、原数据、清洗阈值和暂停队列未改。

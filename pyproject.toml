@@ -14,12 +14,15 @@ test = ["pytest>=8"]
 conversion = ["pyarrow==19.0.1", "av==14.2.0"]
 training = ["pyarrow==19.0.1", "av==14.2.0", "scipy>=1.13,<2", "numba>=0.60,<1"]
 preview = ["opencv-python-headless>=4.8"]
+annotation = ["pyarrow==19.0.1", "av==14.2.0", "scipy>=1.13,<2"]
 
 [project.scripts]
 bag-worker = "bag_worker.cli:main"
 convert-worker = "convest.cli:main"
 ingest-worker = "convest.ingest.cli:main"
 workflow-gui = "convest.gui.server:main"
+subtasks-review = "convest.subtasks.server:main"
+subtasks-data = "convest.subtasks.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -30,3 +33,5 @@ testpaths = ["tests"]
 
 [tool.setuptools.package-data]
 "convest.gui" = ["static/*.html", "static/*.css", "static/*.js", "static/*.png"]
+
+"convest.subtasks" = ["static/*.html", "static/*.css", "static/*.js"]

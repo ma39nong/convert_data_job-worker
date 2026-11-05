@@ -8,6 +8,10 @@
 
 处理阶段原始数据以只读方式访问；采集端daily模式在服务器备份核验通过后释放本机原始副本。裁剪、转换和校验均可独立运行，也可通过可恢复的本地 job 串联执行。
 
+## LeRobot 粗细阶段标注（试用）
+
+新增独立的阶段预标注与人工审核入口 `./scripts/start_subtasks.sh --root /本地LeRobot数据或缓存 --output outputs/subtasks/review`，默认端口 8766。支持三相机视频、粗细阶段时间轴、JSON 历史和 normal→speedup 来源帧映射。JEV 视觉识别需显式启用并在服务端配置凭据；本地样例检索仅为辅助试验。详见 [阶段标注说明](docs/subtasks.md)及 [验证与限制](docs/subtasks-validation.md)。
+
 ## 工作站 GUI：首次配置与日常使用
 
 工作站界面入口是“工作站清洗与上传控制台”，代码位于 `src/convest/gui/`，开发分支为 `auto-convert-transfer-ui`。GUI 统一管理本机读取、数据服务器备份、A+B 合计 100 条完整 LeRobot 批次和训练服务器 normal/speedup 上传。它使用独立于旧命令行服务的任务配置和运行目录；完整操作说明见 [GUI 使用说明](docs/gui.md)。

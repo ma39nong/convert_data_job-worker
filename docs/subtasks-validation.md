@@ -104,3 +104,20 @@ JEV 视觉接口按 [TypeSafe 官方图像文档](https://docs.typesafe.ai/image
 - human-before.json与服务端000000 v4逐字段相同；未改人工27段、其他episode、既有speedup映射和原始数据。updated-subtasks.json/final-verification.json及review-v6.png留在最终验证目录。
 
 全工程323passed/7skipped，末轮标注35passed，Node/diff通过。新增覆盖重复旋转拒绝、局部细动作与七阶段语法、只能选择提供的源帧、null弃权、真实关节起动辅助、思考参数/不缓存incomplete，以及独立结果导入的source/CAS/强制未审核。只更新8766，正常SIGINT并延续原token，最终PID1923528。原页确认无未保存修改后加载v6，核实29段/七阶段一次旋转、10秒定位、未确认提示，浏览器warn/error为空。未修改8765工作流或数据质量规则。
+
+
+## 2026-11-05 再次纠正：仍相连、长尝试及意外掉果
+
+用户发现v6仍把握紧未脱离误当放盘，并将失败/掉落硬拼成成功循环。v3移除强制逐果成对与末尾延长放盘的逻辑；两段采摘都重看5fps、30秒核心/4秒上下文的1280×960三相机视频，输出连接/持果状态和事件。仍相连的持续尝试不按时长拆成功；新增fruit_drop、harvest_retry、harvest_uncertain细标签，粗轨道仍是七阶段/一次旋转。整段概览中放回时附带的落果保留事件说明，不伪造额外粗采摘阶段。
+
+掉果需要另查画面：区分左手滑落、果串上的其他果实脱落、正常向托盘释放；复核否决的判断留档。JSON不自动宣称整条成功。豆包原帧回答仍会给出窗口外帧或遮挡下的猜测，因此保留可见的未确认区间，没有把结构通过当作准确率。用户六个截图仍相连帧只约束同source，模型不得在此前判已摘下。
+
+独立材料在outputs/subtasks/doubao-events-validation。实际从28只读拉取并全SHA校验：Sharpa normal ep2（151.4秒）；Wuji normal ep2/3/6（166.43/98.67/164.03秒）；另取Sharpa配对speedup ep2（3197帧，106.57秒）。来源都在原有两个训练批次，未修改服务器或完整元数据；新缓存位于原工程pilot/additional，未创建额外checkout。
+
+最终发布：原Sharpa ep1 v6→v7，32细段/七粗阶段/一次旋转，9个未确认边界、7个状态待确认段。六个用户帧945/1319/4464/5068/5694/6480均为grasp_fruit；其余帧未冒充人工标注。长抓取59.7–94.6秒保留为连续尝试，约94.6秒后的异常掉落与恢复单列，drop_checks记录掉落来源。仍需人工审核，不保证精确逐帧。
+
+四条新录制均保存v1草稿：Sharpa ep2 24细段（9未确认边界）；Wuji ep2 27段（9）；ep3 19段（4）；ep6 26段（7）。配对speedup通过source_recording_id/源区间/观测时间戳与source_index逐帧映射验证，生成24段v1草稿，不做独立视觉准确率结论。原人工ep0 v4及其余5份旧标注中的非目标4份完全保留，逐字段比较通过；所有新增/替换段reviewed=false、outcome=unknown。最终JSON与对照为final-verification.json及各published-subtasks.json。
+
+整个调试经历了整段响应输出HARVEST占位、视频长思考耗尽、模型批次id重置、短尾未覆盖、窗口外帧及误把正常释放算掉落等失败，失败材料及原响应都留档；成功缓存复用。最终各任务的逻辑请求数包含缓存，不代表全部调试实际调用数或账单。并未把低未确认数量当作性能指标，也没有未见录制的人工真值精度。
+
+最终全工程333passed/7skipped，精确最终源码的标注测试45passed，Node/diff检查通过。新增覆盖长尝试/掉果/恢复语法、附着状态证据、自由落体与受控投放区别、果串落果、用户仍相连约束、无效原帧逐项弃权、短尾不延长成功、异常标签normal→speedup映射。仅8766正常SIGINT更新并保留HTTP token，最终PID2373777；8765未改。页面实查v7、32段/0已确认、七阶段、异常落果定位和复核说明；新Sharpa ep2 v1/24段可审核，浏览器warn/error为空，截图review-v7.png。原人工页面未刷新或代保存。

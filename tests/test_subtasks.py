@@ -555,18 +555,18 @@ def test_whole_template_and_source_frame_passes_preserve_grammar(pair,tmp_path,m
         path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'video')
         return {'sample_fps':1,'sha256':sha(path)}
     monkeypatch.setattr(doubao,'make_montage',montage)
-    monkeypatch.setattr(template,'images_at',lambda ep,indices:[{'frame':i,'sha256':'fake','data_url':'data:image/jpeg;base64,'+base64.b64encode(b'image').decode()} for i in indices])
+    monkeypatch.setattr(template,'images_at',lambda ep,indices,**kwargs:[{'frame':i,'sha256':'fake','data_url':'data:image/jpeg;base64,'+base64.b64encode(b'image').decode()} for i in indices])
     class Client:
         def call(self,path,prompt,fps):
             if 'LOCAL FINE PASS' in prompt:
                 lo,hi=map(int,path.stem.split('_')[-2:]);duration=(hi-lo)/10
-                rows=[{'end_seconds':duration/2,'label':'grasp_fruit','confidence':.9},{'end_seconds':duration,'label':'pick_and_place','confidence':.9}]
+                rows=[{'end_seconds':duration/2,'label':'grasp_fruit','confidence':.9,'attachment':'attached','retention':'held','event':'approach_attached'}, {'end_seconds':duration,'label':'pick_and_place','confidence':.9,'attachment':'detached','retention':'held','event':'detached_held'}]
                 return {'output_text':json.dumps({'segments':rows})},'local',False
             assert 'Exactly these' in prompt and 'actually detached' in prompt
             rows=[{'end_seconds':(i+1)*.5 if i<10 else 6.1,'label':label,'confidence':.9} for i,label in enumerate(labels)]
             return {'output_text':json.dumps({'segments':rows})},'global',False
         def call_images(self,groups,prompt):
-            rows=[{'id':g['task']['id'],'first_after_frame':g['task']['candidate_frame'],'confidence':.9} for g in groups]
+            rows=[{'id':g['task']['id'],'first_after_frame':g['task']['candidate_frame'],'confidence':.9, 'states':[{'frame':f,'attachment':'attached' if f<g['task']['candidate_frame'] else 'detached','retention':'held'} for f in g['task']['frames']]} for g in groups]
             return {'output_text':json.dumps({'boundaries':rows})},str(rows),False
     result=doubao.annotate(normal,tmp_path/'out',client=Client())
     assert [s['label'] for s in result['segments']]==labels
@@ -628,3 +628,123 @@ def test_boundary_image_requests_use_bounded_direct_output_and_do_not_cache_inco
     assert len(list((tmp_path/'api/raw-incomplete').glob('*.json')))==1
     for p in (tmp_path/'api/requests').glob('*.json'):
         assert b'private-key' not in p.read_bytes() and b'data:image' not in p.read_bytes()
+
+
+def test_harvest_grammar_keeps_failed_attempts_without_inventing_placement():
+    from convest.subtasks.template import validate_template
+    labels=['grasp_truss','lift_truss','grasp_fruit','fruit_drop','harvest_retry','grasp_fruit',
+            'return_truss','rotate_stem','grasp_truss','lift_truss','grasp_fruit',
+            'harvest_uncertain','return_stem']
+    assert len(validate_template([segment(i,i+1,label) for i,label in enumerate(labels)]))==7
+
+
+def test_attachment_evidence_rejects_grip_pulling_freefall_and_missing_observations():
+    from convest.subtasks.harvest import parse_proven_boundaries
+    tasks=[{'id':1,'event':'first_detached_frame','frames':[100,101,102]}]
+    def result(states):
+        return parse_proven_boundaries({'output_text':json.dumps({'boundaries':[{
+            'id':1,'first_after_frame':101,'confidence':.99,'states':states}]})},tasks)[1]
+    observations=[{'frame':f,'attachment':'attached' if f==100 else 'detached','retention':'held'} for f in [100,101,102]]
+    assert not result(observations)['needs_review']
+    assert result([{**s,'attachment':'attached'} for s in observations])['needs_review']
+    assert result([{**s,'retention':'falling'} for s in observations])['needs_review']
+    assert result(observations[1:])['needs_review']
+    assert result([])['frame'] is None
+    with pytest.raises(ValueError):result(observations+[observations[0]])
+
+
+def test_long_attached_attempt_and_drop_do_not_force_a_place():
+    from convest.subtasks.harvest import parse_harvest
+    rows=[{'end_seconds':30,'label':'grasp_fruit','confidence':.9,'attachment':'attached','retention':'held','event':'approach_attached'},
+          {'end_seconds':32,'label':'fruit_drop','confidence':.9,'attachment':'detached','retention':'falling','event':'drop'},
+          {'end_seconds':35,'label':'harvest_retry','confidence':.9,'attachment':'occluded','retention':'empty','event':'failed_recovery'}]
+    result,evidence=parse_harvest({'output_text':json.dumps({'segments':rows})},1050,30)
+    assert [s['label'] for s in result]==['grasp_fruit','fruit_drop','harvest_retry']
+    assert result[0]['end_frame']==900 and not any(s['reviewed'] for s in result)
+    rows[1]['label']='pick_and_place' # model claims placement but describes a fall
+    result,_=parse_harvest({'output_text':json.dumps({'segments':rows})},1050,30)
+    assert result[1]['label']=='harvest_uncertain'
+
+
+def test_drop_retry_labels_survive_normal_speedup_source_mapping(pair,tmp_path):
+    normal,speedup=pair
+    doc={'source':normal.identity(),'revision':1,'status':'draft','outcome':'unknown',
+         'segments':[segment(0,20,'grasp_fruit'),segment(20,24,'fruit_drop'),
+                     segment(24,30,'harvest_retry'),segment(30,61,'grasp_fruit')]}
+    result=project(normal,speedup,doc)
+    assert [s['label'] for s in result['segments']]==['grasp_fruit','fruit_drop','harvest_retry','grasp_fruit']
+    assert all(s['coarse']=='摘取番茄' and not s['reviewed'] for s in result['segments'])
+
+
+def test_missing_video_tail_is_uncertain_instead_of_extending_success():
+    from convest.subtasks.harvest import parse_harvest
+    row={'end_seconds':9.5,'label':'pick_and_place','confidence':.9,
+         'attachment':'detached','retention':'held','event':'detached_held'}
+    result,evidence=parse_harvest({'output_text':json.dumps({'segments':[row]})},300,30)
+    assert result[0]['end_frame']==285 and result[1]['label']=='harvest_uncertain'
+    row['end_seconds']=8
+    with pytest.raises(ValueError,match='结尾'):parse_harvest({'output_text':json.dumps({'segments':[row]})},300,30)
+
+
+def test_user_attached_frame_is_a_hard_negative_for_detachment():
+    from convest.subtasks.harvest import parse_proven_boundaries
+    task=[{'id':0,'event':'first_detached_frame','frames':[945,946,947], 'known_attached_frames':[946]}]
+    rows={'boundaries':[{'id':0,'first_after_frame':946,'confidence':.99,'states':[
+        {'frame':945,'attachment':'attached','retention':'held'},
+        {'frame':946,'attachment':'detached','retention':'held'},
+        {'frame':947,'attachment':'detached','retention':'held'}]}]}
+    result=parse_proven_boundaries({'output_text':json.dumps(rows)},task)[0]
+    assert result['needs_review'] and result['frame'] is None and result['human_attachment_conflict']
+
+
+def test_bad_model_frame_abstains_without_losing_an_independent_valid_boundary():
+    from convest.subtasks.harvest import review_boundaries
+    tasks=[{'id':0,'event':'left_return_approach','frames':[10,11,12]},
+           {'id':1,'event':'left_return_approach','frames':[20,21,22]}]
+    rows={'boundaries':[{'id':0,'first_after_frame':13,'confidence':.9},
+                        {'id':1,'first_after_frame':21,'confidence':.9}]}
+    result=review_boundaries({'output_text':json.dumps(rows)},tasks)
+    assert result[0]['frame'] is None and result[0]['needs_review'] and result[0]['schema_error']
+    assert result[1]['frame']==21 and not result[1]['needs_review']
+    rows['boundaries'][0]['id']=8
+    assert all(x['needs_review'] for x in review_boundaries({'output_text':json.dumps(rows)},tasks).values())
+
+
+def test_drop_audit_rejects_controlled_tray_release(pair,tmp_path,monkeypatch):
+    from convest.subtasks.harvest import verify_drop_claims
+    from convest.subtasks import template
+    import base64
+    normal,_=pair
+    monkeypatch.setattr(template,'images_at',lambda ep,frames,**kwargs:[{'frame':f,'data_url':'data:image/jpeg;base64,'+base64.b64encode(b'image').decode(),'sha256':'fake'} for f in frames])
+    class Client:
+        def call_images(self,groups,prompt):
+            return {'output_text':json.dumps({'target_drop':True,'same_target':True,'release':'controlled_release','held_frame':10,'falling_frame':22,'reason':'normal release into intended tray'})},'audit',False
+    spans=[segment(0,20,'grasp_fruit'),segment(20,25,'fruit_drop'),segment(25,61,'grasp_fruit')]
+    result,checks,records=verify_drop_claims(normal,spans,tmp_path/'audit',Client())
+    assert result[1]['label']=='harvest_uncertain' and not checks[0]['verified_drop']
+    with pytest.raises(ValueError,match='预算'):verify_drop_claims(normal,spans,tmp_path/'audit',Client(),max_requests=0)
+
+
+def test_later_user_attached_witness_rejects_same_attempt_drop_and_recovery(pair,tmp_path):
+    from convest.subtasks.harvest import verify_drop_claims
+    normal,_=pair
+    class Client:
+        def call_images(self,*args):raise AssertionError('human contradiction needs no paid request')
+    spans=[segment(0,20,'grasp_fruit'),segment(20,25,'fruit_drop'),segment(25,30,'harvest_retry'),segment(30,61,'grasp_fruit')]
+    result,checks,records=verify_drop_claims(normal,spans,tmp_path,Client(),known_attached=[27])
+    assert not records and not any(s['label']=='fruit_drop' for s in result)
+    assert next(s for s in result if s['start_frame']<=27<s['end_frame'])['label']=='grasp_fruit'
+
+
+def test_visible_truss_fall_is_a_drop_even_if_left_hand_did_not_hold_it(pair,tmp_path,monkeypatch):
+    from convest.subtasks.harvest import verify_drop_claims
+    from convest.subtasks import template
+    import base64
+    normal,_=pair
+    monkeypatch.setattr(template,'images_at',lambda ep,frames,**kwargs:[{'frame':f,'data_url':'data:image/jpeg;base64,'+base64.b64encode(b'image').decode(),'sha256':'fake'} for f in frames])
+    class Client:
+        def call_images(self,groups,prompt):
+            return {'output_text':json.dumps({'observed_drop':True,'origin':'truss','target_drop':False,'same_target':False,'release':'uncontrolled','held_frame':10,'falling_frame':22})},'fall',False
+    spans=[segment(0,20,'grasp_fruit'),segment(20,25,'fruit_drop'),segment(25,61,'grasp_fruit')]
+    result,checks,records=verify_drop_claims(normal,spans,tmp_path,Client())
+    assert result[1]['label']=='fruit_drop' and checks[0]['verified_drop']

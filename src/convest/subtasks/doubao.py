@@ -60,12 +60,13 @@ def reference_style(store):
     return refs
 
 
-def make_montage(episode, path, start, end, sample_fps=5):
+def make_montage(episode, path, start, end, sample_fps=5, panel_size=480):
     """One shared source-frame index per composite, no independently timed cameras.
 
     Grid: cam0 top-left, cam1 top-right, cam2 bottom-left; black fourth panel.
     No spatial flipping or temporal speed changes. Video time zero = start/fps.
     """
+    pw=panel_size;ph=panel_size*3//4
     cameras = sorted(episode.cameras)
     if len(cameras) != 3: raise ValueError('豆包适配需要三路同步相机')
     path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,10 +83,10 @@ def make_montage(episode, path, start, end, sample_fps=5):
                 iterators.append(iter(container.decode(video=0)))
             output = stack.enter_context(av.open(str(temporary), 'w'))
             stream = output.add_stream('libx264', rate=rate)
-            stream.width, stream.height, stream.pix_fmt = 960, 720, 'yuv420p'
+            stream.width, stream.height, stream.pix_fmt = pw*2, ph*2, 'yuv420p'
             stream.options = {'crf':'23', 'preset':'veryfast'}
             for idx in indices:
-                canvas = np.zeros((720,960,3), dtype=np.uint8)
+                canvas = np.zeros((ph*2,pw*2,3), dtype=np.uint8)
                 for n, frames in enumerate(iterators):
                     found = None
                     for frame in frames:
@@ -96,10 +97,10 @@ def make_montage(episode, path, start, end, sample_fps=5):
                         found = frame;break
                     if found is None: raise ValueError('视频提前结束')
                     w, h = found.width, found.height
-                    scale = min(480/w, 360/h)
+                    scale = min(pw/w, ph/h)
                     width, height = max(2, round(w*scale)), max(2, round(h*scale))
                     rgb = found.reformat(width=width, height=height, format='rgb24').to_ndarray()
-                    x, y = (n%2)*480+(480-width)//2, (n//2)*360+(360-height)//2
+                    x, y = (n%2)*pw+(pw-width)//2, (n//2)*ph+(ph-height)//2
                     canvas[y:y+height,x:x+width] = rgb
                 for packet in stream.encode(av.VideoFrame.from_ndarray(canvas,format='rgb24')): output.mux(packet)
             for packet in stream.encode(None): output.mux(packet)
@@ -231,6 +232,8 @@ class Client:
         content.extend([{'type':'input_text','text':'END OF REFERENCES. The following VIDEO is the only target.'},
                         {'type':'input_video','video_url':'data:video/mp4;base64,'+base64.b64encode(Path(video).read_bytes()).decode(),'fps':sample_fps},
                         {'type':'input_text','text':prompt}])
+        if 'LOCAL FINE PASS:' in prompt:
+            return self._perform(identity,content,effort='disabled',max_output_tokens=6000)
         return self._perform(identity,content)
 
     def call_images(self,groups,prompt):
@@ -241,7 +244,7 @@ class Client:
             for e in g['assets']:
                 content.extend([{'type':'input_text','text':f"Boundary {g['task']['id']}, original source frame {e['frame']}"},
                                 {'type':'input_image','image_url':e['data_url']}])
-        return self._perform(identity,content,effort='disabled',max_output_tokens=2000)
+        return self._perform(identity,content,effort='disabled',max_output_tokens=6000 if '"states"' in prompt else 2000)
 
     def _perform(self,identity,content,*,effort='medium',max_output_tokens=12000):
         if effort!='medium' or max_output_tokens!=12000:

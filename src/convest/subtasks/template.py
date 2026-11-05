@@ -12,7 +12,7 @@ import numpy as np
 from .core import LABELS, atomic_json, sha, validate_segments
 
 COARSE = ['拿起番茄','摘取番茄','放回番茄','旋转番茄杆','拿起番茄','摘取番茄','放回番茄']
-POLICY = 'tomato_single_rotation_detached_frame_v2'
+POLICY = 'tomato_attachment_drop_events_v3'
 RULES = '''The user requires the SAME global coarse workflow as reviewed episode 000000:
 pick up truss -> harvest individual fruits -> put truss back -> rotate stem ONCE
 -> pick up again -> harvest remaining fruits -> put bare stem back. Exactly these
@@ -20,8 +20,16 @@ seven coarse phases, one rotation interval total. Fruit counts and timestamps
 are NOT copied from the example. Identify them from this ENTIRE video.
 A temporary wrist/truss adjustment during harvesting is NOT another coarse
 return/rotation/pickup cycle. Do not restart the workflow at chunk boundaries.
-Fine grammar: grasp_truss,lift_truss,(grasp_fruit,pick_and_place)+,return_truss,
-rotate_stem,grasp_truss,lift_truss,(grasp_fruit,pick_and_place)+,return_stem.
+Fine grammar: grasp_truss,lift_truss,HARVEST,return_truss,rotate_stem,
+grasp_truss,lift_truss,HARVEST,return_stem. HARVEST starts with grasp_fruit.
+Harvest can contain grasp_fruit, pick_and_place, fruit_drop, harvest_retry,
+harvest_uncertain. NEVER force alternating successful grasp/place pairs.
+Long attached pulling, twisting and repeated grip WITHOUT detachment remain
+one grasp_fruit regardless of duration. A failed grasp followed by recovery can
+be harvest_retry. Uncontrolled separation or fruit slipping/free fall is
+fruit_drop, NOT successful placement. The empty hand can approach another fruit
+without a preceding pick_and_place. Occluded attachment or retention is
+harvest_uncertain; do not fill it by assuming a successful cycle.
 Do NOT insert idle or stop: continuous preparatory travel/settling belongs to the
 appropriate adjacent action, just as in the user's template. If the visible
 recording cannot support this workflow, return an error instead of inventing it.
@@ -51,6 +59,9 @@ def text_json(response):
     except (TypeError,ValueError):raise ValueError('豆包未返回有效 JSON') from None
 
 
+HARVEST_LABELS = {'grasp_fruit','pick_and_place','fruit_drop','harvest_retry','harvest_uncertain'}
+
+
 def validate_template(segments):
     groups=[]
     for s in segments:
@@ -60,8 +71,9 @@ def validate_template(segments):
     if [g[0] for g in groups]!=COARSE:raise ValueError('结果不符合000000七阶段模板（旋转只能一次）；未发布标签')
     for index,(_,labels) in enumerate(groups):
         if index in (0,4) and labels!=['grasp_truss','lift_truss']:raise ValueError('拿起阶段必须分为抓稳、提起')
-        if index in (1,5) and (len(labels)%2 or labels!=['grasp_fruit','pick_and_place']*(len(labels)//2)):
-            raise ValueError('摘取阶段必须逐果交替抓果、摘下放盘')
+        if index in (1,5):
+            if labels[0]!='grasp_fruit' or any(x not in HARVEST_LABELS for x in labels):
+                raise ValueError('摘取阶段须从接近抓果开始，允许掉落、重试和未确认过程')
         expected={2:['return_truss'],3:['rotate_stem'],6:['return_stem']}.get(index)
         if expected and labels!=expected:raise ValueError('放回/旋转阶段细动作不符合模板')
     return groups
@@ -69,14 +81,15 @@ def validate_template(segments):
 
 def event_name(before,after):
     if (before,after)==('lift_truss','grasp_fruit'):return 'first_left_approach'
-    if (before,after)==('grasp_fruit','pick_and_place'):return 'first_detached_frame'
+    if before in HARVEST_LABELS-{'pick_and_place'} and after=='pick_and_place':return 'first_detached_frame'
     if (before,after)==('pick_and_place','grasp_fruit'):return 'left_return_approach'
     return before+' -> '+after
 
 
-def images_at(episode,indices):
+def images_at(episode,indices,panel_size=480):
     """Decode each camera once per boundary window; explicit source indices."""
-    indices=sorted(set(indices));panels={i:np.zeros((720,960,3),np.uint8) for i in indices}
+    indices=sorted(set(indices));pw=panel_size;ph=panel_size*3//4
+    panels={i:np.zeros((ph*2,pw*2,3),np.uint8) for i in indices}
     for n,camera in enumerate(sorted(episode.cameras)):
         with av.open(str(episode.cameras[camera])) as container:
             stream=container.streams.video[0]
@@ -87,17 +100,17 @@ def images_at(episode,indices):
                 idx=round(float(frame.time)*episode.fps)
                 if idx<target:continue
                 if idx!=target:raise ValueError('边界复查源帧不同步')
-                ratio=min(480/frame.width,360/frame.height)
+                ratio=min(pw/frame.width,ph/frame.height)
                 w,h=round(frame.width*ratio),round(frame.height*ratio)
                 rgb=frame.reformat(width=w,height=h,format='rgb24').to_ndarray()
-                x,y=(n%2)*480+(480-w)//2,(n//2)*360+(360-h)//2
+                x,y=(n%2)*pw+(pw-w)//2,(n//2)*ph+(ph-h)//2
                 panels[idx][y:y+h,x:x+w]=rgb
                 target=next(todo,None)
                 if target is None:break
             if target is not None:raise ValueError('边界复查视频提前结束')
     assets=[]
     for idx,panel in panels.items():
-        encoder=av.CodecContext.create('mjpeg','w');encoder.width=960;encoder.height=720;encoder.pix_fmt='yuvj420p'
+        encoder=av.CodecContext.create('mjpeg','w');encoder.width=pw*2;encoder.height=ph*2;encoder.pix_fmt='yuvj420p'
         f=av.VideoFrame.from_ndarray(panel,format='rgb24').reformat(format='yuvj420p')
         blob=b''.join(bytes(p) for p in [*encoder.encode(f),*encoder.encode(None)])
         assets.append({'frame':idx,'sha256':hashlib.sha256(blob).hexdigest(),
@@ -133,7 +146,7 @@ def left_motion_candidate(episode, center):
     q=values(episode.table,'observation.state')[:,cols]
     delta=np.linalg.norm(np.diff(q,axis=0),axis=1)
     stable=max(3,round(.25*episode.fps))
-    for frame in range(max(stable+1,center-round(episode.fps)),min(episode.length-2,center+round(episode.fps))):
+    for frame in range(max(stable+1,center-round(3*episode.fps)),min(episode.length-2,center+round(3*episode.fps))):
         if delta[frame-1]>1e-4 and delta[frame]>1e-4 and np.max(delta[frame-1-stable:frame-1])<1e-4:
             return frame
     return None
@@ -168,7 +181,28 @@ and last end equals {episode.length/episode.fps:.6f} seconds. Use actual per-fru
 cycles. This first pass gives approximate boundaries, later checked on source frames.
 '''
     response,key,cached=client.call(video,prompt,manifest['sample_fps']);record(response,key,cached,'whole_template')
-    result=parse_segments(response,episode.length,episode.fps);validate_template(result)
+    # HARVEST is a coarse placeholder, never a successful fruit-cycle claim.
+    whole=text_json(response)
+    overview_events=[];previous_end=0
+    rows=whole.get('segments',[])
+    for index,item in enumerate(rows):
+        start=previous_end;previous_end=item.get('end_seconds',0)
+        if item.get('label')=='HARVEST':item['label']='grasp_fruit'
+        if (item.get('label') in {'fruit_drop','harvest_retry','harvest_uncertain'}
+            and index>0 and index+1<len(rows) and rows[index-1].get('label')=='return_truss'
+            and rows[index+1].get('label')=='rotate_stem'):
+            overview_events.append({'start_frame':round(start*episode.fps),'end_frame':round(previous_end*episode.fps),
+                'label':item['label'],'attachment':'occluded','retention':'occluded',
+                'observation':'整段概览提示放回过程中有掉果/异常，需复核；不额外插入一个粗采摘阶段。','reviewed':False})
+            item['label']='return_truss'
+    result=parse_segments({'output_text':json.dumps(whole)},episode.length,episode.fps)
+    # Collapse adjacent duplicate labels from coarse event overlays, not events
+    # into successful placements; their raw event evidence remains separate.
+    merged=[]
+    for item in result:
+        if merged and merged[-1]['label']==item['label']:merged[-1]['end_frame']=item['end_frame']
+        else:merged.append(item)
+    result=merged;validate_template(result)
     # Global context fixes the coarse sequence; dense proposals supply every
     # fruit cycle. Do not rely on a 1fps overview to count brief individual picks.
     coarse=[]
@@ -176,47 +210,15 @@ cycles. This first pass gives approximate boundaries, later checked on source fr
         name=LABELS[item['label']][0]
         if coarse and coarse[-1]['coarse']==name:coarse[-1]['end']=item['end_frame'];coarse[-1]['items'].append(item)
         else:coarse.append({'coarse':name,'start':item['start_frame'],'end':item['end_frame'],'items':[item]})
+    # Discard previous fine-cycle guesses. Re-observe EVERY harvest rather than
+    # preserving their assumed successful pairs or extending a final placement.
     candidate_source=None
-    if initial_proposal is not None:
-        if initial_proposal.get('source')!=identity or initial_proposal.get('status')=='reviewed' or not initial_proposal.get('origin','').startswith('doubao_'):
-            raise ValueError('仅可复用来源相同的豆包未审核草稿作为局部候选')
-        candidate=validate_segments(initial_proposal['segments'],episode.length,episode.fps)
-        candidate_source={'revision':initial_proposal['revision'],'origin':initial_proposal['origin'],
-                          'segments_sha256':hashlib.sha256(json.dumps(candidate,sort_keys=True).encode()).hexdigest()}
-    assembled=[]
+    from .harvest import propose_harvest
+    assembled=[];harvest_evidence=list(overview_events)
     for stage_no,stage in enumerate(coarse):
         if stage_no not in (1,5):assembled.extend(stage['items']);continue
-        if initial_proposal is not None:
-            local=[]
-            for item in candidate:
-                a,b=max(stage['start'],item['start_frame']),min(stage['end'],item['end_frame'])
-                if a>=b:continue
-                label=item['label'] if item['label'] in ('grasp_fruit','pick_and_place') else 'grasp_fruit'
-                if local and local[-1]['label']==label:local[-1]['end_frame']=b
-                else:local.append({**item,'start_frame':a,'end_frame':b,'label':label})
-            # Extend the last placement to the globally located return boundary;
-            # continuous empty-hand travel is not an additional fruit cycle.
-            if local[-1]['label']=='grasp_fruit' and len(local)>1:
-                local[-2]['end_frame']=local[-1]['end_frame'];local.pop()
-        else:
-            local=[]
-            for a in range(stage['start'],stage['end'],round(40*episode.fps)):
-                b=min(stage['end'],a+round(40*episode.fps))
-                lo,hi=max(stage['start'],a-round(2*episode.fps)),min(stage['end'],b+round(2*episode.fps))
-                if len(records)>=max_requests:raise ValueError('局部摘果请求超过预算，未发布标签')
-                clip=run/f'harvest_{stage_no}_{lo}_{hi}.mp4'
-                m=make_montage(episode,clip,lo,hi)
-                p=RULES+f"\nLOCAL FINE PASS ONLY: global coarse phase is harvest number {1 if stage_no==1 else 2}. "
-                p+="This clip is INSIDE that harvest phase, do not emit pickup, return or rotation. Allowed labels ONLY grasp_fruit and pick_and_place. Keep EVERY real fruit cycle. A chunk may start/end mid-action. "
-                p+=f'Local duration {(hi-lo)/episode.fps:.6f} seconds. Return continuous JSON segments with end_seconds,label,confidence, starting at zero and ending at duration.'
-                r,k,c=client.call(clip,p,m['sample_fps']);record(r,k,c,'dense_harvest')
-                for item in parse_segments(r,hi-lo,episode.fps):
-                    x,y=max(a,lo+item['start_frame']),min(b,lo+item['end_frame'])
-                    if x>=y:continue
-                    if item['label'] not in ('grasp_fruit','pick_and_place'):raise ValueError('局部摘果分类越过全局阶段，未发布标签')
-                    if local and local[-1]['label']==item['label']:local[-1]['end_frame']=y
-                    else:local.append({**item,'start_frame':x,'end_frame':y})
-        assembled.extend(local)
+        local,events=propose_harvest(episode,stage,run,client,record,records,max_requests)
+        assembled.extend(local);harvest_evidence.extend(events)
     result=validate_segments(assembled,episode.length,episode.fps);validate_template(result)
     boundaries=[s['end_frame'] for s in result[:-1]]
     total=len(records)+math.ceil(len(boundaries)/3)+math.ceil(len(boundaries)/4)
@@ -228,6 +230,8 @@ cycles. This first pass gives approximate boundaries, later checked on source fr
     if hints_path.exists():
         hints=json.loads(hints_path.read_text())
         if hints.get('source')!=identity:raise ValueError('用户边界提示来源指纹不匹配')
+    known_attached=hints.get('known_attached_frames',[])
+    if not isinstance(known_attached,list) or any(type(f) is not int or not 0<=f<episode.length for f in known_attached):raise ValueError('人工仍相连帧无效')
     detach=0
     for i in range(len(boundaries)):
         event=event_name(result[i]['label'],result[i+1]['label'])
@@ -237,6 +241,9 @@ cycles. This first pass gives approximate boundaries, later checked on source fr
         if hint is not None:
             if type(hint) is not int or not 0<hint<episode.length:raise ValueError('用户边界提示帧无效')
             boundaries[i]=hint # search seed only, never a copied or pinned answer
+        if event=='first_detached_frame':
+            anchors=[f for f in known_attached if (boundaries[i-1] if i else 0)<=f<(boundaries[i+1] if i+1<len(boundaries) else episode.length)]
+            if anchors:boundaries[i]=max(boundaries[i],max(anchors)+1)
     evidence={};motion_cues={}
     judge=Client(root,api_key or getattr(client,'key',None),model) if isinstance(client,Client) else client
     for pass_name,batch_size,radius,stride in [('event_window',3,round(2*episode.fps),max(1,round(episode.fps/5))),('source_frame',4,6,1)]:
@@ -249,17 +256,23 @@ cycles. This first pass gives approximate boundaries, later checked on source fr
         tasks=[]
         for i,center in enumerate(boundaries):
             # Search windows cannot cross either neighbouring candidate boundary.
-            lo=max(1,center-radius,(boundaries[i-1]+1 if i else 1))
-            hi=min(episode.length-1,center+radius,(boundaries[i+1]-1 if i+1<len(boundaries) else episode.length-1))
+            search_radius=max(radius,round(.75*episode.fps)) if pass_name=='source_frame' and event_name(result[i]['label'],result[i+1]['label'])=='first_left_approach' else radius
+            lo=max(1,center-search_radius,(boundaries[i-1]+1 if i else 1))
+            hi=min(episode.length-1,center+search_radius,(boundaries[i+1]-1 if i+1<len(boundaries) else episode.length-1))
             if lo>hi:raise ValueError('边界提示或候选次序冲突，未发布标签')
-            frames=sorted(set(range(lo,hi+1,stride))|{center,hi})
+            anchors=[f for f in known_attached if (boundaries[i-1] if i else 0)<=f<(boundaries[i+1] if i+1<len(boundaries) else episode.length)] if event_name(result[i]['label'],result[i+1]['label'])=='first_detached_frame' else []
+            frames=sorted(set(range(lo,hi+1,stride))|{center,hi}|{f for f in anchors if lo<=f<=hi})
             tasks.append({'id':i,'before':result[i]['label'],'after':result[i+1]['label'],
                           'event':event_name(result[i]['label'],result[i+1]['label']),'candidate_frame':center,'left_motion_cue':motion_cues.get(i),'frames':frames})
+            if anchors:tasks[-1]['known_attached_frames']=anchors
         batches=[tasks[n:n+batch_size] for n in range(0,len(tasks),batch_size)]
         def check(batch):
-            groups=[]
+            groups=[];original_ids=[task['id'] for task in batch]
+            # Model ids are local to this request; global segment indices are
+            # restored only after strict source-frame/schema validation.
+            batch=[{**task,'id':index} for index,task in enumerate(batch)]
             for task in batch:
-                assets=images_at(episode,task['frames'])
+                assets=images_at(episode,task['frames'],panel_size=720)
                 folder=run/pass_name/str(task['id']);folder.mkdir(parents=True,exist_ok=True)
                 for asset in assets:
                     (folder/f"{asset['frame']}.jpg").write_bytes(base64.b64decode(asset['data_url'].split(',',1)[1]))
@@ -272,10 +285,21 @@ is BEFORE. Require visible separation, not squeezing, intended pulling or contac
 At approach boundaries use the beginning of left-arm preparation/movement, not
 contact. A left_motion_cue marks the onset of measured left-arm joint motion after a stable hold; use it as an auxiliary cue to FIRST PREPARATORY motion, not as proof of detachment. For source_frame pass images are consecutive original frames (not seconds).
 If the transition is occluded or outside the window, return null, do not guess.
-Return only {"boundaries":[{"id":0,"first_after_frame":123,"confidence":0.8},...]}.
+For EVERY grasp_fruit -> pick_and_place transition, output evidence per image:
+"states":[{"frame":123,"attachment":"attached|detached|occluded",
+"retention":"held|empty|falling|occluded"},...]. Classify ALL supplied frames
+independently BEFORE choosing a boundary. Attached includes firm grip/pulling,
+the stem/fruit connection MUST visibly separate. Detached AND held is required;
+falling/free fruit is NOT a successful placement. Return null if there is no
+consecutive observed attached -> detached AND held transition. Never echo the
+candidate just because it was suggested. Evidence and confidence are unreviewed.
+Return only {"boundaries":[{"id":0,"first_after_frame":123,"confidence":0.8,
+"states":[...]},...]}. Other event kinds can omit states.
 '''+json.dumps([g['task'] for g in groups])
             response,key,cached=judge.call_images(groups,prompt)
-            return parse_boundaries(response,batch),response,key,cached
+            from .harvest import review_boundaries
+            updates=review_boundaries(response,batch)
+            return {original_ids[i]:item for i,item in updates.items()},response,key,cached
         with ThreadPoolExecutor(max_workers=2) as pool:
             # Bounded batches: an error starts no subsequent pair of requests.
             for offset in range(0,len(batches),2):
@@ -287,15 +311,32 @@ Return only {"boundaries":[{"id":0,"first_after_frame":123,"confidence":0.8},...
                         evidence.setdefault(i,{})[pass_name]=item
                     if progress:progress(len(records),total)
         if any(a>=b for a,b in zip([0]+boundaries,boundaries+[episode.length])):raise ValueError('复查边界顺序冲突；未发布标签')
+    # An unproven detachment must not remain a confident placement draft.
+    for i,passes in evidence.items():
+        if event_name(result[i]['label'],result[i+1]['label'])=='first_detached_frame' and passes['source_frame']['needs_review']:
+            result[i+1]['label']='harvest_uncertain'
+            result[i+1].pop('model_confidence',None)
     for i,s in enumerate(result):s['start_frame']=0 if i==0 else boundaries[i-1];s['end_frame']=episode.length if i==len(result)-1 else boundaries[i]
     result=validate_segments(result,episode.length,episode.fps);validate_template(result)
+    from .harvest import verify_drop_claims
+    # Failure checks may merge spans; bind earlier boundary evidence to frames
+    # rather than leaving obsolete segment indices in the final document.
+    prior=result
+    result,drop_checks,drop_records=verify_drop_claims(episode,result,run,judge,known_attached,max_requests-len(records))
+    for r,k,c in drop_records:record(r,k,c,'verify_target_drop')
+    frame_evidence={prior[i]['end_frame']:passes for i,passes in evidence.items()}
+    evidence={i:frame_evidence[s['end_frame']] for i,s in enumerate(result[:-1]) if s['end_frame'] in frame_evidence}
+    for item in result:
+        if item['label']=='harvest_uncertain':item.pop('model_confidence',None)
+    validate_template(result)
+    if progress:progress(len(records),len(records))
     if episode.identity()!=identity:raise ValueError('模板复查期间源数据发生变化')
     provenance={'method':'doubao_template_source_frames_v1','model':model,'policy':POLICY,'coarse_template':COARSE,
                 'rotation_count':1,'candidate_source':candidate_source,'references':list(references),'reference_examples':[{k:v for k,v in e.items() if k!='data_url'} for e in getattr(client,'examples',[])],
                 'request_count':len(records),'network_requests':sum(not r['cached'] for r in records),'requests':records,
-                'usage':[r['usage'] for r in records],'boundary_evidence':evidence,'user_feedback':hints.get('feedback'),
-                'left_motion_cues':motion_cues,'unresolved_boundaries':[i for i,passes in evidence.items() if passes['source_frame']['needs_review']],
-                'warning':'按000000七阶段模板：旋转仅一次；抓果到放盘以实际脱离首帧为界。已作局部原始帧视觉复查，仍需人工确认，不能保证逐帧无误。'}
+                'usage':[r['usage'] for r in records],'boundary_evidence':evidence,'user_feedback':hints.get('feedback'),'known_attached_frames':known_attached,
+                'drop_checks':drop_checks,'harvest_evidence':harvest_evidence,'left_motion_cues':motion_cues,'unresolved_boundaries':[i for i,passes in evidence.items() if passes['source_frame']['needs_review']],
+                'warning':'七粗阶段、旋转一次；仍相连的握紧/拽拉属于抓果。已脱离且握住才进入摘下放盘；掉果、恢复及遮挡单独标记。模型草稿仍需人工审核。'}
     if provenance['unresolved_boundaries']:
         provenance['warning']+=f" 本次有{len(provenance['unresolved_boundaries'])}个边界未能确认，需重点人工复核。"
     atomic_json(run/'completed.json',{'source':identity,**provenance,'segments':result})

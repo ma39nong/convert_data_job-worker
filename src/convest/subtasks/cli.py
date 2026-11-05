@@ -6,6 +6,7 @@ from pathlib import Path
 from .core import Store, project
 from .learning import predict, train
 from .remote import fetch, query
+from .behavior import merge_candidates
 
 
 def main(argv=None):
@@ -53,8 +54,11 @@ def main(argv=None):
                                         provenance={k:v for k,v in proposal.items() if k!='segments'})
                 elif args.command == 'project':
                     proposal = project(ep, target, current)
-                    result = store.save(target, {**existing, 'segments': proposal['segments'], 'outcome': proposal['outcome']},
-                        origin='normal_projection', provenance={k:v for k,v in proposal.items() if k not in {'segments','source'}})
+                    doc={**existing,'segments':proposal['segments'],'outcome':proposal['outcome']}
+                    if 'review_events' in proposal:
+                        doc['review_events']=merge_candidates(existing.get('review_events',[]),proposal['review_events'],target.length)
+                    result = store.save(target,doc,origin='normal_projection',
+                                        provenance={k:v for k,v in proposal.items() if k not in {'segments','source'}})
                 else:
                     proposal = json.loads(Path(args.file).read_text())
                     if proposal['source'] != current['source']:raise ValueError('导入标签的来源指纹不匹配')

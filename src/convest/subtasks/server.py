@@ -13,6 +13,7 @@ import uuid
 import webbrowser
 
 from .core import LABELS, Store, project
+from .behavior import KINDS
 from .learning import predict, train
 
 STATIC = Path(__file__).parent/'static'
@@ -100,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
             if route.path == '/api/bootstrap':
                 return self.send({'app': 'subtasks-review', 'token': self.server.token,
                                   'labels': {k: {'coarse': v[0], 'text': v[1]} for k, v in LABELS.items()},
-                                  'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
+                                  'behavior_kinds':KINDS,'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
                                   'jev': self.server.model_status(), 'doubao': self.server.doubao_status()})
             if route.path == '/api/models/status':
                 return self.send(self.server.model_status())
@@ -224,6 +225,18 @@ class Handler(BaseHTTPRequestHandler):
                                             provenance={k: v for k, v in result.items() if k != 'segments'})
                     return {'annotation': annotation, 'proposal': {k: v for k, v in result.items() if k != 'segments'}}
                 return self.send(self.server.submit(propose, lock_store=body.get('backend','local') == 'local'))
+            if route == '/api/scan-behavior':
+                if not self.server.doubao_key:raise ValueError('尚未配置豆包 API key')
+                current=store.load(ep)
+                if current['revision']!=body['revision']:raise ValueError('标注版本已变化，未覆盖修改')
+                def scan_behavior():
+                    from .behavior import scan,merge_candidates
+                    result=scan(ep,store.output,api_key=self.server.doubao_key,model=self.server.doubao_model)
+                    events=merge_candidates(current.get('review_events',[]),result['events'],ep.length)
+                    annotation=store.save(ep,{**current,'review_events':events},origin=current['origin'],
+                        provenance={**current.get('provenance',{}),'behavior_review':{k:v for k,v in result.items() if k not in {'source','events'}}})
+                    return {'annotation':annotation,'behavior_review':result}
+                return self.send(self.server.submit(scan_behavior,lock_store=False))
             if route == '/api/jev-plan':
                 from .jev import plan
                 return self.send({'plan':plan(ep, store.output, self.server.jev_model)})
@@ -238,6 +251,9 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError('normal 标注在开始映射前已变化，请重新发起')
                     result = project(ep, target, current)
                     doc = {**existing, 'segments': result['segments'], 'outcome': result['outcome']}
+                    if 'review_events' in result:
+                        from .behavior import merge_candidates
+                        doc['review_events']=merge_candidates(existing.get('review_events',[]),result['review_events'],target.length)
                     saved = store.save(target, doc, origin='normal_projection',
                                        provenance={k: v for k, v in result.items() if k not in {'segments', 'source'}})
                     return {'annotation': saved, 'target_id': target.id, 'projection': saved['provenance']}

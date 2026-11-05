@@ -220,7 +220,7 @@ class Client:
         self.root=Path(root);self.key=api_key or os.environ.get('ARK_API_KEY');self.model=model
         self.examples=list(examples)
 
-    def call(self, video, prompt, sample_fps):
+    def call(self, video, prompt, sample_fps, *, effort=None, max_output_tokens=12000):
         if Path(video).stat().st_size > 45*1024*1024: raise ValueError('豆包视频请求超过本机限制')
         identity={'protocol':PROTOCOL,'model':self.model,'video_sha256':sha(video),
                   'prompt':prompt,'sample_fps':sample_fps,
@@ -232,6 +232,8 @@ class Client:
         content.extend([{'type':'input_text','text':'END OF REFERENCES. The following VIDEO is the only target.'},
                         {'type':'input_video','video_url':'data:video/mp4;base64,'+base64.b64encode(Path(video).read_bytes()).decode(),'fps':sample_fps},
                         {'type':'input_text','text':prompt}])
+        if effort is not None:
+            return self._perform(identity,content,effort=effort,max_output_tokens=max_output_tokens)
         if 'LOCAL FINE PASS:' in prompt:
             return self._perform(identity,content,effort='disabled',max_output_tokens=6000)
         return self._perform(identity,content)

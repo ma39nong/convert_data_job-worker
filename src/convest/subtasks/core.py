@@ -264,6 +264,11 @@ class Store:
                       'source': current['source'], 'origin': origin, 'outcome': outcome,
                       'status': 'reviewed' if all(s['reviewed'] for s in segments) else 'draft',
                       'segments': segments, 'provenance': provenance if provenance is not None else current.get('provenance', {})}
+            from .behavior import validate_events, validate_training_review
+            if 'review_events' in doc or 'review_events' in current:
+                result['review_events']=validate_events(doc.get('review_events',current.get('review_events',[])),episode.length)
+            if 'training_review' in doc or 'training_review' in current:
+                result['training_review']=validate_training_review(doc.get('training_review',current.get('training_review',{})))
             # Retain every revision; a failed history write must not publish the new head.
             atomic_json(self.output/'history'/episode.id/f"{result['revision']:06d}.json", result)
             atomic_json(self.path(episode.id), result)
@@ -321,10 +326,23 @@ def project(normal, speedup, annotation):
     stops = np.r_[starts[1:], speedup.length]
     projected = [segment(a, b, segments[int(ids[a])]['label']) for a, b in zip(starts, stops)]
     action_ids = np.searchsorted(ends, np.rint(act).astype(int), side='right')
-    return {'schema_version': 1, 'source': speedup.identity(), 'normal_source': annotation['source'],
+    result = {'schema_version': 1, 'source': speedup.identity(), 'normal_source': annotation['source'],
             'normal_revision': annotation['revision'], 'normal_status': annotation['status'],
             'status': 'draft', 'outcome': annotation.get('outcome', 'unknown'),
             'mapping_sha256': sha(mapping_path), 'policy': 'nearest_observation_source_frame',
             'collapsed_normal_segments': sorted(set(range(len(segments)))-set(ids.tolist())),
             'action_crosses_boundary_frames': np.flatnonzero(ids != action_ids).tolist(),
             'segments': validate_segments(projected, speedup.length, speedup.fps)}
+    if 'review_events' in annotation:
+        from .behavior import validate_events
+        events=validate_events(annotation['review_events'],normal.length);mapped=[];collapsed=[]
+        for event in events:
+            if event['status']=='dismissed':continue
+            a=int(np.searchsorted(nearest,event['start_frame'],side='left'))
+            b=int(np.searchsorted(nearest,event['end_frame'],side='left'))
+            if a>=b:collapsed.append(event['id']);continue
+            mapped.append({**event,'id':hashlib.sha256((normal.id+speedup.id+event['id']).encode()).hexdigest()[:20],
+                'start_frame':a,'end_frame':b,'status':'pending','origin':'model',
+                'note':f"normal帧{event['start_frame']}–{event['end_frame']}映射候选，须审核speedup："+event['note'][:1800]})
+        result.update(review_events=validate_events(mapped,speedup.length),normal_review_events=events,collapsed_review_events=collapsed)
+    return result

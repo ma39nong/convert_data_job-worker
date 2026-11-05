@@ -748,3 +748,71 @@ def test_visible_truss_fall_is_a_drop_even_if_left_hand_did_not_hold_it(pair,tmp
     spans=[segment(0,20,'grasp_fruit'),segment(20,25,'fruit_drop'),segment(25,61,'grasp_fruit')]
     result,checks,records=verify_drop_claims(normal,spans,tmp_path,Client())
     assert result[1]['label']=='fruit_drop' and checks[0]['verified_drop']
+
+
+def test_training_behavior_records_are_independent_and_survive_saves(pair,tmp_path):
+    normal,_=pair;store=Store([normal.root],tmp_path/'review')
+    try:
+        original=store.load(normal)
+        original['segments']=[segment(0,normal.length,'grasp_fruit',reviewed=True)]
+        original['review_events']=[{'start_frame':20,'end_frame':30,'kind':'empty_hand_place','status':'confirmed','origin':'manual','note':'empty before reaching tray'}]
+        original['training_review']={'decision':'pending','note':'人工稍后决定'}
+        saved=store.save(normal,original)
+        assert saved['status']=='reviewed' and saved['training_review']['decision']=='pending'
+        assert saved['outcome']=='unknown' and saved['review_events'][0]['kind']=='empty_hand_place'
+        next_doc={k:v for k,v in saved.items() if k not in ('review_events','training_review')}
+        again=store.save(normal,next_doc)
+        assert again['review_events']==saved['review_events'] and again['training_review']==saved['training_review']
+        bad={**again,'review_events':[{**again['review_events'][0],'end_frame':normal.length+1}]}
+        with pytest.raises(ValueError):store.save(normal,bad)
+    finally:store.lockfile.close()
+
+
+def test_behavior_model_cannot_confirm_itself_or_exclude_training(pair):
+    from convest.subtasks.behavior import parse_candidates,merge_candidates
+    normal,_=pair
+    response={'output_text':json.dumps({'events':[{'start_seconds':1,'end_seconds':2,'kind':'drop_then_resume','evidence':'dropped then direct regrasp','status':'confirmed','training_review':{'decision':'exclude'}}]})}
+    events=parse_candidates(response,normal)
+    assert events[0]['status']=='pending' and events[0]['origin']=='model' and 'training_review' not in events[0]
+    reviewed=[{**events[0],'status':'dismissed'}]
+    assert merge_candidates(reviewed,events,normal.length)==reviewed
+    response['output_text']=json.dumps({'events':[{'start_seconds':1,'end_seconds':90,'kind':'empty_hand_place'}]})
+    with pytest.raises(ValueError):parse_candidates(response,normal)
+
+
+def test_behavior_events_project_with_observation_frames_but_need_rechecking(pair):
+    normal,speedup=pair
+    doc={'source':normal.identity(),'revision':2,'status':'draft','segments':[segment(0,61,'grasp_fruit')],
+         'review_events':[{'id':'x','start_frame':20,'end_frame':30,'kind':'truss_takeover_return','status':'confirmed','origin':'manual','note':'left took whole truss'},
+                          {'id':'short','start_frame':1,'end_frame':2,'kind':'empty_hand_place'},
+                          {'id':'false-alarm','start_frame':30,'end_frame':40,'kind':'empty_hand_place','status':'dismissed'}],
+         'training_review':{'decision':'exclude'}}
+    result=project(normal,speedup,doc)
+    assert len(result['review_events'])==1
+    assert result['review_events'][0]['start_frame']==10 and result['review_events'][0]['end_frame']==15
+    assert result['review_events'][0]['status']=='pending' and result['collapsed_review_events']==['short']
+    assert 'training_review' not in result
+
+
+def test_behavior_scan_api_preserves_labels_and_manual_train_choice(pair,tmp_path,monkeypatch):
+    from convest.subtasks import behavior
+    normal,_=pair;server=Server(('127.0.0.1',0),[normal.root],tmp_path/'review',doubao_key='test-only')
+    doc=server.store.load(normal);doc['segments']=[segment(0,61,'grasp_fruit',reviewed=True)];doc['training_review']={'decision':'keep'}
+    before=server.store.save(normal,doc)
+    def scan(ep,output,**kwargs):
+        return {'policy':behavior.POLICY,'events':behavior.validate_events([{'start_frame':20,'end_frame':30,'kind':'truss_takeover_return','origin':'model','status':'pending'}],ep.length),'warning':'candidate only'}
+    monkeypatch.setattr(behavior,'scan',scan)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();base=f'http://127.0.0.1:{server.server_port}'
+    try:
+        request=urllib.request.Request(base+'/api/scan-behavior',data=json.dumps({'id':normal.id,'revision':before['revision']}).encode(),headers={'X-Subtasks-Token':server.token})
+        job=json.load(urllib.request.urlopen(request))['job']
+        import time
+        for _ in range(100):
+            value=json.load(urllib.request.urlopen(base+'/api/job?id='+job))
+            if value['state'] in {'completed','failed'}:break
+            time.sleep(.01)
+        assert value['state']=='completed'
+        saved=value['result']['annotation']
+        assert saved['segments']==before['segments'] and saved['training_review']==before['training_review']
+        assert saved['review_events'][0]['status']=='pending' and saved['outcome']==before['outcome']
+    finally:server.shutdown();server.server_close();thread.join()

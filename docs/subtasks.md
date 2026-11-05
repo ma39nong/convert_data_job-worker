@@ -196,3 +196,14 @@ review/
 2026-11-05 v3补充：用户截图提供的仍相连帧绑定完整source身份，存入corrections的known_attached_frames，只约束这条录制。相应尝试的脱离不得早于这些帧；与其冲突的掉果推断被否决，接近/抓持前缀归入grasp_fruit，观察之后不自动推断。frame945/1319/4464/5068/5694/6480均作当前来源约束，没有复制到新录制。
 
 模型边界id在每个请求内从0编号，解析后才恢复到全局段号。返回未提供的帧、无效id或证据缺失时逐项弃权；不插值、不猜归属，也不因一项错误丢掉其他有效结果。所有声称fruit_drop的区间另作同步画面复核：要求看到先有支撑、后无支撑下落，区分origin=left_hand和truss；正常释放到目标果盘不算掉果。原始判断与否决理由都留在drop_checks，页面同时展示，依然是模型草稿。复核预算计入max_requests，超过预算拒绝发布。图像状态与掉果复核关闭长思考，整段概览保留思考；请求参数都进入缓存身份。
+
+
+### PI0.5训练行为审核
+
+动作阶段与示范质量分开记录。掉果后直接继续采摘是可接受的恢复，不自动判整条失败；掉果后仍空手走向果盘执行投放、左手拽走整串再交回右手是需要人工确认的异常。整串转交不能硬套普通单果采摘/旋转，遮挡下不确定的区间保留候选。
+
+“训练行为审核”面板支持：检查训练异常候选，定位候选帧，修改区间/类型/说明，确认事实或排除误报，添加人工记录。新模型候选一律pending，不自动决定训练取舍。豆包“自动预标注”完成后，界面再单独运行一次行为检查（一个额外视频请求）；行为检查失败时动作草稿已保留并明确提示。也可独立检查既有标注，不覆盖动作标签。2fps整段候选检查不提供逐帧准确率，空候选不能认证数据正常。
+
+JSON新增可选review_events（id、start_frame/end_frame、kind、status、origin、note）与training_review（decision=pending/keep/exclude、note）。kind为drop_then_resume、empty_hand_place、truss_takeover_return、uncertain_behavior。status为pending/confirmed/dismissed。动作标签全审核通过与训练取舍无直接等同关系；只有人工改变训练取舍才保存keep/exclude。当前只是记录决定，不删除原始数据、不自动剔除、也不改训练文件。
+
+normal→speedup同时映射未排除的异常区间，依据观测source_index映射，映射后重新pending；已排除误报不重引入。完全被压缩掉的异常id留在collapsed_review_events供检查，不静默消失；normal的训练取舍不自动覆盖speedup的人工决定。重复扫描以稳定事件id合并，不覆盖用户已经确认/排除或修改的记录；保存依旧受source身份与revision保护。

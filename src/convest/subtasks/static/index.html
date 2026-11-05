@@ -20,6 +20,15 @@
 <div class="button-row"><button id="save" class="primary">保存标注</button><button id="download">下载 JSON</button></div><label class="block">整条任务结果<select id="outcome"><option value="unknown">尚未判断</option><option value="success">确认全部完成</option><option value="failure">任务失败</option><option value="incomplete">录制未完成整个任务</option></select></label>
 <label class="block">对应的 speedup<select id="target"><option value="">选择同源 speedup 片段</option></select></label><button id="project">将 normal 标签映射到 speedup</button>
 </section></div>
+<section class="panel behavior-panel"><div class="section-title">训练行为审核 · PI0.5 <span id="behaviorStatus">尚未检查</span></div>
+<p class="muted">掉果后继续采摘可接受；掉果后仍空手投放、左手拽走整串再交回右手，需人工确认。动作标签审核与训练取舍分别保存，不会自动删除或剔除数据。</p>
+<div class="button-row"><button id="scanBehavior">检查训练异常候选</button></div>
+<div class="fields"><label>异常开始帧<input id="behaviorStart" type="number" min="0"></label><label>异常结束帧<input id="behaviorEnd" type="number" min="1"></label></div>
+<label class="block">行为类型<select id="behaviorKind" aria-label="行为类型"></select></label><label class="block">异常说明<input id="behaviorNote" placeholder="例如：左手已空，仍移动到果盘执行投放"></label><div class="button-row"><button id="addBehavior">添加人工记录</button><button id="cancelBehaviorEdit">取消编辑</button></div>
+<div id="behaviorEvents"></div>
+<label class="block">整条数据的训练取舍<select id="trainingDecision" aria-label="整条数据的训练取舍"><option value="pending">尚未决定</option><option value="keep">人工决定保留</option><option value="exclude">人工决定不用于训练</option></select></label>
+<label class="block">取舍说明<input id="trainingNote" placeholder="仅记录人工决定，当前不会改变原始数据或训练文件"></label>
+</section>
 <div class="segment-list"><div class="section-title">全部动作片段</div><div id="segments"></div></div>
 <footer>空格 播放／暂停 · ← → 逐帧 · M 拆分 · Ctrl/Cmd+S 保存 · 点击片段后修改标签或边界</footer>
 </main></div><script src="/app.js"></script></body></html>

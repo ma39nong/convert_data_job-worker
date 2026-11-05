@@ -121,3 +121,14 @@ JEV 视觉接口按 [TypeSafe 官方图像文档](https://docs.typesafe.ai/image
 整个调试经历了整段响应输出HARVEST占位、视频长思考耗尽、模型批次id重置、短尾未覆盖、窗口外帧及误把正常释放算掉落等失败，失败材料及原响应都留档；成功缓存复用。最终各任务的逻辑请求数包含缓存，不代表全部调试实际调用数或账单。并未把低未确认数量当作性能指标，也没有未见录制的人工真值精度。
 
 最终全工程333passed/7skipped，精确最终源码的标注测试45passed，Node/diff检查通过。新增覆盖长尝试/掉果/恢复语法、附着状态证据、自由落体与受控投放区别、果串落果、用户仍相连约束、无效原帧逐项弃权、短尾不延长成功、异常标签normal→speedup映射。仅8766正常SIGINT更新并保留HTTP token，最终PID2373777；8765未改。页面实查v7、32段/0已确认、七阶段、异常落果定位和复核说明；新Sharpa ep2 v1/24段可审核，浏览器warn/error为空，截图review-v7.png。原人工页面未刷新或代保存。
+
+
+## 2026-11-05 PI0.5示范质量与人工异常标记
+
+按用户澄清把可接受掉果恢复、空手投放错误、左手整串拽走再交回分开，新增behavior.py整段2fps候选检查及独立人工事件/训练取舍。扫描不改变动作标签、reviewed、outcome或人工训练决定；模型输出强制pending，不能自证确认/排除训练。界面普通豆包预标注后接独立行为检查；可独立扫描以保留既有动作标签。预算为动作分析预算之外一次显式UI行为检查请求，不将其混报为原动作max_requests之内。
+
+真实调用既有豆包接口复核两条既有缓存，不重新生成动作标签：Sharpa ep1当前更新到v9，候选64–72秒drop_then_resume、150–156.5秒empty_hand_place、231–248秒truss_takeover_return；三项都是未经人工确认的模型候选，尤其整串转交可能误判，留给用户看片。Wuji新ep3元数据v2，本次未检出候选，不等同于认证无异常。原始source、动作segments（包括确认位）与outcome逐字段未变，training_review未自动写入或改动；其他原有标注逐字段未变。材料在outputs/subtasks/behavior-validation/，包含输入/响应在原review/doubao缓存、annotations-before、两条-result.json与final-verification.json。
+
+337passed/7skipped全工程，最终源码定向标注49passed、Node/diff通过。新增覆盖独立保存/历史与字段校验、禁止模型自确认或自排除、保留人工确认/误报记录、normal→speedup异常映射与压缩消失记录、误报不重引入、训练取舍不照搬，以及真实HTTP异步扫描保留动作与人工选择。
+
+另用独立合成小视频及18767临时审核服务验证UI添加人工异常→保存→编辑帧区间→保存→误报处理/人工保留→保存重载，动作和source完全不变。合成数据在behavior-validation/ui-fixture与ui-review，未混入pilot，临时标签页与服务已清理，仅保留测试文件。真实结果页tab6保留，模型3候选均待确认、训练取舍未决定，浏览器warn/error空；截图review-behavior.png。仅正常更新8766并保留token，当前PID2513623；8765未改，未改原始数据、未真正过滤训练数据。用户原人工页未刷新或代保存。

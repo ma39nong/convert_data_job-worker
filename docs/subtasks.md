@@ -31,6 +31,8 @@ cd /home/user/convert_data_job-worker
 
 ## 标签定义
 
+当前只选以下七个主要动作及待确认。第3类抓果结束于抓稳且尚未开始拽脱；第4类从抓稳后的拽脱起动开始，包含拽脱、移向果盘与释放，不等到果实已经离杆才切换。掉果、重试、遮挡、停止、等待不再单列动作阶段；异常保留在独立训练行为审核与原始观察记录。
+
 | 粗标签 | 细标签 ID | 内容 |
 |---|---|---|
 | 拿起番茄 | `grasp_truss` | 右手抓稳整串番茄 |
@@ -38,13 +40,8 @@ cd /home/user/convert_data_job-worker
 | 摘取番茄 | `grasp_fruit` | 左手接近并抓紧一颗番茄，右手稳定托持番茄串 |
 | 摘取番茄 | `pick_and_place` | 左手摘下并放入左侧果盘，右手稳定托持番茄串 |
 | 放回番茄 | `return_truss` | 右手将番茄串放回右侧白盘并松手 |
-| 摘取番茄 | `fruit_drop` | 番茄意外脱落或从左手滑落，未完成受控投放 |
-| 摘取番茄 | `harvest_retry` | 采摘失败后重抓、恢复或调整 |
-| 摘取番茄 | `harvest_uncertain` | 连接或持果状态待确认 |
 | 旋转番茄杆 | `rotate_stem` | 右手手指移动并旋转番茄杆 |
 | 放回番茄 | `return_stem` | 确认全部摘完后，右手放回番茄杆 |
-| 结束 | `stop` | 停止任务 |
-| 其他 | `idle` / `retry` | 等待暂停 / 失败重试调整 |
 | 待确认 | `unknown` | 无法确定或尚未标注 |
 
 粗标签由细标签唯一推导，避免两层互相矛盾。连续相同粗标签在粗轨道合并显示，细轨道保留每次动作。动作可以循环任意次数，不套固定的 19 段时间模板。
@@ -207,3 +204,12 @@ review/
 JSON新增可选review_events（id、start_frame/end_frame、kind、status、origin、note）与training_review（decision=pending/keep/exclude、note）。kind为drop_then_resume、empty_hand_place、truss_takeover_return、uncertain_behavior。status为pending/confirmed/dismissed。动作标签全审核通过与训练取舍无直接等同关系；只有人工改变训练取舍才保存keep/exclude。当前只是记录决定，不删除原始数据、不自动剔除、也不改训练文件。
 
 normal→speedup同时映射未排除的异常区间，依据观测source_index映射，映射后重新pending；已排除误报不重引入。完全被压缩掉的异常id留在collapsed_review_events供检查，不静默消失；normal的训练取舍不自动覆盖speedup的人工决定。重复扫描以稳定事件id合并，不覆盖用户已经确认/排除或修改的记录；保存依旧受source身份与revision保护。
+
+
+## 2026-11-05 主动作收敛（当前 v4，覆盖前述 v3 的边界与额外动作规则）
+
+`tomato_main_actions_extraction_onset_v4` 只输出主动作；历史 JSON 的旧标签仍可读取，但新下拉框与模型发布结果不再提供六个辅助标签。未知或失败操作不自动变成成功投放，候选动作仍未确认；独立行为审核、人工训练取舍继续保留，尚未接训练过滤导出。
+
+抓果→摘下放盘改为抓稳后的主动拽脱起点：上一帧须抓稳且相连，下一帧开始拽脱，两帧都可以仍相连。已离杆并移动的画面不能证明拽脱起点。原帧请求分类 phase/attachment/retention；证据不足只标边界待核，不新增阶段。旧 known_attached_frames 仅约束历史实际离杆判定，不再限制当前拽脱动作起点。
+
+当前未确认草稿做一次可回溯收敛，相邻同动作合并，原标签保存在历史及审计副本；人工已确认模板不变。旧离杆边界未复查处继续提示待核。Sharpa additional normal ep2 首次抓果/摘下边界从534帧前移到模型建议493帧（16.43秒），未代替人工确认；配对 speedup 按真实观测 source_index 重映射。两次真实图像请求、原帧及前后版本审计见 outputs/subtasks/simple-actions-validation。

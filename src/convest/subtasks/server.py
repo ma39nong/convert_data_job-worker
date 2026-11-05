@@ -14,6 +14,7 @@ import webbrowser
 
 from .core import LABELS, Store, project
 from .behavior import KINDS
+from .actions import ACTION_LABELS,simplify
 from .learning import predict, train
 
 STATIC = Path(__file__).parent/'static'
@@ -101,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
             if route.path == '/api/bootstrap':
                 return self.send({'app': 'subtasks-review', 'token': self.server.token,
                                   'labels': {k: {'coarse': v[0], 'text': v[1]} for k, v in LABELS.items()},
-                                  'behavior_kinds':KINDS,'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
+                                  'action_labels':list(ACTION_LABELS),'behavior_kinds':KINDS,'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
                                   'jev': self.server.model_status(), 'doubao': self.server.doubao_status()})
             if route.path == '/api/models/status':
                 return self.send(self.server.model_status())
@@ -220,6 +221,8 @@ class Handler(BaseHTTPRequestHandler):
                         result = predict(store, ep)
                         if result.get('in_reference_set'): raise ValueError('当前是模型参考样例，请保留参考标签，在其他 episode 上运行预标注')
                     else: raise ValueError('未知预标注方式')
+                    result['segments'],simplified=simplify(result['segments'],ep.length,ep.fps,result.get('harvest_evidence',[]))
+                    if simplified:result['simplified_helper_stages']=simplified
                     doc = {**current, 'segments': result['segments']}
                     annotation = store.save(ep, doc, origin=result['method'],
                                             provenance={k: v for k, v in result.items() if k != 'segments'})

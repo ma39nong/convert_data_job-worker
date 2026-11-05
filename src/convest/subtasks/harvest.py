@@ -18,7 +18,7 @@ def parse_proven_boundaries(response, tasks):
     result = parse_boundaries(response, tasks)
     rows = text_json(response)['boundaries']
     for row, task in zip(sorted(rows, key=lambda r:r['id']), sorted(tasks, key=lambda t:t['id'])):
-        if task['event'] != 'first_detached_frame':
+        if task['event'] not in {'first_detached_frame','first_extraction_motion'}:
             continue
         item = result[task['id']]
         states = row.get('states', [])
@@ -40,11 +40,17 @@ def parse_proven_boundaries(response, tasks):
             current = observed[candidate]
             proof = (previous['attachment']=='attached' and
                      current['attachment']=='detached' and current['retention']=='held')
-        anchors=task.get('known_attached_frames',[])
+        if task['event']=='first_extraction_motion':
+            proof=False
+            if len(observed)==len(frames) and candidate in observed and frames.index(candidate)>0:
+                previous=observed[frames[frames.index(candidate)-1]];current=observed[candidate]
+                proof=previous.get('phase')=='grip_secured' and previous['attachment']=='attached' and previous['retention']=='held' and current.get('phase')=='extract' and current['retention']=='held'
+            item['extraction_onset_proven']=proof
+        anchors=task.get('known_attached_frames',[]) if task['event']=='first_detached_frame' else []
         if anchors and (candidate is None or candidate<=max(anchors) or any(f in observed and observed[f]['attachment']!='attached' for f in anchors)):
             proof=False;item['human_attachment_conflict']=True
         item['states'] = [observed[f] for f in frames if f in observed]
-        item['attachment_transition_proven'] = proof
+        item['attachment_transition_proven'] = proof if task['event']=='first_detached_frame' else False
         if not proof:
             item['needs_review'] = True
             item['frame'] = None
@@ -71,12 +77,12 @@ def parse_harvest(response, length, fps):
         attachment=row.get('attachment');retention=row.get('retention');event=row.get('event')
         if attachment not in ATTACHMENT or retention not in RETENTION:
             raise ValueError('采摘状态证据缺失或无效')
-        if event not in {'approach_attached','detached_held','controlled_release','drop','failed_recovery','occluded'}:
+        if event not in {'approach_attached','extract_start','detached_held','controlled_release','drop','failed_recovery','occluded'}:
             raise ValueError('采摘物理事件无效')
         # A fruit being gripped is not evidence of detachment. Free fall is not
         # placement. Inconsistent model claims are visible review regions.
         original=label
-        place_evidence=(attachment=='detached' and retention=='held' and event=='detached_held') or (event=='controlled_release' and result and result[-1]['label']=='pick_and_place' and attachment=='detached' and retention in {'held','empty'})
+        place_evidence=(event=='extract_start' and retention=='held') or (attachment=='detached' and retention=='held' and event=='detached_held') or (event=='controlled_release' and result and result[-1]['label']=='pick_and_place' and attachment=='detached' and retention in {'held','empty'})
         if score<.5 or (label=='pick_and_place' and not place_evidence):
             label='harvest_uncertain'
         if label=='fruit_drop' and not (event=='drop' and retention in {'falling','empty'}):label='harvest_uncertain'
@@ -107,14 +113,14 @@ def propose_harvest(episode,stage,run,client,record,records,max_requests):
         prompt=RULES+f'''\nLOCAL FINE PASS: this entire clip is WITHIN one harvest coarse phase.
 Only classify the physical state of the currently targeted LEFT-hand fruit.
 Watch the stem-fruit CONNECTION and fruit RETENTION over time, using both wrist
-views AND the front/tray view. Holding/twisting/pulling still ATTACHED belongs to
-grasp_fruit, even if it lasts 30 seconds or there are multiple grip attempts.
+views AND the front/tray view. Approach and securing the grip belong to grasp_fruit. Once the secured hand
+starts the purposeful extraction pull/twist, pick_and_place begins, even while
+the fruit is still attached. Complete separation is later, not the boundary.
 Do not use hand closing, left-arm motion, elapsed time or expected alternation
-as detachment evidence. A real pick begins only with independent detached fruit
-retained in left hand. An uncontrolled fall or slipping from the hand is a
-fruit_drop, even after initially valid detachment. Do not invent a tray visit.
-Recovery/empty-hand reposition following failure is harvest_retry, and a new
-approach is grasp_fruit. Unclear connection/retention is harvest_uncertain.
+as proof of fruit separation. Output ONLY grasp_fruit or pick_and_place.
+Do not introduce fruit_drop, harvest_retry or harvest_uncertain action stages.
+Dropping/recovery/occlusion are review observations, not extra stages. A new
+empty-hand approach is grasp_fruit; do not invent a successful tray visit.
 A chunk may start/end MID-ACTION. NEVER add a successful place to make pairs.
 Segments cover exactly {(hi-lo)/episode.fps:.6f} LOCAL seconds starting at 0.
 Return {{"segments":[{{"end_seconds":3.2,"label":"grasp_fruit",
@@ -122,9 +128,9 @@ Return {{"segments":[{{"end_seconds":3.2,"label":"grasp_fruit",
 "observation":"specific visible connection or trajectory evidence, in Chinese",
 "confidence":0.8}},...]}}.
 attachment: attached|detached|occluded; retention: held|empty|falling|occluded.
-event: approach_attached|detached_held|controlled_release|drop|failed_recovery|occluded.
-A pick_and_place segment starts with event detached_held and attachment detached,
-retention held. Its later controlled tray release stays within that segment.
+event: approach_attached|extract_start|detached_held|controlled_release|drop|failed_recovery|occluded.
+A pick_and_place segment starts with event extract_start and a secured grip;
+attachment may still be attached. Do not wait until it is fully detached. Its later controlled tray release stays within that segment.
 Do not claim any task success. Include long failed attempts, drops, retries.
 '''
         response,key,cached=client.call(clip,prompt,manifest['sample_fps'])

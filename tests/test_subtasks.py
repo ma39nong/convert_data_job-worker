@@ -562,11 +562,11 @@ def test_whole_template_and_source_frame_passes_preserve_grammar(pair,tmp_path,m
                 lo,hi=map(int,path.stem.split('_')[-2:]);duration=(hi-lo)/10
                 rows=[{'end_seconds':duration/2,'label':'grasp_fruit','confidence':.9,'attachment':'attached','retention':'held','event':'approach_attached'}, {'end_seconds':duration,'label':'pick_and_place','confidence':.9,'attachment':'detached','retention':'held','event':'detached_held'}]
                 return {'output_text':json.dumps({'segments':rows})},'local',False
-            assert 'Exactly these' in prompt and 'actually detached' in prompt
+            assert 'Exactly these' in prompt and 'extraction' in prompt.lower()
             rows=[{'end_seconds':(i+1)*.5 if i<10 else 6.1,'label':label,'confidence':.9} for i,label in enumerate(labels)]
             return {'output_text':json.dumps({'segments':rows})},'global',False
         def call_images(self,groups,prompt):
-            rows=[{'id':g['task']['id'],'first_after_frame':g['task']['candidate_frame'],'confidence':.9, 'states':[{'frame':f,'attachment':'attached' if f<g['task']['candidate_frame'] else 'detached','retention':'held'} for f in g['task']['frames']]} for g in groups]
+            rows=[{'id':g['task']['id'],'first_after_frame':g['task']['candidate_frame'],'confidence':.9, 'states':[{'frame':f,'attachment':'attached' if f<g['task']['candidate_frame'] else 'detached','retention':'held','phase':'grip_secured' if f<g['task']['candidate_frame'] else 'extract'} for f in g['task']['frames']]} for g in groups]
             return {'output_text':json.dumps({'boundaries':rows})},str(rows),False
     result=doubao.annotate(normal,tmp_path/'out',client=Client())
     assert [s['label'] for s in result['segments']]==labels

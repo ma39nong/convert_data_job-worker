@@ -71,3 +71,21 @@ JEV 视觉接口按 [TypeSafe 官方图像文档](https://docs.typesafe.ai/image
 ## 2026-11-05 JEV 账号连接准备
 新增独立 /models 配置页，账号官网入口、密码框及连接状态；POST 接口复用同源/token 防护。只读取官方模型列表验证凭据，成功后内存启用 JEV，失败不替换原配置；密钥不落盘、不进入响应/标注/审计。图像推理显式客户端注入内存密钥，原环境变量 CLI 方式兼容。审核服务更新通过仅进程环境交接现有 HTTP token，原页面无需刷新即可继续保存。
 22 项 annotation 测试通过，含连接防伪造、旧会话延续、凭据不泄漏、验证失败保留配置及模型列表唯一请求。尚无用户账号/key，真实图像调用仍为 0，未验证供应商实际图像响应或精度。
+
+## 2026-11-05 豆包真实视频接入与人工对照
+
+新增豆包后端，复用用户提供工程的官方 Ark Responses 接口及现有凭据，未导入/执行原工程，也未复制密钥到配置或 Git。固定 doubao-seed-2-1-pro-260628，三相机同步 2×2 视频、约5fps抽样，40秒核心分块、前后2秒上下文、最多两路并发。没有使用原工程的人手筛选/短动作合并条件或 SAM3 依赖。审核接口按原始帧输出固定粗细标签 JSON，并保持原有修边界、拆并、审核、下载和 normal→speedup 映射流程。
+
+首次真实短块发现模型将短暂托持/左手回位误拆成 idle，故初试在两个完成请求后通过 STOP 停止后续请求；原始响应仍保留在 outputs/subtasks/doubao-validation。修正连续阶段定义后完整运行人工对照，证据在 outputs/subtasks/doubao-validation-v2：
+
+- 参考为用户已确认的 Sharpa normal ep0 v4，27段，7658帧；预测单独保存为 prediction.json，没有替换人工标注。此条没有发送同一录制的标注图片或人工边界作为答案，仅用固定类别/划分规则，因此仍应称为“同条录制上的标法校准”，不能称为未见数据准确率。
+- 模型输出30段，完整覆盖255.27秒；细动作逐帧一致率84.02%，粗阶段88.31%，unknown 0。unknown为0不等于全部正确。
+- 26个人工内部边界中17个在1秒容差内一对一匹配，召回65.38%；29个预测内部边界中17个匹配，精确率58.62%。匹配部分平均偏差0.384秒，不代表全部边界平均误差。
+- 明显偏差是旋转后再次抓串：人工131.67–149.00秒为grasp_truss，模型将其中大部分仍判成rotate_stem；首次lift→grasp交界也偏早。应重点审核这些边界，不能只检查unknown区域。
+- 完整校准7次真实请求，约717.8秒，input_tokens545308/output_tokens43895，记录供应商返回用量，未据此估算账单。report.json保存逐类IoU、边界统计、调用记录；human-reference-before.json为人工版本快照，结束时验证服务端人工JSON逐字段相同。
+
+全工程317 passed/7 skipped；标注、GUI、OSS定向58 passed。新增测试覆盖同步三相机源帧、上下文拼接/完整覆盖、固定标签/时间/分数强校验、无执行地读取凭据、审计与缓存不泄漏密钥、STOP和请求上限、推理期间人工保存与revision冲突，以及参考画面排除当前/同源normal-speedup和未审核录制。Node语法和diff检查通过。远程任务不持有全局保存锁，本地基线训练/预测原有锁行为保留。
+
+另通过实际审核服务 /api/predict 对不同录制 Sharpa normal-heldout ep1 运行完整流程：使用7类人工代表画面（来源normal ep0 v4），7次真实请求，输出33段连续覆盖7654帧/255.13秒，保存为v5 draft，origin=doubao_multicamera_temporal_v1，全段reviewed=false、outcome仍unknown，unknown帧0；该录制没有人工真值，不能报告准确率。input_tokens608344/output_tokens45775。旧试验v4保留历史。请求和视频缓存在review/doubao/，独立交付JSON heldout-subtasks.json、用量与来源报告heldout-report.json、final-verification.json在doubao-validation-v2/。人工normal ep0 v4逐字段未变，原speedup映射/其余录制未替换。
+
+审核HTTP在空闲时正常SIGINT更新，延续旧token并验证相同，最终PID1733531；已有页面未刷新/切换/代保存。另开新版页面直接定位ep1，核实豆包可选、33段/0已确认、粗细轨道、片段定位与confidence显示，浏览器warn/error为空。截图review-ui.png、review-controls.png在同验证目录；原人工页面与新结果页面均保留。此次只是两条试用录制（含人工校准），未全量处理远端四个场景根。

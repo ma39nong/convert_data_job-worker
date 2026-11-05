@@ -21,12 +21,14 @@ STATIC = Path(__file__).parent/'static'
 class Server(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, roots, output, *, enable_jev=False, jev_model="jev-1.14.0"):
+    def __init__(self, address, roots, output, *, enable_jev=False, jev_model="jev-1.14.0", doubao_key=None, doubao_model="doubao-seed-2-1-pro-260628"):
         self.enable_jev, self.jev_model = enable_jev, jev_model
         self.store = Store(roots, output)
         self.token = os.environ.pop('SUBTASKS_HTTP_TOKEN', None) or secrets.token_urlsafe(32)
         self.jev_key = os.environ.get('TYPESAFE_API_KEY', '')
         self.jev_verified = False
+        self.doubao_key = doubao_key or os.environ.get('ARK_API_KEY', '')
+        self.doubao_model = doubao_model
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.jobs, self.jobs_lock = {}, threading.Lock()
         self.cached_episodes = {}
@@ -36,11 +38,21 @@ class Server(ThreadingHTTPServer):
         return {'enabled': self.enable_jev, 'configured': bool(self.jev_key),
                 'verified': self.jev_verified, 'model': self.jev_model}
 
+    def doubao_status(self):
+        return {'enabled': bool(self.doubao_key), 'configured': bool(self.doubao_key),
+                'model': self.doubao_model}
+
+    def progress(self, done, total):
+        with self.jobs_lock:
+            for job in self.jobs.values():
+                if job['state'] == 'running':
+                    job['progress'] = {'completed_chunks': done, 'total_chunks': total}
+
     def episode(self, id_):
         # Reload after edits so source changes cannot be hidden behind an in-memory table.
         return self.store.episode(id_)
 
-    def submit(self, action):
+    def submit(self, action, *, lock_store=True):
         with self.jobs_lock:
             if any(j['state'] in ('running', 'queued') for j in self.jobs.values()):
                 raise ValueError('已有任务正在处理，请等待完成')
@@ -49,7 +61,10 @@ class Server(ThreadingHTTPServer):
         def run():
             with self.jobs_lock: self.jobs[id_] = {'state': 'running'}
             try:
-                with self.store.lock: result = action()
+                if lock_store:
+                    with self.store.lock: result = action()
+                else:
+                    result = action()
                 with self.jobs_lock: self.jobs[id_] = {'state': 'completed', 'result': result}
             except Exception as exc:
                 with self.jobs_lock: self.jobs[id_] = {'state': 'failed', 'error': str(exc)}
@@ -86,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send({'app': 'subtasks-review', 'token': self.server.token,
                                   'labels': {k: {'coarse': v[0], 'text': v[1]} for k, v in LABELS.items()},
                                   'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
-                                  'jev': self.server.model_status()})
+                                  'jev': self.server.model_status(), 'doubao': self.server.doubao_status()})
             if route.path == '/api/models/status':
                 return self.send(self.server.model_status())
             if route.path == '/api/episode':
@@ -175,6 +190,17 @@ class Handler(BaseHTTPRequestHandler):
                         from .jev import annotate, Client
                         if not self.server.jev_key: raise ValueError('请先在视觉模型配置页填写 API key')
                         result = annotate(ep, store.output, model=self.server.jev_model, max_requests=body.get('max_requests',256), client=Client(store.output/'jev', api_key=self.server.jev_key))
+                    elif backend == 'doubao':
+                        if not self.server.doubao_key: raise ValueError('尚未配置豆包 API key')
+                        from .doubao import annotate, reference_style, reference_examples, Client
+                        with store.lock:
+                            refs = reference_style(store)
+                            examples = reference_examples(store,ep)
+                        result = annotate(ep, store.output, api_key=self.server.doubao_key,
+                                          model=self.server.doubao_model, references=refs,
+                                          client=Client(store.output/'doubao', self.server.doubao_key, self.server.doubao_model,
+                                                        examples=examples),
+                                          max_requests=body.get('max_requests',16), progress=self.server.progress)
                     elif backend == 'local':
                         result = predict(store, ep)
                         if result.get('in_reference_set'): raise ValueError('当前是模型参考样例，请保留参考标签，在其他 episode 上运行预标注')
@@ -183,7 +209,7 @@ class Handler(BaseHTTPRequestHandler):
                     annotation = store.save(ep, doc, origin=result['method'],
                                             provenance={k: v for k, v in result.items() if k != 'segments'})
                     return {'annotation': annotation, 'proposal': {k: v for k, v in result.items() if k != 'segments'}}
-                return self.send(self.server.submit(propose))
+                return self.send(self.server.submit(propose, lock_store=body.get('backend','local') == 'local'))
             if route == '/api/jev-plan':
                 from .jev import plan
                 return self.send({'plan':plan(ep, store.output, self.server.jev_model)})
@@ -215,8 +241,14 @@ def main(argv=None):
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--enable-jev', action='store_true', help='显式允许向 TypeSafe 发送本次所选 episode 的抽帧；API key 可从环境或本机视觉模型配置页提供')
     parser.add_argument('--jev-model', default='jev-1.14.0')
+    parser.add_argument('--doubao-key-source', help='从指定现有 Python 文件读取 DEFAULT_ARK_API_KEY 字面量，不执行文件、不复制到配置')
+    parser.add_argument('--doubao-model', default='doubao-seed-2-1-pro-260628')
     args = parser.parse_args(argv)
-    server = Server(('127.0.0.1', args.port), args.root, args.output, enable_jev=args.enable_jev, jev_model=args.jev_model)
+    doubao_key = None
+    if args.doubao_key_source:
+        from .doubao import credential_from_source
+        doubao_key = credential_from_source(args.doubao_key_source)
+    server = Server(('127.0.0.1', args.port), args.root, args.output, enable_jev=args.enable_jev, jev_model=args.jev_model, doubao_key=doubao_key, doubao_model=args.doubao_model)
     url = f'http://127.0.0.1:{server.server_port}'
     print('Subtasks review: '+url, flush=True)
     if not args.no_browser: threading.Timer(.5, lambda: webbrowser.open(url)).start()

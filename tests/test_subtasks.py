@@ -395,3 +395,128 @@ def test_jev_key_validation_uses_only_model_list(monkeypatch):
     monkeypatch.setattr(model_config.urllib.request,'build_opener',lambda *args:BadOpener())
     with pytest.raises(ValueError) as error:model_config.validate_key('test-key')
     assert 'secret-must-not-leak' not in str(error.value)
+
+
+def test_doubao_fixed_labels_complete_timeline_and_rejects_invalid():
+    from convest.subtasks.doubao import parse_segments
+    def response(rows):return {'status':'completed','output':[{'content':[{'type':'output_text','text':json.dumps({'segments':rows})}]}]}
+    good=[{'end_seconds':2.5,'label':'grasp_truss','confidence':.9},{'end_seconds':6.1,'label':'lift_truss','confidence':.8}]
+    rows=parse_segments(response(good),61,10)
+    assert [(s['start_frame'],s['end_frame'],s['coarse'],s['reviewed']) for s in rows]==[(0,25,'拿起番茄',False),(25,61,'拿起番茄',False)]
+    assert parse_segments(response([{**good[0],'confidence':.2},good[1]]),61,10)[0]['label']=='unknown'
+    for bad in [[],[good[0]],[{**good[0],'end_seconds':float('nan')},good[1]],
+                [{**good[0],'label':'new_unlisted_action'},good[1]],
+                [{**good[0],'confidence':True},good[1]],
+                [good[0],{**good[1],'end_seconds':2.4}]]:
+        with pytest.raises(ValueError):parse_segments(response(bad),61,10)
+
+
+def test_doubao_reads_credential_without_executing_source(tmp_path):
+    from convest.subtasks.doubao import credential_from_source
+    path=tmp_path/'existing.py'
+    path.write_text("raise RuntimeError('must not execute')\nDEFAULT_ARK_API_KEY = 'private-key'\n")
+    assert credential_from_source(path)=='private-key'
+    path.write_text("DEFAULT_ARK_API_KEY = __import__('os').getenv('KEY')")
+    with pytest.raises(ValueError):credential_from_source(path)
+
+
+def test_doubao_montage_uses_identical_source_frames_for_three_cameras(pair,tmp_path):
+    from convest.subtasks.doubao import make_montage
+    normal,_=pair;path=tmp_path/'composite.mp4'
+    manifest=make_montage(normal,path,20,41)
+    assert manifest['source_frame_indices']==list(range(20,41,2))
+    with av.open(str(path)) as container:
+        frames=list(container.decode(video=0))
+    assert len(frames)==11
+    for i,frame in enumerate(frames):
+        rgb=frame.to_ndarray(format='rgb24')
+        a,b,c=rgb[180,240],rgb[180,720],rgb[540,240]
+        assert np.max(np.abs(a.astype(int)-b))<=5 and np.max(np.abs(a.astype(int)-c))<=5
+        assert np.max(rgb[540,720])<10
+        assert (a[0]>a[1])==(i<5)  # source frame 30 switches red to green
+
+
+def test_doubao_client_cache_no_secret_in_logs_and_no_retry(tmp_path,monkeypatch):
+    from convest.subtasks import doubao
+    import io
+    path=tmp_path/'video.mp4';path.write_bytes(b'fake-video')
+    calls=[]
+    class Opener:
+        def open(self,request,timeout):
+            calls.append(request)
+            payload=json.loads(request.data)
+            assert request.full_url==doubao.ENDPOINT and request.get_header('Authorization')=='Bearer secret-test-key'
+            assert payload['store'] is False and any(c['type']=='input_video' for c in payload['input'][0]['content'])
+            return io.BytesIO(json.dumps({'model':doubao.MODEL,'status':'completed'}).encode())
+    monkeypatch.setattr(doubao.urllib.request,'build_opener',lambda *args:Opener())
+    client=doubao.Client(tmp_path/'api','secret-test-key')
+    a=client.call(path,'prompt',5);b=client.call(path,'prompt',5)
+    assert len(calls)==1 and a[2] is False and b[2] is True
+    assert all(b'secret-test-key' not in p.read_bytes() for p in tmp_path.rglob('*') if p.is_file())
+    (tmp_path/'api/STOP').write_text('stop')
+    with pytest.raises(ValueError,match='STOP'):client.call(path,'different prompt',5)
+    assert len(calls)==1
+
+
+def test_doubao_stitches_context_and_budget_before_network(pair,tmp_path,monkeypatch):
+    from convest.subtasks import doubao
+    normal,_=pair;calls=[]
+    def montage(ep,path,start,end):
+        path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'video')
+        return {'sample_fps':5,'source_start_frame':start,'source_end_frame':end,'sha256':sha(path)}
+    monkeypatch.setattr(doubao,'make_montage',montage)
+    class Client:
+        def call(self,path,prompt,fps):
+            start,end=map(int,path.stem.split('_')[1:])
+            # One consistent boundary in original video at frame 30.
+            rows=[]
+            if start<30:rows.append({'end_seconds':(min(30,end)-start)/10,'label':'grasp_truss','confidence':.9})
+            if end>30:rows.append({'end_seconds':(end-start)/10,'label':'lift_truss','confidence':.8})
+            calls.append(path)
+            return {'output_text':json.dumps({'segments':rows}),'usage':{}},str(len(calls)),False
+    with pytest.raises(ValueError,match='上限'):
+        doubao.annotate(normal,tmp_path/'result',chunk_seconds=5,max_requests=1,client=Client())
+    assert not calls
+    result=doubao.annotate(normal,tmp_path/'result',chunk_seconds=5,max_requests=2,client=Client())
+    assert [(r['start_frame'],r['end_frame'],r['label']) for r in result['segments']]==[(0,30,'grasp_truss'),(30,61,'lift_truss')]
+    assert result['network_requests']==2 and all(not s['reviewed'] for s in result['segments'])
+
+
+def test_long_model_job_allows_manual_save_and_revision_conflict(pair,tmp_path):
+    normal,_=pair
+    server=Server(('127.0.0.1',0),[normal.root],tmp_path/'review')
+    started=threading.Event();finish=threading.Event();saved=threading.Event()
+    old=server.store.load(normal)
+    def remote():
+        started.set();assert finish.wait(5)
+        with pytest.raises(ValueError,match='其他窗口'):
+            server.store.save(normal,old,origin='model')
+        return {'conflict_detected':True}
+    try:
+        server.submit(remote,lock_store=False)
+        assert started.wait(2)
+        def manual():
+            server.store.save(normal,{**old,'segments':[segment(0,normal.length,'grasp_truss')]})
+            saved.set()
+        thread=threading.Thread(target=manual);thread.start()
+        assert saved.wait(2), 'manual save blocked behind network job'
+        finish.set();thread.join()
+    finally:
+        finish.set();server.server_close()
+    assert json.loads(server.store.path(normal.id).read_text())['origin']=='manual'
+
+
+def test_doubao_reference_images_only_other_reviewed_recordings(pair,tmp_path):
+    from convest.subtasks.doubao import reference_examples
+    normal,speedup=pair
+    other=dataset(tmp_path/'other',recording='different-recording')
+    store=Store([normal.root,speedup.root,other.root],tmp_path/'review')
+    try:
+        doc=store.load(normal)
+        store.save(normal,{**doc,'segments':[segment(0,30,'grasp_truss',reviewed=True),segment(30,61,'lift_truss',reviewed=True)]})
+        assert reference_examples(store,normal)==[]  # same episode cannot supply answers
+        assert reference_examples(store,speedup)==[] # same recording variant also excluded
+        examples=reference_examples(store,other)
+        assert {e['label'] for e in examples}=={'grasp_truss','lift_truss'}
+        assert all(e['source_id']==normal.id and e['revision']==1 and e['data_url'].startswith('data:image/jpeg;base64,') for e in examples)
+    finally:store.lockfile.close()

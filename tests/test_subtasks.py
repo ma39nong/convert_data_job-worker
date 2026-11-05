@@ -566,7 +566,12 @@ def test_whole_template_and_source_frame_passes_preserve_grammar(pair,tmp_path,m
             rows=[{'end_seconds':(i+1)*.5 if i<10 else 6.1,'label':label,'confidence':.9} for i,label in enumerate(labels)]
             return {'output_text':json.dumps({'segments':rows})},'global',False
         def call_images(self,groups,prompt):
-            rows=[{'id':g['task']['id'],'first_after_frame':g['task']['candidate_frame'],'confidence':.9, 'states':[{'frame':f,'attachment':'attached' if f<g['task']['candidate_frame'] else 'detached','retention':'held','phase':'grip_secured' if f<g['task']['candidate_frame'] else 'extract','side':'before' if f<g['task']['candidate_frame'] else 'after'} for f in g['task']['frames']], 'outcome_observations':[{'frame':f,'attachment':'detached','retention':'held','single_fruit':True} for f in g['task'].get('outcome_frames',[])]} for g in groups]
+            rows=[]
+            for g in groups:
+                task=g['task'];assert 'candidate_frame' not in task
+                f0=task['frames'][len(task['frames'])//2]
+                states=[{'frame':f,'attachment':'attached' if f<f0 else 'detached','retention':'held','phase':'grip_secured' if f<f0 else 'extract','side':'before' if f<f0 else 'after','right_grip':'secured','right_motion':'still' if f<f0 else 'lift_onset' if f==f0 else 'lifting'} for f in task['frames']]
+                rows.append({'id':task['id'],'first_after_frame':f0,'confidence':.9,'states':states,'outcome_observations':[{'frame':f,'attachment':'detached','retention':'held','single_fruit':True} for f in task.get('outcome_frames',[])]})
             return {'output_text':json.dumps({'boundaries':rows})},str(rows),False
     result=doubao.annotate(normal,tmp_path/'out',client=Client())
     assert [s['label'] for s in result['segments']]==labels

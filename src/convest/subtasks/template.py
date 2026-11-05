@@ -11,11 +11,11 @@ import numpy as np
 from .core import LABELS, atomic_json, sha, validate_segments
 
 COARSE = ['拿起番茄','摘取番茄','放回番茄','旋转番茄杆','拿起番茄','摘取番茄','放回番茄']
-POLICY = 'tomato_outcome_grounded_style_source_frames_v6'
+POLICY = 'tomato_lift_motion_first_extraction_v8'
 RULES = '''The user requires the SAME global coarse workflow as reviewed episode 000000:
 pick up truss -> harvest individual fruits -> put truss back -> rotate stem ONCE
 -> pick up again -> harvest remaining fruits -> put bare stem back. Exactly these
-seven coarse phases, one rotation interval total. Work BACKWARD from a visible retained detached fruit going toward the tray, trace the same fruit back to the last effective secured grip and final extraction. Do not count a missed reach or a repeated failed grasp as a new successful cycle. Fruit counts and timestamps
+seven coarse phases, one rotation interval total. Work BACKWARD from a visible retained detached fruit going toward the tray, trace the same fruit back to the last effective secured grip and the FIRST extraction effort within that uninterrupted grip. Do not count a missed reach or a repeated failed grasp as a new successful cycle. Fruit counts and timestamps
 are NOT copied from the example. Identify them from this ENTIRE video.
 A temporary wrist/truss adjustment during harvesting is NOT another coarse
 return/rotation/pickup cycle. Do not restart the workflow at chunk boundaries.
@@ -32,18 +32,23 @@ recording cannot support this workflow, return an error instead of inventing it.
 Boundary definitions override any looser interpretation:
 - lift_truss -> grasp_fruit: FIRST frame the LEFT hand/arm starts preparing to
 move/approach the first fruit, even before contact. Not the first touch or grip.
-- grasp_fruit -> pick_and_place: onset of the FINAL EXTRACTION that actually
-removes the target fruit, AFTER the left hand has secured it. Earlier preparatory
-twisting, failed pulls and regrips while the SAME fruit remains attached stay
-grasp_fruit; they are not extra successful cycles. The final grasp_fruit frame
-shows a secured grasp with fruit still attached, BEFORE extraction begins.
-The AFTER action includes the pull/twist that detaches the fruit and the following
-tray transport/release. Do NOT wait for visible complete separation, a gap from
-the stem, or the detached fruit already moving toward the tray. These are LATER.
-Do not confuse finger closing/regripping with the start of extraction.
+- grasp_fruit -> pick_and_place: after the LAST EFFECTIVE SECURED GRIP, choose
+its FIRST purposeful extraction effort. This is the effective GRASP ATTEMPT,
+not merely the last strong jerk immediately before the fruit tears free.
+An uninterrupted secured grasp may twist/pull repeatedly for many seconds:
+ALL those continuous extraction efforts belong to pick_and_place from their
+FIRST onset, even while the fruit stays attached. Do NOT postpone the boundary
+to the last twist, stronger acceleration, visible gap, or detached transport.
+Missed reaches, finger closing and failed grasps BEFORE the effective secured
+grip stay grasp_fruit; do not invent a completed delivery for them.
+The final grasp_fruit frame is secured+attached BEFORE purposeful extraction.
+Distinguish continued secured gripping during extraction from actually losing
+or releasing the target and starting a new grasp attempt. Track the same target
+forward to retained detachment/transport and back to the beginning of that
+uninterrupted effective grasp attempt, not just the final breaking movement.
 - pick_and_place -> grasp_fruit: beginning of empty left-hand return/approach for
 the next fruit, not waiting until it touches that fruit.
-- grasp_truss -> lift_truss: first right-hand lifting/central transfer movement.
+- grasp_truss -> lift_truss: FIRST actual lifting/central-transfer motion of the truss AFTER secure right-hand grip. Secure but stationary holding and preparation remain grasp_truss. Do not cut merely at grasp completion; do not wait until obvious lifting or tray clearance. Compare consecutive source frames to identify actual motion onset.
 - rotate_stem -> grasp_truss: FIRST preparation to grasp after purposeful stem
 rotation ends, including approaching, arranging fingers and repeated grip
 adjustments. Do NOT wait for the final secured grip or the lift. This preparation

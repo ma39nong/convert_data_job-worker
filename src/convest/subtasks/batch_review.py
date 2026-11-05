@@ -61,7 +61,7 @@ def enrich_report(output,report):
             row['boundaries_detail']=[{'index':i,'before':a['label'],'after':b['label'],'frame':a['end_frame'],
                 'proposed_frame':audit['proposed_segments'][i]['end_frame'],'needs_review':i in unresolved,
                 'source_frame':audit['boundary_evidence'][str(i)]['source_frame']} for i,(a,b) in enumerate(zip(audit['reference_segments'],audit['reference_segments'][1:]))]
-        if row['human_preserved'] and proposal.exists():
+        if row['human_preserved'] and proposal.exists() and json.loads(proposal.read_text()).get('review_scope')!='existing_boundaries':
             reference=snapshot[row['id']]['segments'];predicted=json.loads(proposal.read_text())['segments']
             length=snapshot[row['id']]['source']['length']
             a=np.empty(length,dtype=object);b=np.empty(length,dtype=object)
@@ -88,6 +88,7 @@ def main(argv=None):
     parser.add_argument('--credential-source',required=True)
     parser.add_argument('--workers',type=int,choices=(1,2,3),default=2)
     parser.add_argument('--resume',action='store_true',help='继续最近一轮，只重做未成功片段；已保存结果及人工修改不覆盖')
+    parser.add_argument('--boundaries-only',action='store_true',help='保留现有动作循环，只重新检查所有分界；不重新猜测果数')
     args=parser.parse_args(argv);output=Path(args.output).resolve();base=f'http://127.0.0.1:{args.port}'
     def get(path):return json.load(urllib.request.urlopen(base+path,timeout=120))
     bootstrap=get('/api/bootstrap');token=bootstrap['token']
@@ -97,13 +98,16 @@ def main(argv=None):
     if args.resume:
         previous=json.loads((output/'quality-review'/'report.json').read_text())
         if previous['policy']!=POLICY:raise ValueError('策略已变化，不能接续旧策略报告')
+        if previous.get('review_scope','full_segmentation')!=('existing_boundaries' if args.boundaries_only else 'full_segmentation'):raise ValueError('复查范围变化，不能接续不同范围')
         snapshot=json.loads((output/'quality-review'/previous['run_id']/'annotations-before.json').read_text())
         if set(snapshot)!=set(e['id'] for e in entries):raise ValueError('片段集合已变化，不能接续旧批次')
-    run_id=hashlib.sha256(json.dumps({'policy':POLICY,'snapshot':snapshot},sort_keys=True).encode()).hexdigest()[:16]
+    scope='existing_boundaries' if args.boundaries_only else 'full_segmentation'
+    run_id=hashlib.sha256(json.dumps({'policy':POLICY,'snapshot':snapshot,'review_scope':scope},sort_keys=True).encode()).hexdigest()[:16]
     root=output/'quality-review';run=root/run_id;run.mkdir(parents=True,exist_ok=True)
     atomic_json(run/'annotations-before.json',snapshot)
     key=credential_from_source(args.credential_source);client=Client(output/'doubao',key)
     report={'policy':POLICY,'run_id':run_id,'started_at':previous['started_at'] if previous else time.time(),'state':'running','total':len(entries),'episodes':[],
+            'review_scope':scope,
             'warning':'模型全量复查，不是人工真值或准确率；已人工确认的动作保留，异常及训练取舍由人工决定。'}
     if previous:report['resumed_at']=previous.get('resumed_at',[])+[time.time()]
     rows={}
@@ -144,8 +148,19 @@ def main(argv=None):
             if result_path.exists():
                 result=json.loads(result_path.read_text());assert result['source']==ep.identity()
             elif entry['variant']=='normal':
-                result=annotate_template(ep,output,api_key=key,client=model_client,max_requests=128,
-                    progress=lambda done,total:(row.update(requests_completed=done),checkpoint()))
+                if args.boundaries_only:
+                    records=[]
+                    def record(response,key,cached,stage):records.append({'key':key,'cached':cached,'stage':stage,'usage':response.get('usage',{})})
+                    checked,evidence,cues=refine_all(ep,doc['segments'],folder/'visual-audit',model_client,record,records,128,
+                        lambda done,total:(row.update(requests_completed=done),checkpoint()))
+                    result={'method':'doubao_template_source_frames_v1','policy':POLICY,'review_scope':scope,
+                        'segments':checked,'boundary_evidence':evidence,'left_motion_cues':cues,'requests':records,'request_count':len(records),
+                        'unresolved_boundaries':[int(i) for i,v in evidence.items() if v['source_frame']['needs_review']],
+                        'boundary_audit':{'scope':'every_existing_boundary','source_fps':ep.fps,'dense_stride':1,'all_boundaries_checked':len(evidence)==len(checked)-1},
+                        'prior_revision':doc['revision'],'warning':'保留原动作循环，全部分界重新复查；右手握稳后开始提起的第一帧进入第二段，静止握持仍属第一段，左手有效抓稳后的首次主动摘脱包含持续扭拉，不等最后一下断开。证据不足仍需人工复核。'}
+                else:
+                    result=annotate_template(ep,output,api_key=key,client=model_client,max_requests=128,
+                        progress=lambda done,total:(row.update(requests_completed=done),checkpoint()))
                 result={'source':ep.identity(),**result}
                 atomic_json(result_path,result)
             else:
@@ -160,6 +175,7 @@ def main(argv=None):
                 differences=[i for i,(a,b) in enumerate(zip(projected['segments'][:-1],checked[:-1])) if a['end_frame']!=b['end_frame']]
                 unresolved=sorted(set(differences)|{int(i) for i,p in evidence.items() if p['source_frame']['needs_review']})
                 result={'source':ep.identity(),'method':'doubao_template_source_frames_v1','policy':POLICY,
+                    'review_scope':scope,
                     'segments':projected['segments'],'boundary_evidence':evidence,'unresolved_boundaries':unresolved,
                     'requests':records,'request_count':len(records),'projection':{k:v for k,v in projected.items() if k not in {'segments','source'}},
                     'independent_visual_segments':checked,'mapping_visual_disagreements':differences,

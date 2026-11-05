@@ -132,3 +132,40 @@ JEV 视觉接口按 [TypeSafe 官方图像文档](https://docs.typesafe.ai/image
 337passed/7skipped全工程，最终源码定向标注49passed、Node/diff通过。新增覆盖独立保存/历史与字段校验、禁止模型自确认或自排除、保留人工确认/误报记录、normal→speedup异常映射与压缩消失记录、误报不重引入、训练取舍不照搬，以及真实HTTP异步扫描保留动作与人工选择。
 
 另用独立合成小视频及18767临时审核服务验证UI添加人工异常→保存→编辑帧区间→保存→误报处理/人工保留→保存重载，动作和source完全不变。合成数据在behavior-validation/ui-fixture与ui-review，未混入pilot，临时标签页与服务已清理，仅保留测试文件。真实结果页tab6保留，模型3候选均待确认、训练取舍未决定，浏览器warn/error空；截图review-behavior.png。仅正常更新8766并保留token，当前PID2513623；8765未改，未改原始数据、未真正过滤训练数据。用户原人工页未刷新或代保存。
+
+## 2026-11-05 全部11条的结果回推与连续原帧复查（v6）
+
+本节覆盖前述仅修指定片段的流程和旧辅助动作词表。当前策略为`tomato_outcome_grounded_style_source_frames_v6`，只保留七个主动作及unknown。normal重新分析整段七粗阶段、两次拿起及5fps局部采摘过程；每一个分界均经过上下文定位、连续原始帧判定，证据不足扩大范围后再查。speedup先按真实观测来源帧映射，再独立检查每个映射分界的画面；视觉冲突保留待核，不破坏来源对应。异常仍在独立人工记录中。
+
+抓果结束于最后一次有效抓稳、最终拽脱开始之前；失败接近、没抓住、重抓和仍连在同一果实上的失败拉扯不自动拆成新循环。抓果→摘下分界额外提供后续三个结果时刻，要求模型看见同一单果脱离并被左手保留，再回溯起点。仅有拉扯、空手、落果或整串转交不足以认证正常摘下。每个源帧请求和逐图状态都有记录，但模型观察仍可能误判，不能称为人工逐帧真值。
+
+人工已确认参考只用于其他录制的两类动作含义示例，不复制时间或果数，目标自身和同源normal/speedup排除。参考自身另做完整独立预测与原26个边界的单独复查，原人工JSON逐字段保留。独立模型在这条参考上的细动作逐帧一致率80.595%、粗阶段96.592%，预测31段而人工27段，仍有多拆循环问题；不作为训练就绪或未见数据准确率。上一轮v5为77.38%/91.33%，报告另存baseline-v5.json，未隐去校准不足。
+
+用户最新截图对应Sharpa additional normal ep2：旧v3第9/10段1389–2024帧收敛为一段抓果，第11/12段2024–2346帧附近为同一次有效摘取投放。v6实际重新定位为抓果[1389,2031)、摘下放盘[2031,2346)，全条21→19段。模型原帧证据为2030抓稳且相连、2031开始最终拽脱；后续2134/2240帧见独立持果向果盘移动。此边界是模型候选而非人工确认；该条仍有4个其他分界未能证实。具体输入、输出和旧标注快照见`outputs/subtasks/review/quality-review/1adeebcf5b0e698c`及doubao源身份/策略缓存，观察对照图为`quality-review/inspection/ep2-final-grasp-extraction.jpg`。
+
+Sharpa heldout ep1 v12为27段，6个未证实边界。约189–224秒（5682–6744帧）的正常摘下候选在上下文、连续原帧、扩围及重查中均缺乏“同一单果独立脱离且仍被握持”的证据；其源帧proof为needs_review，不能据此视为成功投放。页面选中该段会显示拒绝证实的原因；原局部观察文字仍作为模型假设留档，不当成真值。这类未解决候选仍需人工修改，不把全部运行完成等同于全部标签正确。
+
+全工程回归350passed/7skipped；最终源码的标注与逐帧证据定向60passed。Node语法检查及diff检查通过。新增覆盖逐帧before/after完整证据、扩大范围重查、必须有后续单果持有、失败不延长成功投放补尾、人工示例来源隔离、全量保存CAS与人工参考保护、speedup来源版本变化拒绝、异常和训练取舍保留、报告保留人工已排除决定并纳入映射候选。测试通过验证实现约束，不代表视觉模型准确率。
+
+
+### 本轮最终实际结果
+全部11/11条完成模型复查，共263个边界、95处重点复核、20条待审异常记录。待核包含证据不足及speedup映射/视觉分歧，不是已知错误率；异常数量包含保留历史、同源映射和人工参考的报告候选，不等于独立错误次数。
+| 片段 | 细段 | 边界 | 待核 | 待审异常 | 版本 |
+|---|---:|---:|---:|---:|---:|
+| additional/sharpa/normal ep2 | 19 | 18 | 4 | 0 | v4 |
+| additional/sharpa/speedup ep2 | 19 | 18 | 14 | 2 | v3 |
+| additional/wuji/normal ep2 | 26 | 25 | 6 | 0 | v5 |
+| additional/wuji/normal ep3 | 20 | 19 | 2 | 0 | v5 |
+| additional/wuji/normal ep6 | 26 | 25 | 6 | 0 | v4 |
+| pilot/sharpa/normal ep0 | 27 | 26 | 3 | 2 | v4 |
+| pilot/sharpa/normal-heldout ep1 | 27 | 26 | 6 | 3 | v12 |
+| pilot/sharpa/speedup ep0 | 27 | 26 | 26 | 2 | v4 |
+| pilot/wuji/normal ep0 | 31 | 30 | 5 | 1 | v4 |
+| pilot/wuji/normal-heldout ep1 | 21 | 20 | 3 | 0 | v2 |
+| pilot/wuji/speedup ep0 | 31 | 30 | 20 | 10 | v2 |
+
+独立最终核对脚本`quality-review/verify_v6.py`通过：11份缓存来源SHA不变，人工000000 v4逐字段完全保留，其他10份主动作均未自动确认，旧异常与训练取舍保留；3组normal→speedup按真实source_index重新计算后与保存标签一致，normal来源版本吻合。每个分界均保存连续原帧输入，已证实的抓果→摘下均有握稳/最终拽脱及后续单果持有记录。此项检查验证完整性和流程约束，不认证模型观察正确。
+
+首轮Wuji additional ep2概览因输出未完成而拒绝发布，完整失败报告在本轮目录first-attempt-report.json，原响应在raw-incomplete。将全局输出限定为9个结构区间、局部仍独立重看逐果动作后重跑成功，62个逻辑请求（含缓存）产出26段；通过--resume仅接续这一条，其他已保存结果不重写。resumed_at与最初started_at均保留。最终报告为quality-review/report.json，逐条proposal/behavior/published、人工reference-boundaries、用户案例user-feedback-verification及final-verification均在1adeebcf5b0e698c目录。逻辑请求数不代表整个调试的实际账单。
+
+8766已正常SIGINT收尾并保留HTTP token，最终PID3985766；8765及原pipeline未动。真实浏览器核实11/11、各版本/疑点/异常、人工参考80.6%/96.6%、speedup帧差和异常定位链接；Sharpa ep2定位2031帧时三路画面均readyState4，选中第10/19段[2031,2346)，七粗阶段、八个主标签选项（含unknown），0段自动人工确认。复查页warn/error为空，完整截图为quality-review/review-all-eleven.png；用户原页面未刷新、未代保存。

@@ -29,9 +29,10 @@ PROTOCOL = 'tomato_multicamera_v3'
 # Match the user's continuous phase convention rather than splitting hand travel
 # and brief holding into a separate pause after every manipulation.
 DESCRIPTIONS = {**CRITERIA,
+    'grasp_truss': 'Right hand begins preparing/approaching to grasp the truss, arranges fingers and adjusts the grip until stable. After rotation ends, this preparation belongs here even if it takes a long time; do not wait for the final secured grip or the lift.',
     'lift_truss': 'Right hand lifts the grasped truss to the central working position, including brief settling/holding until the left hand begins the first fruit approach.',
-    'grasp_fruit': 'Left hand approaches, grasps and adjusts or loosens an attached tomato while the right supports the truss. End when the secured hand starts purposeful extraction; do not wait for complete detachment or tray transport.',
-    'pick_and_place': 'Left hand finally detaches the fruit, transports it and releases it into the left collection tray; right hand holds the truss. Begin at the purposeful extraction pull/twist after securing the grip, before complete detachment. Finger contact alone does not start this action.',
+    'grasp_fruit': 'Left hand approaches, grasps and adjusts or loosens an attached tomato while the right supports the truss. Preparatory/failed pulls remain here. End when the secured hand starts the final extraction that actually detaches this fruit; do not wait for complete detachment or tray transport.',
+    'pick_and_place': 'Left hand finally detaches the fruit, transports it and releases it into the left collection tray; right hand holds the truss. Begin at the final extraction pull/twist that actually produces a detached retained fruit, after securing the grip and before complete detachment. Earlier failed pulls are grasp_fruit, not successful cycles. Finger contact alone does not start this action.',
     'idle': 'A genuine task pause with no ongoing approach, grasp, placement or manipulation. Brief settling after lifting belongs to lift_truss; returning toward the next fruit belongs to grasp_fruit. Supporting the truss alone is not a new idle phase.'}
 
 
@@ -218,16 +219,18 @@ def parse_segments(response, length, fps):
 
 
 class Client:
-    def __init__(self,root,api_key=None,model=MODEL,examples=()):
+    def __init__(self,root,api_key=None,model=MODEL,examples=(),style_examples=()):
         self.root=Path(root);self.key=api_key or os.environ.get('ARK_API_KEY');self.model=model
-        self.examples=list(examples)
+        self.examples=list(examples);self.style_examples=list(style_examples)
 
     def call(self, video, prompt, sample_fps, *, effort=None, max_output_tokens=12000):
         if Path(video).stat().st_size > 45*1024*1024: raise ValueError('豆包视频请求超过本机限制')
         identity={'protocol':PROTOCOL,'model':self.model,'video_sha256':sha(video),
                   'prompt':prompt,'sample_fps':sample_fps,
                   'reference_examples':[{k:v for k,v in e.items() if k!='data_url'} for e in self.examples]}
-        content=[]
+        from .style import content as style_content
+        if self.style_examples:identity['transition_style_examples']=[{k:v for k,v in e.items() if k!='data_url'} for e in self.style_examples]
+        content=style_content(self.style_examples)
         for e in self.examples:
             content.extend([{'type':'input_text','text':'Separate human-reviewed reference image, fine label: '+e['label']},
                             {'type':'input_image','image_url':e['data_url']}])
@@ -243,10 +246,14 @@ class Client:
     def call_images(self,groups,prompt):
         identity={'protocol':PROTOCOL,'model':self.model,'prompt':prompt,'image_groups':[
             {'task':g['task'],'images':[{k:v for k,v in e.items() if k!='data_url'} for e in g['assets']]} for g in groups]}
-        content=[{'type':'input_text','text':prompt}]
+        from .style import content as style_content
+        pairs={(g['task'].get('before'),g['task'].get('after')) for g in groups}
+        examples=[e for e in self.style_examples if tuple(e['transition']) in pairs]
+        if examples:identity['transition_style_examples']=[{k:v for k,v in e.items() if k!='data_url'} for e in examples]
+        content=style_content(examples)+[{'type':'input_text','text':prompt}]
         for g in groups:
             for e in g['assets']:
-                content.extend([{'type':'input_text','text':f"Boundary {g['task']['id']}, original source frame {e['frame']}"},
+                content.extend([{'type':'input_text','text':f"Boundary {g['task']['id']}, {e.get('role','candidate')} original source frame {e['frame']}"},
                                 {'type':'input_image','image_url':e['data_url']}])
         return self._perform(identity,content,effort='disabled',max_output_tokens=6000 if '"states"' in prompt else 2000)
 

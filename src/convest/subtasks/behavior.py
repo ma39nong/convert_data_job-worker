@@ -77,8 +77,10 @@ def parse_candidates(response, episode):
     events=[]
     for row in rows:
         a,b=row.get('start_seconds'),row.get('end_seconds')
-        if any(type(v) not in (float,int) or not math.isfinite(v) for v in (a,b)) or not 0<=a<b<=episode.length/episode.fps:
+        if any(type(v) not in (float,int) or not math.isfinite(v) for v in (a,b)) or not 0<=a<b<=episode.length/episode.fps+1/episode.fps+1e-6:
             raise ValueError('模型异常候选时间无效')
+        # A model's decimal timestamp may round one camera frame beyond EOF.
+        # Clip only that quantization edge; never invent out-of-video evidence.
         start=max(0,round(a*episode.fps));end=min(episode.length,round(b*episode.fps))
         if start>=end:raise ValueError('模型异常候选不能映射为有效原帧')
         events.append({'start_frame':start,'end_frame':end,'kind':row.get('kind'),

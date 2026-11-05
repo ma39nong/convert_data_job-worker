@@ -566,11 +566,12 @@ def test_whole_template_and_source_frame_passes_preserve_grammar(pair,tmp_path,m
             rows=[{'end_seconds':(i+1)*.5 if i<10 else 6.1,'label':label,'confidence':.9} for i,label in enumerate(labels)]
             return {'output_text':json.dumps({'segments':rows})},'global',False
         def call_images(self,groups,prompt):
-            rows=[{'id':g['task']['id'],'first_after_frame':g['task']['candidate_frame'],'confidence':.9, 'states':[{'frame':f,'attachment':'attached' if f<g['task']['candidate_frame'] else 'detached','retention':'held','phase':'grip_secured' if f<g['task']['candidate_frame'] else 'extract'} for f in g['task']['frames']]} for g in groups]
+            rows=[{'id':g['task']['id'],'first_after_frame':g['task']['candidate_frame'],'confidence':.9, 'states':[{'frame':f,'attachment':'attached' if f<g['task']['candidate_frame'] else 'detached','retention':'held','phase':'grip_secured' if f<g['task']['candidate_frame'] else 'extract','side':'before' if f<g['task']['candidate_frame'] else 'after'} for f in g['task']['frames']], 'outcome_observations':[{'frame':f,'attachment':'detached','retention':'held','single_fruit':True} for f in g['task'].get('outcome_frames',[])]} for g in groups]
             return {'output_text':json.dumps({'boundaries':rows})},str(rows),False
     result=doubao.annotate(normal,tmp_path/'out',client=Client())
     assert [s['label'] for s in result['segments']]==labels
-    assert result['rotation_count']==1 and result['request_count']==10
+    assert result['rotation_count']==1 and result['request_count']==18
+    assert all(type(i) is int for i in result['unresolved_boundaries'])
     assert all(not s['reviewed'] for s in result['segments'])
     assert result['segments'][-1]['end_frame']==normal.length
 
@@ -816,3 +817,118 @@ def test_behavior_scan_api_preserves_labels_and_manual_train_choice(pair,tmp_pat
         assert saved['segments']==before['segments'] and saved['training_review']==before['training_review']
         assert saved['review_events'][0]['status']=='pending' and saved['outcome']==before['outcome']
     finally:server.shutdown();server.server_close();thread.join()
+
+
+def test_quality_review_publishes_only_complete_unreviewed_source_matched_results(pair,tmp_path):
+    from convest.subtasks.template import POLICY
+    normal,_=pair;server=Server(('127.0.0.1',0),[normal.root],tmp_path/'review')
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    base=f'http://127.0.0.1:{server.server_port}'
+    labels=['grasp_truss','lift_truss','grasp_fruit','pick_and_place','return_truss','rotate_stem',
+            'grasp_truss','lift_truss','grasp_fruit','pick_and_place','return_stem']
+    current=server.store.load(normal);current['training_review']={'decision':'keep','note':'human choice'}
+    current['review_events']=[{'start_frame':2,'end_frame':8,'kind':'drop_then_resume','status':'confirmed','origin':'manual','note':'human evidence'}]
+    current=server.store.save(normal,current)
+    proposal={'source':normal.identity(),'method':'doubao_template_source_frames_v1','policy':POLICY,
+              'segments':[segment(i*5,(i+1)*5 if i<10 else normal.length,label) for i,label in enumerate(labels)],
+              'boundary_audit':{'all_boundaries_checked':True},'boundary_evidence':{str(i):{'source_frame':{'needs_review':True}} for i in range(10)}}
+    def post(p=proposal,revision=1):
+        payload={'id':normal.id,'revision':revision,'proposal':p,'behavior_review':{'source':normal.identity(),'events':[]},'run_id':'test'}
+        req=urllib.request.Request(base+'/api/apply-quality-review',data=json.dumps(payload).encode(),headers={'X-Subtasks-Token':server.token})
+        return json.load(urllib.request.urlopen(req))['annotation']
+    try:
+        with pytest.raises(urllib.error.HTTPError):post({**proposal,'boundary_evidence':{}})
+        saved=post();assert saved['training_review']==current['training_review'] and saved['review_events']==current['review_events']
+        assert not any(s['reviewed'] for s in saved['segments'])
+        with pytest.raises(urllib.error.HTTPError):post()
+        saved['segments'][0]['reviewed']=True;confirmed=server.store.save(normal,saved)
+        with pytest.raises(urllib.error.HTTPError):post(revision=confirmed['revision'])
+        assert server.store.load(normal)==confirmed
+    finally:server.shutdown();server.server_close();thread.join()
+
+
+def test_harvest_short_coverage_is_reobserved_not_extended(pair,tmp_path,monkeypatch):
+    from convest.subtasks import doubao
+    from convest.subtasks.harvest import propose_harvest
+    normal,_=pair
+    def montage(ep,path,lo,hi,**kwargs):
+        path.write_bytes(b'video');return {'sample_fps':5,'sha256':sha(path)}
+    monkeypatch.setattr(doubao,'make_montage',montage)
+    class Client:
+        calls=0
+        def call(self,path,prompt,fps):
+            self.calls+=1;end=4.0 if self.calls==1 else normal.length/normal.fps
+            if self.calls==2:assert 'COVERAGE/SCHEMA RECHECK' in prompt
+            rows=[{'end_seconds':2,'label':'grasp_fruit','attachment':'attached','retention':'held','event':'approach_attached','confidence':.8},
+                  {'end_seconds':end,'label':'pick_and_place','attachment':'attached','retention':'held','event':'extract_start','confidence':.8}]
+            return {'output_text':json.dumps({'segments':rows})},str(self.calls),False
+    records=[];client=Client()
+    spans,_=propose_harvest(normal,{'start':0,'end':normal.length},tmp_path,client,lambda *a:records.append(a),records,10)
+    assert client.calls==2 and len(records)==2 and spans[-1]['end_frame']==normal.length
+    assert records[1][-1]=='harvest_coverage_recheck'
+
+
+def test_first_left_approach_searches_entire_lift_not_only_late_candidate(monkeypatch):
+    from types import SimpleNamespace
+    from convest.subtasks.template import left_motion_candidate
+    from convest.training.adatempo import lerobot_io
+    q=np.zeros((200,7));q[30:,0]=np.arange(1,171)*.0002
+    ep=SimpleNamespace(fps=30,length=200,table=None,info={'features':{'observation.state':{'names':[f'left_fr3_joint{i}.position' for i in range(1,8)]}}})
+    monkeypatch.setattr(lerobot_io,'values',lambda *a:q)
+    assert left_motion_candidate(ep,150) is None
+    assert left_motion_candidate(ep,150,lower_bound=10,upper_bound=170)==30
+
+
+def test_quality_speedup_keeps_mapped_anomalies_and_rejects_changed_normal(pair,tmp_path):
+    from convest.subtasks.template import POLICY
+    normal,speedup=pair;server=Server(('127.0.0.1',0),[normal.root,speedup.root],tmp_path/'review')
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    base=f'http://127.0.0.1:{server.server_port}'
+    labels=['grasp_truss','lift_truss','grasp_fruit','pick_and_place','return_truss','rotate_stem',
+            'grasp_truss','lift_truss','grasp_fruit','pick_and_place','return_stem']
+    doc=server.store.load(normal);doc['segments']=[segment(i*5,(i+1)*5 if i<10 else normal.length,label) for i,label in enumerate(labels)]
+    doc['review_events']=[{'start_frame':20,'end_frame':30,'kind':'empty_hand_place','status':'confirmed','origin':'manual','note':'source evidence'}]
+    doc=server.store.save(normal,doc);mapped=project(normal,speedup,doc)
+    proposal={'source':speedup.identity(),'method':'doubao_template_source_frames_v1','policy':POLICY,
+       'segments':mapped['segments'],'projection':{k:v for k,v in mapped.items() if k not in {'source','segments'}},
+       'boundary_audit':{'all_boundaries_checked':True},'boundary_evidence':{str(i):{'source_frame':{'needs_review':True}} for i in range(len(mapped['segments'])-1)}}
+    def post(revision):
+        payload={'id':speedup.id,'revision':revision,'proposal':proposal,'behavior_review':{'source':speedup.identity(),'events':[]},'run_id':'test'}
+        req=urllib.request.Request(base+'/api/apply-quality-review',data=json.dumps(payload).encode(),headers={'X-Subtasks-Token':server.token})
+        return json.load(urllib.request.urlopen(req))['annotation']
+    try:
+        saved=post(0)
+        assert saved['review_events']==mapped['review_events']
+        assert all(e['status']=='pending' for e in saved['review_events'])
+        server.store.save(normal,doc)
+        with pytest.raises(urllib.error.HTTPError):post(saved['revision'])
+        assert server.store.load(speedup)==saved
+    finally:server.shutdown();server.server_close();thread.join()
+
+
+def test_behavior_eof_decimal_rounding_clips_one_frame_only(pair):
+    from convest.subtasks.behavior import parse_candidates
+    normal,_=pair
+    def response(end):return {'output_text':json.dumps({'events':[{'start_seconds':1,'end_seconds':end,'kind':'uncertain_behavior','evidence':'EOF event'}]})}
+    events=parse_candidates(response((normal.length+1)/normal.fps),normal)
+    assert events[0]['end_frame']==normal.length and events[0]['status']=='pending'
+    with pytest.raises(ValueError):parse_candidates(response((normal.length+2)/normal.fps),normal)
+
+
+def test_transition_style_excludes_target_and_same_recording(pair,tmp_path,monkeypatch):
+    from convest.subtasks import style
+    from types import SimpleNamespace
+    normal,speedup=pair
+    labels=['grasp_truss','lift_truss','grasp_fruit','pick_and_place','return_truss','rotate_stem','grasp_truss','lift_truss','grasp_fruit','pick_and_place','return_stem']
+    rows=[segment(i*5,(i+1)*5 if i<10 else normal.length,label,reviewed=True) for i,label in enumerate(labels)]
+    doc={'status':'reviewed','source':normal.identity(),'revision':4,'segments':rows}
+    monkeypatch.setattr(style,'images_at',lambda ep,frames,**kw:[{'frame':f,'sha256':str(f),'data_url':'data:image/jpeg;base64,eA=='} for f in frames])
+    assert style.transition_examples({normal.id:doc},normal)==[]
+    assert style.transition_examples({normal.id:doc},speedup)==[]
+    target=SimpleNamespace(id='different',entry={'source_recording_id':'other'})
+    examples=style.transition_examples({normal.id:doc},target)
+    assert {tuple(e['transition']) for e in examples}=={('grasp_fruit','pick_and_place'),('rotate_stem','grasp_truss')}
+    assert all(e['source_id']==normal.id and e['source_revision']==4 for e in examples)
+    content=style.content(examples)
+    assert all(str(normal.root) not in c.get('text','') for c in content)
+    assert style.transition_examples({normal.id:{**doc,'status':'draft'}},target)==[]

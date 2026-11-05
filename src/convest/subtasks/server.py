@@ -104,6 +104,9 @@ class Handler(BaseHTTPRequestHandler):
                                   'labels': {k: {'coarse': v[0], 'text': v[1]} for k, v in LABELS.items()},
                                   'action_labels':list(ACTION_LABELS),'behavior_kinds':KINDS,'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
                                   'jev': self.server.model_status(), 'doubao': self.server.doubao_status()})
+            if route.path == '/api/quality-review':
+                path=self.server.store.output/'quality-review'/'report.json'
+                return self.send(json.loads(path.read_text()) if path.exists() else {'state':'not_started','episodes':[]})
             if route.path == '/api/models/status':
                 return self.send(self.server.model_status())
             if route.path == '/api/episode':
@@ -118,7 +121,7 @@ class Handler(BaseHTTPRequestHandler):
             if route.path == '/api/download':
                 ep = self.server.episode(q['id'][0]); doc = self.server.store.load(ep)
                 return self.send(doc, attachment=f'episode_{ep.index:06d}_{ep.id}_subtasks.json')
-            files = {'/': ('index.html', 'text/html; charset=utf-8'),
+            files = {'/quality': ('quality.html','text/html; charset=utf-8'), '/quality.js': ('quality.js','text/javascript; charset=utf-8'), '/': ('index.html', 'text/html; charset=utf-8'),
                      '/models': ('models.html', 'text/html; charset=utf-8'),
                      '/models.js': ('models.js', 'text/javascript; charset=utf-8'),
                      '/app.js': ('app.js', 'text/javascript; charset=utf-8'), '/style.css': ('style.css', 'text/css; charset=utf-8')}
@@ -191,6 +194,32 @@ class Handler(BaseHTTPRequestHandler):
                 validate_template(proposal['segments'])
                 return self.send({'annotation': store.save(ep, {**current,'segments':[{**s,'reviewed':False} for s in proposal['segments']]},
                     origin=proposal['method'],provenance={k:v for k,v in proposal.items() if k not in ('source','segments')})})
+            if route == '/api/apply-quality-review':
+                from .template import POLICY,validate_template
+                from .behavior import merge_candidates
+                current=store.load(ep);proposal=body['proposal'];behavior=body['behavior_review']
+                if current['revision']!=body['revision']:raise ValueError('人工或其他窗口已有新修改，全量结果未覆盖')
+                if any(s['reviewed'] for s in current['segments']):raise ValueError('已人工确认的动作仅给复查报告，不自动改写')
+                if proposal.get('source')!=ep.identity() or behavior.get('source')!=ep.identity():raise ValueError('全量复查来源不匹配')
+                if proposal.get('policy')!=POLICY or not proposal.get('boundary_audit',{}).get('all_boundaries_checked'):raise ValueError('未完成当前策略的所有边界复查')
+                validate_template(proposal['segments'])
+                evidence=proposal.get('boundary_evidence',{})
+                if set(evidence)!=set(map(str,range(len(proposal['segments'])-1))):raise ValueError('边界复查记录不完整')
+                projection=proposal.get('projection')
+                if projection:
+                    normal_source=projection['normal_source']
+                    matches=[e for e in store.entries.values() if e['dataset']==normal_source['dataset'] and e['episode_index']==normal_source['episode_index']]
+                    if len(matches)!=1:raise ValueError('映射来源normal不唯一或已移除')
+                    normal=store.episode(matches[0]['id']);normal_doc=store.load(normal)
+                    if normal_doc['source']!=normal_source or normal_doc['revision']!=projection['normal_revision']:
+                        raise ValueError('normal在speedup视觉复查期间已更新，未保存旧映射')
+                provenance={k:v for k,v in proposal.items() if k not in {'source','segments'}}
+                provenance.update(quality_review_run=body['run_id'],behavior_review={k:v for k,v in behavior.items() if k not in {'source','events'}})
+                candidates=behavior['events']
+                if projection:candidates=merge_candidates(candidates,projection.get('review_events',[]),ep.length)
+                doc={**current,'segments':[{**s,'reviewed':False} for s in proposal['segments']],
+                     'review_events':merge_candidates(current.get('review_events',[]),candidates,ep.length)}
+                return self.send({'annotation':store.save(ep,doc,origin=proposal['method'],provenance=provenance)})
             if route == '/api/save':
                 return self.send({'annotation': store.save(ep, body['annotation'])})
             if route == '/api/predict':
@@ -211,12 +240,14 @@ class Handler(BaseHTTPRequestHandler):
                         with store.lock:
                             refs = reference_style(store)
                             examples = reference_examples(store,ep)
+                            from .style import transition_examples
+                            style_examples=transition_examples({id_:store.load(store.episode(id_)) for id_ in store.entries},ep)
                         result = annotate(ep, store.output, api_key=self.server.doubao_key,
                                           model=self.server.doubao_model, references=refs,
                                           initial_proposal=current if current.get('origin','').startswith('doubao_') and current['status']!='reviewed' else None,
                                           client=Client(store.output/'doubao', self.server.doubao_key, self.server.doubao_model,
-                                                        examples=examples),
-                                          max_requests=body.get('max_requests',32), progress=self.server.progress)
+                                                        examples=examples,style_examples=style_examples),
+                                          max_requests=body.get('max_requests',128), progress=self.server.progress)
                     elif backend == 'local':
                         result = predict(store, ep)
                         if result.get('in_reference_set'): raise ValueError('当前是模型参考样例，请保留参考标签，在其他 episode 上运行预标注')

@@ -7,7 +7,7 @@ import json
 import base64
 import math
 
-from .core import atomic_json, segment, validate_segments
+from .core import atomic_json, segment, validate_segments, sha
 
 ATTACHMENT = {'attached', 'detached', 'occluded'}
 RETENTION = {'held', 'empty', 'falling', 'occluded'}
@@ -108,8 +108,13 @@ def propose_harvest(episode,stage,run,client,record,records,max_requests):
         lo=max(stage['start'],a-round(4*episode.fps));hi=min(stage['end'],b+round(4*episode.fps))
         if len(records)>=max_requests:raise ValueError('采摘事件分析超过请求预算，未发布标签')
         clip=run/f'events_{lo}_{hi}.mp4'
-        manifest=make_montage(episode,clip,lo,hi,sample_fps=5,panel_size=640)
-        atomic_json(clip.with_suffix('.json'),manifest)
+        manifest_path=clip.with_suffix('.json')
+        if clip.exists() and manifest_path.exists():
+            manifest=json.loads(manifest_path.read_text())
+            if manifest['sha256']!=sha(clip):raise ValueError('局部采摘视频缓存校验失败')
+        else:
+            manifest=make_montage(episode,clip,lo,hi,sample_fps=5,panel_size=640)
+            atomic_json(manifest_path,manifest)
         prompt=RULES+f'''\nLOCAL FINE PASS: this entire clip is WITHIN one harvest coarse phase.
 Only classify the physical state of the currently targeted LEFT-hand fruit.
 Watch the stem-fruit CONNECTION and fruit RETENTION over time, using both wrist
@@ -135,7 +140,25 @@ Do not claim any task success. Include long failed attempts, drops, retries.
 '''
         response,key,cached=client.call(clip,prompt,manifest['sample_fps'])
         record(response,key,cached,'harvest_attachment_events')
-        spans,observations=parse_harvest(response,hi-lo,episode.fps)
+        try:
+            spans,observations=parse_harvest(response,hi-lo,episode.fps)
+            if observations[-1].get('claimed_label') is None:raise ValueError('模型未覆盖局部视频末尾')
+        except ValueError as exc:
+            # A semantic/schema repair re-observes the same full clip. Never
+            # stretch a successful placement to fill an unobserved tail.
+            if len(records)>=max_requests:raise ValueError('局部覆盖修复超过请求预算，未发布标签') from exc
+            repair=prompt+f'''\nCOVERAGE/SCHEMA RECHECK: previous output was rejected: {exc}.
+Re-observe the SAME entire clip, return a fresh complete segment list.
+The LAST end_seconds MUST equal {(hi-lo)/episode.fps:.6f}; local time begins at 0.
+Do not shorten to the last salient grasp/release or silently omit remaining motion.
+Do not invent a successful placement to fill the tail. Keep the main action
+proposal unreviewed, and describe uncertainty/failed motion in observation.
+All per-row attachment, retention, event, confidence fields remain required.
+'''
+            response,key,cached=client.call(clip,repair,manifest['sample_fps'])
+            record(response,key,cached,'harvest_coverage_recheck')
+            spans,observations=parse_harvest(response,hi-lo,episode.fps)
+            if observations[-1].get('claimed_label') is None:raise ValueError('局部覆盖复查仍未完成，未发布标签')
         for item,event in zip(spans,observations):
             x=max(a,lo+item['start_frame']);y=min(b,lo+item['end_frame'])
             if x>=y:continue

@@ -89,3 +89,18 @@ JEV 视觉接口按 [TypeSafe 官方图像文档](https://docs.typesafe.ai/image
 另通过实际审核服务 /api/predict 对不同录制 Sharpa normal-heldout ep1 运行完整流程：使用7类人工代表画面（来源normal ep0 v4），7次真实请求，输出33段连续覆盖7654帧/255.13秒，保存为v5 draft，origin=doubao_multicamera_temporal_v1，全段reviewed=false、outcome仍unknown，unknown帧0；该录制没有人工真值，不能报告准确率。input_tokens608344/output_tokens45775。旧试验v4保留历史。请求和视频缓存在review/doubao/，独立交付JSON heldout-subtasks.json、用量与来源报告heldout-report.json、final-verification.json在doubao-validation-v2/。人工normal ep0 v4逐字段未变，原speedup映射/其余录制未替换。
 
 审核HTTP在空闲时正常SIGINT更新，延续旧token并验证相同，最终PID1733531；已有页面未刷新/切换/代保存。另开新版页面直接定位ep1，核实豆包可选、33段/0已确认、粗细轨道、片段定位与confidence显示，浏览器warn/error为空。截图review-ui.png、review-controls.png在同验证目录；原人工页面与新结果页面均保留。此次只是两条试用录制（含人工校准），未全量处理远端四个场景根。
+
+## 2026-11-05 用户纠正：单次旋转模板与真实脱离边界
+
+用户指出ep1 v5第2段过晚，7/8边界应按“仍相连→真正脱离”定义，且整条粗流程必须与000000相同、只旋转一次。这条新指令取代此前“不约束整体顺序”的方案。新增template.py，七阶段/细动作语法强校验，整段约1fps定粗流程，旧密集草稿或摘取范围内5fps局部推理补足逐果循环，再对边界做约±2秒事件窗口及连续原帧复查；不固定果数，不复制参考时间。
+
+整段概览曾漏掉局部循环，故不把它单独用于细动作计数。多图中思考模式曾耗尽12000推理token而无完整答案，low模式也较慢，试验随后用各自STOP结束后续调用并保留材料；最终使用官方支持的thinking=disabled（不带reasoning）输出边界JSON，参数计入缓存key，incomplete不进入成功缓存。模型返回frame=null/confidence=null表示弃权，归为未确认，不猜测或整条报错丢弃其他有效结果。失败/试验用量不藏在最终一次cache-hit计数中，原始记录留在各validation根，不估算账单。
+
+最终独立预测在outputs/subtasks/doubao-template-validation-final/，通过带token/source/revision/模板校验的apply-proposal写入ep1 v6，旧v5完整保留：
+
+- 29个细动作，七个粗阶段严格为拿起0–300、摘取300–3000、放回3000–3264、旋转3264–3726、拿起3726–4110、摘取4110–7494、放回7494–7654（均原始帧、左闭右开），旋转仅1段。两个摘取阶段分别保留6和5次模型候选循环，不照抄000000的27段。
+- 原第2段结束360帧/12秒→300帧/10秒；原第7/8段分界1320→1319帧/43.967秒。两者是按新规则复查的候选，不声称已经得到人工逐帧真值。左手实测起动辅助标记297帧，视觉候选300帧，两者仍有3帧差异，保持待审核。
+- 共18个逻辑请求（含精确缓存复用）；完整provenance记录原始用量、两次边界证据、候选来源v5/SHA与用户搜索种子。4个边界视觉未确认，0基边界id为8/10/13/15，对应细段9–10、11–12、14–15、16–17；页面显示提示。其余边界也全未人工审核，outcome仍unknown。
+- human-before.json与服务端000000 v4逐字段相同；未改人工27段、其他episode、既有speedup映射和原始数据。updated-subtasks.json/final-verification.json及review-v6.png留在最终验证目录。
+
+全工程323passed/7skipped，末轮标注35passed，Node/diff通过。新增覆盖重复旋转拒绝、局部细动作与七阶段语法、只能选择提供的源帧、null弃权、真实关节起动辅助、思考参数/不缓存incomplete，以及独立结果导入的source/CAS/强制未审核。只更新8766，正常SIGINT并延续原token，最终PID1923528。原页确认无未保存修改后加载v6，核实29段/七阶段一次旋转、10秒定位、未确认提示，浏览器warn/error为空。未修改8765工作流或数据质量规则。

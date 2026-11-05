@@ -24,7 +24,7 @@ from .jev import CRITERIA, NoRedirect
 
 MODEL = 'doubao-seed-2-1-pro-260628'
 ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/responses'
-PROTOCOL = 'tomato_multicamera_v2'
+PROTOCOL = 'tomato_multicamera_v3'
 
 # Match the user's continuous phase convention rather than splitting hand travel
 # and brief holding into a separate pause after every manipulation.
@@ -220,9 +220,32 @@ class Client:
         self.examples=list(examples)
 
     def call(self, video, prompt, sample_fps):
+        if Path(video).stat().st_size > 45*1024*1024: raise ValueError('豆包视频请求超过本机限制')
         identity={'protocol':PROTOCOL,'model':self.model,'video_sha256':sha(video),
                   'prompt':prompt,'sample_fps':sample_fps,
                   'reference_examples':[{k:v for k,v in e.items() if k!='data_url'} for e in self.examples]}
+        content=[]
+        for e in self.examples:
+            content.extend([{'type':'input_text','text':'Separate human-reviewed reference image, fine label: '+e['label']},
+                            {'type':'input_image','image_url':e['data_url']}])
+        content.extend([{'type':'input_text','text':'END OF REFERENCES. The following VIDEO is the only target.'},
+                        {'type':'input_video','video_url':'data:video/mp4;base64,'+base64.b64encode(Path(video).read_bytes()).decode(),'fps':sample_fps},
+                        {'type':'input_text','text':prompt}])
+        return self._perform(identity,content)
+
+    def call_images(self,groups,prompt):
+        identity={'protocol':PROTOCOL,'model':self.model,'prompt':prompt,'image_groups':[
+            {'task':g['task'],'images':[{k:v for k,v in e.items() if k!='data_url'} for e in g['assets']]} for g in groups]}
+        content=[{'type':'input_text','text':prompt}]
+        for g in groups:
+            for e in g['assets']:
+                content.extend([{'type':'input_text','text':f"Boundary {g['task']['id']}, original source frame {e['frame']}"},
+                                {'type':'input_image','image_url':e['data_url']}])
+        return self._perform(identity,content,effort='disabled',max_output_tokens=2000)
+
+    def _perform(self,identity,content,*,effort='medium',max_output_tokens=12000):
+        if effort!='medium' or max_output_tokens!=12000:
+            identity={**identity,'generation':{'effort':effort,'max_output_tokens':max_output_tokens}}
         key=hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()
         path=self.root/'responses'/f'{key}.json'
         if path.exists():
@@ -231,18 +254,13 @@ class Client:
             return response,key,True
         if not self.key: raise ValueError('未配置豆包 API key')
         if (self.root/'STOP').exists(): raise ValueError('豆包 STOP 文件存在，已停止新请求')
-        if Path(video).stat().st_size > 45*1024*1024: raise ValueError('豆包视频请求超过本机限制，请缩短分块')
-        examples=[]
-        for example in self.examples:
-            examples.extend([{'type':'input_text','text':'Separate human-reviewed reference IMAGE, not the target timeline. Fine label: '+example['label']},
-                             {'type':'input_image','image_url':example['data_url']}])
-        examples.append({'type':'input_text','text':'END OF REFERENCE IMAGES. The following VIDEO is the only target to label.'})
         payload={'model':self.model,'instructions':'You precisely label robot manipulation videos. Return only grounded JSON.',
-                 'input':[{'role':'user','content':examples+[
-                     {'type':'input_video','video_url':'data:video/mp4;base64,'+base64.b64encode(Path(video).read_bytes()).decode(),'fps':sample_fps},
-                     {'type':'input_text','text':prompt}]}],
-                 'reasoning':{'effort':'medium'},'thinking':{'type':'enabled'},
-                 'max_output_tokens':12000,'stream':False,'store':False}
+                 'input':[{'role':'user','content':content}],
+                 'reasoning':{'effort':effort},'thinking':{'type':'enabled'},
+                 'max_output_tokens':max_output_tokens,'stream':False,'store':False}
+        if effort=='disabled':
+            payload['thinking']={'type':'disabled'}
+            payload.pop('reasoning',None)
         atomic_json(self.root/'requests'/f'{key}.json',identity)
         request=urllib.request.Request(ENDPOINT,data=json.dumps(payload).encode(),headers={
             'Authorization':'Bearer '+self.key,'Content-Type':'application/json'})
@@ -254,11 +272,14 @@ class Client:
         except Exception:
             raise ValueError('豆包连接或响应失败；未发布标签，可复用成功请求后重试') from None
         if response.get('model') != self.model: raise ValueError('豆包返回模型版本与请求不一致')
+        if response.get('status') not in (None,'completed'):
+            atomic_json(self.root/'raw-incomplete'/f'{key}.json',response)
+            raise ValueError('豆包推理输出未完成，未缓存为成功结果、未发布标签')
         atomic_json(path,response)
         return response,key,False
 
 
-def annotate(episode,output,*,api_key=None,model=MODEL,references=(),chunk_seconds=40,max_requests=16,client=None,progress=None):
+def annotate_unconstrained(episode,output,*,api_key=None,model=MODEL,references=(),chunk_seconds=40,max_requests=16,client=None,progress=None):
     if type(max_requests) is not int or not 1 <= max_requests <= 64: raise ValueError('豆包请求上限必须为1–64')
     if not 5 <= chunk_seconds <= 60: raise ValueError('豆包分块长度必须为5–60秒')
     identity=episode.identity();episode.validate_media(output,identity)
@@ -313,3 +334,8 @@ def annotate(episode,output,*,api_key=None,model=MODEL,references=(),chunk_secon
     atomic_json(run_root/'completed.json',{'source':identity,**provenance,'segments':result})
     if progress:progress(len(cores),len(cores))
     return {**provenance,'segments':result}
+
+
+def annotate(episode,output,**kwargs):
+    from .template import annotate_template
+    return annotate_template(episode,output,**kwargs)

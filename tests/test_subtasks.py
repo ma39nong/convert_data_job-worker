@@ -475,9 +475,9 @@ def test_doubao_stitches_context_and_budget_before_network(pair,tmp_path,monkeyp
             calls.append(path)
             return {'output_text':json.dumps({'segments':rows}),'usage':{}},str(len(calls)),False
     with pytest.raises(ValueError,match='上限'):
-        doubao.annotate(normal,tmp_path/'result',chunk_seconds=5,max_requests=1,client=Client())
+        doubao.annotate_unconstrained(normal,tmp_path/'result',chunk_seconds=5,max_requests=1,client=Client())
     assert not calls
-    result=doubao.annotate(normal,tmp_path/'result',chunk_seconds=5,max_requests=2,client=Client())
+    result=doubao.annotate_unconstrained(normal,tmp_path/'result',chunk_seconds=5,max_requests=2,client=Client())
     assert [(r['start_frame'],r['end_frame'],r['label']) for r in result['segments']]==[(0,30,'grasp_truss'),(30,61,'lift_truss')]
     assert result['network_requests']==2 and all(not s['reviewed'] for s in result['segments'])
 
@@ -520,3 +520,111 @@ def test_doubao_reference_images_only_other_reviewed_recordings(pair,tmp_path):
         assert {e['label'] for e in examples}=={'grasp_truss','lift_truss'}
         assert all(e['source_id']==normal.id and e['revision']==1 and e['data_url'].startswith('data:image/jpeg;base64,') for e in examples)
     finally:store.lockfile.close()
+
+
+def test_tomato_template_rejects_repeated_rotation_and_wrong_fine_order():
+    from convest.subtasks.template import validate_template
+    labels=['grasp_truss','lift_truss','grasp_fruit','pick_and_place','return_truss','rotate_stem',
+            'grasp_truss','lift_truss','grasp_fruit','pick_and_place','return_stem']
+    make=lambda labels:[segment(i,i+1,label) for i,label in enumerate(labels)]
+    assert len(validate_template(make(labels)))==7
+    with pytest.raises(ValueError):validate_template(make(labels[:6]+labels))
+    with pytest.raises(ValueError):validate_template(make(labels[:2]+['pick_and_place','grasp_fruit']+labels[4:]))
+    with pytest.raises(ValueError):validate_template(make(labels+['stop']))
+
+
+def test_boundary_refinement_only_selects_present_source_frames_and_marks_uncertain():
+    from convest.subtasks.template import parse_boundaries
+    task=[{'id':2,'frames':[1300,1301,1302]}]
+    response=lambda frame,confidence:{'output_text':json.dumps({'boundaries':[{'id':2,'first_after_frame':frame,'confidence':confidence}]})}
+    assert parse_boundaries(response(1301,.9),task)[2]['frame']==1301
+    assert parse_boundaries(response(None,.3),task)[2]['needs_review']
+    assert parse_boundaries(response(None,None),task)[2]['needs_review']
+    assert parse_boundaries(response(1300,.9),task)[2]['needs_review'] # no prior BEFORE image
+    for bad in [response(1299,.9),response(1301,float('nan')),response(True,.8)]:
+        with pytest.raises(ValueError):parse_boundaries(bad,task)
+
+
+def test_whole_template_and_source_frame_passes_preserve_grammar(pair,tmp_path,monkeypatch):
+    from convest.subtasks import template,doubao
+    import base64
+    normal,_=pair
+    labels=['grasp_truss','lift_truss','grasp_fruit','pick_and_place','return_truss','rotate_stem',
+            'grasp_truss','lift_truss','grasp_fruit','pick_and_place','return_stem']
+    def montage(ep,path,start,end,**kwargs):
+        path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'video')
+        return {'sample_fps':1,'sha256':sha(path)}
+    monkeypatch.setattr(doubao,'make_montage',montage)
+    monkeypatch.setattr(template,'images_at',lambda ep,indices:[{'frame':i,'sha256':'fake','data_url':'data:image/jpeg;base64,'+base64.b64encode(b'image').decode()} for i in indices])
+    class Client:
+        def call(self,path,prompt,fps):
+            if 'LOCAL FINE PASS' in prompt:
+                lo,hi=map(int,path.stem.split('_')[-2:]);duration=(hi-lo)/10
+                rows=[{'end_seconds':duration/2,'label':'grasp_fruit','confidence':.9},{'end_seconds':duration,'label':'pick_and_place','confidence':.9}]
+                return {'output_text':json.dumps({'segments':rows})},'local',False
+            assert 'Exactly these' in prompt and 'actually detached' in prompt
+            rows=[{'end_seconds':(i+1)*.5 if i<10 else 6.1,'label':label,'confidence':.9} for i,label in enumerate(labels)]
+            return {'output_text':json.dumps({'segments':rows})},'global',False
+        def call_images(self,groups,prompt):
+            rows=[{'id':g['task']['id'],'first_after_frame':g['task']['candidate_frame'],'confidence':.9} for g in groups]
+            return {'output_text':json.dumps({'boundaries':rows})},str(rows),False
+    result=doubao.annotate(normal,tmp_path/'out',client=Client())
+    assert [s['label'] for s in result['segments']]==labels
+    assert result['rotation_count']==1 and result['request_count']==10
+    assert all(not s['reviewed'] for s in result['segments'])
+    assert result['segments'][-1]['end_frame']==normal.length
+
+
+def test_apply_template_proposal_checks_source_revision_and_clears_review(pair,tmp_path):
+    from convest.subtasks.template import POLICY
+    normal,_=pair;server=Server(('127.0.0.1',0),[normal.root],tmp_path/'review')
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    base=f'http://127.0.0.1:{server.server_port}'
+    labels=['grasp_truss','lift_truss','grasp_fruit','pick_and_place','return_truss','rotate_stem',
+            'grasp_truss','lift_truss','grasp_fruit','pick_and_place','return_stem']
+    proposal={'source':normal.identity(),'method':'doubao_template_source_frames_v1','policy':POLICY,
+              'segments':[segment(i*5,(i+1)*5 if i<10 else normal.length,label,reviewed=True) for i,label in enumerate(labels)]}
+    def apply(proposal,revision=0):
+        request=urllib.request.Request(base+'/api/apply-proposal',data=json.dumps({'id':normal.id,'proposal':proposal,'revision':revision,'replace':True}).encode(),headers={'X-Subtasks-Token':server.token})
+        return json.load(urllib.request.urlopen(request))
+    try:
+        with pytest.raises(urllib.error.HTTPError):apply({**proposal,'source':{}})
+        assert server.store.load(normal)['revision']==0
+        saved=apply(proposal)['annotation']
+        assert saved['status']=='draft' and saved['origin']==proposal['method']
+        assert not any(s['reviewed'] for s in saved['segments'])
+        with pytest.raises(urllib.error.HTTPError):apply(proposal)
+        assert server.store.load(normal)['revision']==1
+    finally:server.shutdown();server.server_close();thread.join()
+
+
+def test_left_preparation_motion_cue_requires_stationary_prefix(monkeypatch):
+    from types import SimpleNamespace
+    from convest.subtasks.template import left_motion_candidate
+    from convest.training.adatempo import lerobot_io
+    q=np.zeros((100,7));q[30:,0]=np.arange(1,71)*.0002
+    ep=SimpleNamespace(fps=30,length=100,table=None,info={'features':{'observation.state':{'names':[f'left_fr3_joint{i}.position' for i in range(1,8)]}}})
+    monkeypatch.setattr(lerobot_io,'values',lambda *a:q)
+    assert left_motion_candidate(ep,35)==30
+    q[:,0]=np.arange(100)*.001
+    assert left_motion_candidate(ep,35) is None
+
+
+def test_boundary_image_requests_use_bounded_direct_output_and_do_not_cache_incomplete(tmp_path,monkeypatch):
+    from convest.subtasks import doubao
+    import io
+    count=[]
+    class Opener:
+        def open(self,request,timeout):
+            payload=json.loads(request.data);count.append(payload)
+            assert payload['thinking']=={'type':'disabled'} and 'reasoning' not in payload
+            assert payload['max_output_tokens']==2000
+            return io.BytesIO(json.dumps({'model':doubao.MODEL,'status':'incomplete','incomplete_details':{'reason':'length'}}).encode())
+    monkeypatch.setattr(doubao.urllib.request,'build_opener',lambda *a:Opener())
+    client=doubao.Client(tmp_path/'api','private-key')
+    groups=[{'task':{'id':0},'assets':[{'frame':100,'sha256':'fake','data_url':'data:image/jpeg;base64,ZmFrZQ=='}]}]
+    with pytest.raises(ValueError,match='未完成'):client.call_images(groups,'find first detached frame')
+    assert len(count)==1 and not list((tmp_path/'api/responses').glob('*.json'))
+    assert len(list((tmp_path/'api/raw-incomplete').glob('*.json')))==1
+    for p in (tmp_path/'api/requests').glob('*.json'):
+        assert b'private-key' not in p.read_bytes() and b'data:image' not in p.read_bytes()

@@ -176,6 +176,19 @@ class Handler(BaseHTTPRequestHandler):
             if route == '/api/train':
                 return self.send(self.server.submit(lambda: {'models': train(store)}))
             ep = self.server.episode(body['id'])
+            if route == '/api/apply-proposal':
+                from .template import validate_template, POLICY
+                current = store.load(ep)
+                proposal = body['proposal']
+                if proposal.get('source') != ep.identity(): raise ValueError('预测结果来源指纹不匹配')
+                if proposal.get('method') != 'doubao_template_source_frames_v1' or proposal.get('policy') != POLICY:
+                    raise ValueError('仅接收已完成七阶段与原帧复查的豆包结果')
+                if current['revision'] != body['revision']: raise ValueError('标注版本已变化，未覆盖新修改')
+                if any(s['label'] != 'unknown' for s in current['segments']) and not body.get('replace'):
+                    raise ValueError('已有标签，须明确选择替换；历史版本仍保留')
+                validate_template(proposal['segments'])
+                return self.send({'annotation': store.save(ep, {**current,'segments':[{**s,'reviewed':False} for s in proposal['segments']]},
+                    origin=proposal['method'],provenance={k:v for k,v in proposal.items() if k not in ('source','segments')})})
             if route == '/api/save':
                 return self.send({'annotation': store.save(ep, body['annotation'])})
             if route == '/api/predict':
@@ -198,9 +211,10 @@ class Handler(BaseHTTPRequestHandler):
                             examples = reference_examples(store,ep)
                         result = annotate(ep, store.output, api_key=self.server.doubao_key,
                                           model=self.server.doubao_model, references=refs,
+                                          initial_proposal=current if current.get('origin','').startswith('doubao_') and current['status']!='reviewed' else None,
                                           client=Client(store.output/'doubao', self.server.doubao_key, self.server.doubao_model,
                                                         examples=examples),
-                                          max_requests=body.get('max_requests',16), progress=self.server.progress)
+                                          max_requests=body.get('max_requests',32), progress=self.server.progress)
                     elif backend == 'local':
                         result = predict(store, ep)
                         if result.get('in_reference_set'): raise ValueError('当前是模型参考样例，请保留参考标签，在其他 episode 上运行预标注')

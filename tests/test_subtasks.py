@@ -324,21 +324,74 @@ def test_jev_rejects_bad_responses_and_abstains(pair,tmp_path):
     assert len(result['segments'])==1 and result['segments'][0]['label']=='unknown'
 
 
-def test_jev_client_caches_and_keeps_key_out_of_audit(tmp_path,monkeypatch):
+@pytest.mark.parametrize('injected',[False,True])
+def test_jev_client_caches_and_keeps_key_out_of_audit(tmp_path,monkeypatch,injected):
     from convest.subtasks import jev
     import base64,io
-    monkeypatch.setenv('TYPESAFE_API_KEY','not-a-real-secret-for-test')
+    if injected:monkeypatch.delenv('TYPESAFE_API_KEY',raising=False)
+    else:monkeypatch.setenv('TYPESAFE_API_KEY','not-a-real-secret-for-test')
     calls=[]
     class Opener:
         def open(self,request,timeout):
             calls.append(request)
+            assert request.get_header('Authorization')=='Bearer not-a-real-secret-for-test'
             assert request.get_header('Typesafe-danger-zone-images')=='true'
             assert request.full_url=='https://api.typesafe.ai/v1/systemone'
             return io.BytesIO(json.dumps(jev_response()).encode())
     monkeypatch.setattr(jev.urllib.request,'build_opener',lambda *a:Opener())
     payload={'model':'jev-1.14.0','state':'test-image-ref','questions':{},'assets':{
         'test-image-ref':{'type':'image','format':'jpg','data_base64':base64.b64encode(b'fake-test-image').decode()}}}
-    client=jev.Client(tmp_path/'api')
+    client=jev.Client(tmp_path/'api',api_key='not-a-real-secret-for-test' if injected else None)
     first=client.call(payload);second=client.call(payload)
     assert first==second and len(calls)==1
     assert all(b'not-a-real-secret-for-test' not in p.read_bytes() for p in tmp_path.rglob('*') if p.is_file())
+
+
+def test_jev_model_connection_keeps_secret_private(pair,tmp_path,monkeypatch):
+    from convest.subtasks import model_config
+    normal,_=pair
+    monkeypatch.setenv('SUBTASKS_HTTP_TOKEN','preserved-browser-session')
+    monkeypatch.delenv('TYPESAFE_API_KEY',raising=False)
+    server=Server(('127.0.0.1',0),[normal.root],tmp_path/'review')
+    assert server.token=='preserved-browser-session'
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    base=f'http://127.0.0.1:{server.server_port}'
+    secret='private-test-key'
+    try:
+        monkeypatch.setattr(model_config,'validate_key',lambda key:key if key==secret else (_ for _ in ()).throw(ValueError('invalid key')))
+        def connect(key,token=server.token):
+            req=urllib.request.Request(base+'/api/models/connect',data=json.dumps({'key':key}).encode(),headers={'X-Subtasks-Token':token,'Content-Type':'application/json'})
+            return urllib.request.urlopen(req)
+        with pytest.raises(urllib.error.HTTPError) as error:connect(secret,'bad-token')
+        assert error.value.code==403 and not server.jev_key
+        with connect(secret) as response:
+            raw=response.read();assert secret.encode() not in raw
+            assert json.loads(raw)=={'enabled':True,'configured':True,'verified':True,'model':'jev-1.14.0'}
+        with pytest.raises(urllib.error.HTTPError):connect('bad')
+        assert server.jev_key==secret
+        bootstrap=json.load(urllib.request.urlopen(base+'/api/bootstrap'))
+        assert bootstrap['jev']['configured'] and secret not in json.dumps(bootstrap)
+        assert b'type="password"' in urllib.request.urlopen(base+'/models').read()
+        assert not any(secret.encode() in p.read_bytes() for p in (tmp_path/'review').rglob('*') if p.is_file())
+    finally:server.shutdown();server.server_close();thread.join()
+
+
+def test_jev_key_validation_uses_only_model_list(monkeypatch):
+    import io
+    from convest.subtasks import model_config
+    class Opener:
+        def open(self,request,timeout):
+            assert request.full_url=='https://api.typesafe.ai/v1/models'
+            assert request.get_header('Authorization')=='Bearer test-key'
+            assert request.data is None
+            return io.BytesIO(b'{"models":[{"name":"jev-1.14.0"}]}')
+    monkeypatch.setattr(model_config.urllib.request,'build_opener',lambda *args:Opener())
+    assert model_config.validate_key(' test-key ')=='test-key'
+    for key in ('',None,'bad\nkey','x'*4097):
+        with pytest.raises(ValueError):model_config.validate_key(key)
+    class BadOpener:
+        def open(self,*args,**kwargs):
+            raise urllib.error.HTTPError('https://api.typesafe.ai/v1/models',401,'secret-must-not-leak',{},None)
+    monkeypatch.setattr(model_config.urllib.request,'build_opener',lambda *args:BadOpener())
+    with pytest.raises(ValueError) as error:model_config.validate_key('test-key')
+    assert 'secret-must-not-leak' not in str(error.value)

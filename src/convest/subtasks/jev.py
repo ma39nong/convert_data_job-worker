@@ -58,8 +58,9 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class Client:
-    def __init__(self, root):
+    def __init__(self, root, api_key=None):
         self.root = root
+        self.api_key = api_key
 
     def call(self, payload):
         key = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
@@ -68,7 +69,7 @@ class Client:
             response = json.loads(path.read_text())
             validate_response(payload, response)
             return response, key
-        api_key = os.environ.get('TYPESAFE_API_KEY')
+        api_key = self.api_key or os.environ.get('TYPESAFE_API_KEY')
         if not api_key: raise ValueError('未配置 TYPESAFE_API_KEY；未发送图像或调用 JEV')
         if (self.root/'STOP').exists(): raise ValueError('JEV STOP 文件存在，停止发送新请求')
         # Store asset bytes separately; request logs contain hashes rather than credentials or base64.

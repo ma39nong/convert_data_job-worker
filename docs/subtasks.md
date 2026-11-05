@@ -52,7 +52,11 @@ cd /home/user/convert_data_job-worker
 
 采用 TypeSafe 官方 [图像输入协议](https://docs.typesafe.ai/images)和 [Choice 协议](https://docs.typesafe.ai/primitives/choice)，固定 `jev-1.14.0`；图像接口目前被官方标为试验能力，效果必须用实际视频验证。
 
-需要在启动服务的本机终端设置 `TYPESAFE_API_KEY`，密钥不写配置、不放进浏览器、不提交仓库。可以交互输入后导出环境变量：
+推荐打开独立的 [本机视觉模型配置页](http://127.0.0.1:8766/models)，从其中的官方控制台入口注册/登录并创建 TypeSafe API key，然后在本机密码框填写，点击“验证连接并启用 JEV”。账号条款、充值由用户自行完成。连接验证仅请求官方 `GET /v1/models`，不会发送图像或运行推理；通过后在服务内存中启用 JEV，密钥不落盘、不回传到页面、不写日志或标注文件，服务重启后需重新填写。验证失败保留原有配置。
+
+连接完成后，先保存原标注页未保存的修改，再刷新标注页选择 JEV。连接验证通过不等于图像接口或识别效果已经验证，应在另一条录制上小样本试验，保留已完成人工标签。
+
+也可以在启动服务的本机终端设置 `TYPESAFE_API_KEY`：
 
 ```bash
 read -rsp 'TypeSafe API key: ' TYPESAFE_API_KEY

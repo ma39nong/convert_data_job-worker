@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>配置 JEV 视觉模型</title><link rel="stylesheet" href="/style.css"></head>
+<body><header><span class="brand">番茄 ／ 视觉模型</span><span class="tag">JEV · TYPESAFE</span></header>
+<main style="max-width:760px;margin:32px auto;padding:24px"><p class="eyebrow">MODEL CONNECTION</p><h1>配置 JEV 视觉模型</h1>
+<p>用于查看三路相机的时序画面，生成粗阶段和细动作草稿，再由你审核。</p>
+<section class="panel"><h2>1. 开通 TypeSafe 账号</h2><p>打开官方控制台登录或注册，创建 API key。账号授权、服务条款与充值由你在官网完成。</p><p><a href="https://console.typesafe.ai" target="_blank" rel="noopener noreferrer">打开 TypeSafe 官方控制台 ↗</a> · <a href="https://docs.typesafe.ai/api/list-models" target="_blank" rel="noopener noreferrer">官方 API 文档 ↗</a></p></section>
+<section class="panel" style="margin-top:24px"><h2>2. 在本机连接</h2><form id="configure"><label for="key">TypeSafe API key</label><input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="在这里粘贴密钥，不要发到聊天里" required style="display:block;width:100%;margin:12px 0"><button id="connect" class="primary" type="submit">验证连接并启用 JEV</button></form><p>密钥仅保存在当前本机服务的内存中，不写入配置文件、标注 JSON 或浏览器存储；服务重启后需重新填写。验证只读取模型列表，不上传图像、不运行推理。</p><p id="result" role="status">正在检查连接状态…</p></section>
+<section class="panel" style="margin-top:24px"><h2>3. 开始预标注</h2><p>模型固定为 jev-1.14.0。连接成功后，先在原标注页保存当前修改，再刷新页面，选择 JEV 并点击“自动预标注”。届时会将所选录制的抽帧发送至 TypeSafe，可能消耗账号额度。</p><p>连接成功只说明凭据可用；图像接口兼容性和实际标注效果仍需首条样本验证。已有人工标注建议保留，在另一条录制上试用。</p></section></main><script src="/models.js"></script></body></html>

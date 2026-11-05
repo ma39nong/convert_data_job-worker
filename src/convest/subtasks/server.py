@@ -24,11 +24,17 @@ class Server(ThreadingHTTPServer):
     def __init__(self, address, roots, output, *, enable_jev=False, jev_model="jev-1.14.0"):
         self.enable_jev, self.jev_model = enable_jev, jev_model
         self.store = Store(roots, output)
-        self.token = secrets.token_urlsafe(32)
+        self.token = os.environ.pop('SUBTASKS_HTTP_TOKEN', None) or secrets.token_urlsafe(32)
+        self.jev_key = os.environ.get('TYPESAFE_API_KEY', '')
+        self.jev_verified = False
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.jobs, self.jobs_lock = {}, threading.Lock()
         self.cached_episodes = {}
         super().__init__(address, Handler)
+
+    def model_status(self):
+        return {'enabled': self.enable_jev, 'configured': bool(self.jev_key),
+                'verified': self.jev_verified, 'model': self.jev_model}
 
     def episode(self, id_):
         # Reload after edits so source changes cannot be hidden behind an in-memory table.
@@ -80,7 +86,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send({'app': 'subtasks-review', 'token': self.server.token,
                                   'labels': {k: {'coarse': v[0], 'text': v[1]} for k, v in LABELS.items()},
                                   'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
-                                  'jev': {'enabled':self.server.enable_jev, 'configured':bool(os.environ.get('TYPESAFE_API_KEY')), 'model':self.server.jev_model}})
+                                  'jev': self.server.model_status()})
+            if route.path == '/api/models/status':
+                return self.send(self.server.model_status())
             if route.path == '/api/episode':
                 ep = self.server.episode(q['id'][0])
                 return self.send({'episode': ep.detail(), 'annotation': self.server.store.load(ep)})
@@ -94,6 +102,8 @@ class Handler(BaseHTTPRequestHandler):
                 ep = self.server.episode(q['id'][0]); doc = self.server.store.load(ep)
                 return self.send(doc, attachment=f'episode_{ep.index:06d}_{ep.id}_subtasks.json')
             files = {'/': ('index.html', 'text/html; charset=utf-8'),
+                     '/models': ('models.html', 'text/html; charset=utf-8'),
+                     '/models.js': ('models.js', 'text/javascript; charset=utf-8'),
                      '/app.js': ('app.js', 'text/javascript; charset=utf-8'), '/style.css': ('style.css', 'text/css; charset=utf-8')}
             if route.path in files:
                 name, mime = files[route.path]
@@ -141,6 +151,13 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < length <= 2_000_000: raise ValueError('请求大小无效')
             body = json.loads(self.rfile.read(length)); route = urlsplit(self.path).path
             store = self.server.store
+            if route == '/api/models/connect':
+                from .model_config import validate_key
+                key = validate_key(body.get('key'))
+                self.server.jev_key = key
+                self.server.enable_jev = True
+                self.server.jev_verified = True
+                return self.send(self.server.model_status())
             if route == '/api/train':
                 return self.send(self.server.submit(lambda: {'models': train(store)}))
             ep = self.server.episode(body['id'])
@@ -155,8 +172,9 @@ class Handler(BaseHTTPRequestHandler):
                     backend = body.get('backend', 'local')
                     if backend == 'jev':
                         if not self.server.enable_jev: raise ValueError('服务未启用 JEV；请用 --enable-jev 启动')
-                        from .jev import annotate
-                        result = annotate(ep, store.output, model=self.server.jev_model, max_requests=body.get('max_requests',256))
+                        from .jev import annotate, Client
+                        if not self.server.jev_key: raise ValueError('请先在视觉模型配置页填写 API key')
+                        result = annotate(ep, store.output, model=self.server.jev_model, max_requests=body.get('max_requests',256), client=Client(store.output/'jev', api_key=self.server.jev_key))
                     elif backend == 'local':
                         result = predict(store, ep)
                         if result.get('in_reference_set'): raise ValueError('当前是模型参考样例，请保留参考标签，在其他 episode 上运行预标注')
@@ -195,7 +213,7 @@ def main(argv=None):
     parser.add_argument('--output', default='outputs/subtasks/review')
     parser.add_argument('--port', type=int, default=8766)
     parser.add_argument('--no-browser', action='store_true')
-    parser.add_argument('--enable-jev', action='store_true', help='显式允许向 TypeSafe 发送本次所选 episode 的抽帧；API key 仅从环境读取')
+    parser.add_argument('--enable-jev', action='store_true', help='显式允许向 TypeSafe 发送本次所选 episode 的抽帧；API key 可从环境或本机视觉模型配置页提供')
     parser.add_argument('--jev-model', default='jev-1.14.0')
     args = parser.parse_args(argv)
     server = Server(('127.0.0.1', args.port), args.root, args.output, enable_jev=args.enable_jev, jev_model=args.jev_model)

@@ -237,3 +237,13 @@ Sharpa additional normal 2 的提起候选为88帧（约2.93秒），模型逐�
 verify_batch.py独立验证6目录/52条/26normal+26speedup，每条唯一对应；26组用真实source_index/action_source_index和source_timestamp_ns重新调用project通过，包含长度/时序/源观测对齐检查。人工000000原稿逐字段一致、全部15份旧标注/工作层SHA不变；新批次只1份人工参考头，51条待处理，无模型草稿从旧测试偷带入。未发模型请求、未训练。reference-verification.json验证其他录制得到10张人工转场例图，目标/同录制排除；不是识别准确率测试。
 
 界面缩短数据包名与统计，默认仅显示所选包，片段按编号排序并优先打开待处理项。当前1102 normal只显示3条，000000标“人工参考·已完成”，不是把全部52条默认堆在左侧。完整来源路径仍可查看；批次栏提示人工参考已保留。24项定向单元回归、Node导航/联动和语法、compile/diff通过；不为纯展示改动重跑无关全工程。证据在outputs/subtasks/batch-1102-1104-preparation/，final-verification.json passed。保留人工参考能维持标法依据，不是新批次无误的保证，仍需逐帧人工复核。
+
+## 2026-11-06 speedup依赖状态误报失败
+
+实际用户先启动1102 speedup：ep1/2当时没有normal标签，旧代码报“请先处理同源normal，再处理speedup”并记为failed；ep0因人工normal参考存在而成功。随后normal ep2正在模型处理。该两条是依赖未就绪，不是视频损坏、缺人工参考或模型接口失败。
+
+新增WaitingForNormal及源录制/起止纳秒依赖预检：缺normal或normal标签含unknown时，进入waiting_normal，不组装参考图、不发独立speedup请求；normal就绪后目录状态恢复pending，可继续处理。兼容旧failed字符串，但保留旧队列记录供追溯；HTTP等真正失败仍显示失败。前端同步兼容正在运行的旧服务，显示等待normal和跳转入口，统计不算失败；对应版本跳转会切换左侧数据包，避免主视图与列表不同包。
+
+当前PID397857的normal ep2仍运行，**没有重启、中断、重复提交或更改正在写的队列文件**。前端兼容修复已实时验收；新的Python依赖预检需当前任务结束后正常重启才能加载，不能误报已热更新Python类。当前旧API仍可保留两条failed历史，网页按确切依赖原因显示waiting_normal。此分离只对指定旧依赖错误生效，不隐藏其他错误。
+
+26项workspace/delivery测试通过，Node导航/边界/依赖兼容测试、compile/语法/diff通过。真实浏览器1102 speedup显示ep0草稿、ep1/2等待normal，选ep1显示“等待同源normal处理完成，再处理speedup”和对应normal入口。仅只读导航，无模型请求/人工确认/保存，截图outputs/subtasks/waiting-normal-validation/waiting-normal.png。新批次数据及参考保持。

@@ -27,3 +27,9 @@ vm.createContext(context);
 for(const name of ['seek','select']){const line=script.split('\n').find(l=>l.startsWith('function '+name+'('));vm.runInContext(line,context);}
 vm.runInContext('select(1)',context);assert.equal(context.commits,1);assert.equal(context.state.selected.coarse,1);
 console.log('subtasks UI: boundary sync and navigation regression passed');
+vm.runInThisContext(script.slice(script.indexOf('function normalizeCatalog('),script.indexOf('async function showEpisode(')));
+const depCatalog={directories:[{id:'n'},{id:'s'}],episodes:[{id:'n',directory_id:'n',variant:'normal',state:'pending',source_recording_id:'r',source_start_ns:'100000000000000001',source_end_ns:'100000000000000099'},{id:'s',directory_id:'s',variant:'speedup',state:'failed',error:'请先处理同源normal，再处理speedup',source_recording_id:'r',source_start_ns:'100000000000000001',source_end_ns:'100000000000000099'},{id:'bad',directory_id:'s',variant:'speedup',state:'failed',error:'HTTP 500'}]};
+let waiting=normalizeCatalog(JSON.parse(JSON.stringify(depCatalog)));
+assert.equal(waiting.episodes[1].state,'waiting_normal');assert.equal(waiting.episodes[1].depends_on,'n');assert.equal(waiting.directories[1].failed,1);assert.equal(waiting.directories[1].waiting_normal,1);
+depCatalog.episodes[0].state='ready';assert.equal(normalizeCatalog(depCatalog).episodes[1].state,'pending');
+console.log('subtasks UI: dependency wait compatibility passed');

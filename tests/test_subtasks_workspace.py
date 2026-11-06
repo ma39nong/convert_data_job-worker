@@ -205,3 +205,39 @@ def test_explicit_fine_review_status_takes_precedence_over_legacy(tmp_path):
         assert ws.catalog()['episodes'][0]['human_reviewed']
         assert store.load(ep)['revision']==1
     finally:store.lockfile.close()
+
+
+def test_speedup_dependency_wait_is_not_failure_and_becomes_runnable(tmp_path,monkeypatch):
+    from convest.subtasks import doubao,behavior
+    normal=dataset(tmp_path/'normal');speed=dataset(tmp_path/'speedup',speedup=True)
+    store=Store([normal.root,speed.root],tmp_path/'review');ws=Workspace(store)
+    monkeypatch.setattr(doubao,'annotate',lambda *a,**kw:pytest.fail('依赖未就绪不应调用模型'))
+    monkeypatch.setattr(behavior,'scan',lambda *a,**kw:pytest.fail('依赖未就绪不应扫描'))
+    try:
+        result=ws.process([speed.id],SimpleNamespace(doubao_key='test'))
+        assert result['episodes'][0]['state']=='waiting_normal'
+        item=next(e for e in ws.catalog()['episodes'] if e['id']==speed.id)
+        assert item['state']=='waiting_normal' and item['depends_on']==normal.id
+        assert sum(g['failed'] for g in ws.catalog()['directories'])==0
+        assert store.load(speed)['revision']==0
+        # Existing versions used a generic failure string. Derive the wait without
+        # rewriting a live queue file, and expose pending once normal is ready.
+        ws.queue[speed.id]={'state':'failed','error':'请先处理同源normal，再处理speedup'}
+        assert next(e for e in ws.catalog()['episodes'] if e['id']==speed.id)['state']=='waiting_normal'
+        store.save(normal,{**store.load(normal),'segments':[segment(0,61,'grasp_truss')]})
+        assert next(e for e in ws.catalog()['episodes'] if e['id']==speed.id)['state']=='pending'
+        assert ws.queue[speed.id]['state']=='failed'  # The old record stays auditable.
+        ws.queue[speed.id]={'state':'failed','error':'HTTP 500'}
+        assert next(e for e in ws.catalog()['episodes'] if e['id']==speed.id)['state']=='failed'
+    finally:store.lockfile.close()
+
+
+def test_missing_normal_waits_for_import_instead_of_independent_inference(tmp_path,monkeypatch):
+    from convest.subtasks import doubao
+    speed=dataset(tmp_path/'speedup',speedup=True);store=Store([speed.root],tmp_path/'review');ws=Workspace(store)
+    monkeypatch.setattr(doubao,'annotate',lambda *a,**kw:pytest.fail('没有normal时不独立猜测speedup'))
+    try:
+        result=ws.process([speed.id],SimpleNamespace(doubao_key='test'))
+        assert result['episodes'][0]['state']=='waiting_normal'
+        item=ws.catalog()['episodes'][0];assert item['depends_on'] is None and '导入' in item['error']
+    finally:store.lockfile.close()

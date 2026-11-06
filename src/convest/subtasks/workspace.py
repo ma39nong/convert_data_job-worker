@@ -38,6 +38,10 @@ def validate_coarse(rows,length,fps):
     return out
 
 
+class WaitingForNormal(ValueError):
+    """A dependency is not a failed video/model request."""
+
+
 class Workspace:
     def __init__(self,store):
         self.store=store;self.root=store.output/'workspace';self.lock=threading.RLock()
@@ -97,6 +101,19 @@ class Workspace:
             atomic_json(self.stage_path(ep.id,stage),saved)
             return saved
 
+    def normal_dependency(self,id_):
+        entry=self.store.entries[id_]
+        if entry['variant']!='speedup':return None
+        keys=('source_recording_id','source_start_ns','source_end_ns')
+        matches=[e for e in self.store.entries.values() if e['variant']=='normal' and all(entry.get(k) is not None and entry[k]==e.get(k) for k in keys)]
+        if len(matches)>1:raise ValueError('同源normal不唯一，请核对数据包')
+        if not matches:return {'id':None,'ready':False,'reason':'等待导入同源normal'}
+        normal=matches[0];path=self.stage_path(normal['id'],'fine')
+        if not path.exists():path=self.store.path(normal['id'])
+        doc=json.loads(path.read_text()) if path.exists() else None
+        ready=bool(doc and doc['segments'] and all(s['label']!='unknown' for s in doc['segments']))
+        return {'id':normal['id'],'ready':ready,'reason':'' if ready else '等待同源normal处理完成，再处理speedup'}
+
     def catalog(self):
         with self.lock,self.store.lock:
             groups={};episodes=[]
@@ -114,9 +131,17 @@ class Workspace:
                 saved['fine'] |= bool(doc and doc['status']=='reviewed')
                 q=self.queue.get(entry['id'],{});status=q.get('state','ready' if ready else 'pending')
                 if status not in {'running','failed','interrupted'} and ready:status='ready'
+                dependency=None
+                legacy_wait=q.get('error')=='请先处理同源normal，再处理speedup'
+                if entry['variant']=='speedup' and (status in {'pending','queued','interrupted','waiting_normal'} or legacy_wait):
+                    dependency=self.normal_dependency(entry['id'])
+                    if not dependency['ready']:status='waiting_normal'
+                    elif status=='waiting_normal' or legacy_wait:status='pending'
                 item={**entry,'directory_id':group_id,'remote_directory':directory,'state':status,
                     'coarse_saved':saved['coarse'],'fine_saved':saved['fine'],'error':q.get('error',''),
-                    'human_reviewed':reviewed}
+                    'human_reviewed':reviewed,'depends_on':dependency['id'] if dependency else None}
+                if status=='waiting_normal':item['error']=dependency['reason']
+                elif legacy_wait:item['error']=''
                 for key in ('source_start_ns','source_end_ns'):
                     if item.get(key) is not None:item[key]=str(item[key])
                 episodes.append(item)
@@ -199,7 +224,7 @@ class Workspace:
         if fine:
             if fine['source']!=normal_doc['source']:raise ValueError('normal保存阶段来源变化')
             normal_doc={**normal_doc,'segments':fine['segments'],'outcome':fine.get('outcome',normal_doc['outcome'])}
-        if any(s['label']=='unknown' for s in normal_doc['segments']):raise ValueError('请先处理同源normal，再处理speedup')
+        if any(s['label']=='unknown' for s in normal_doc['segments']):raise WaitingForNormal('等待同源normal处理完成，再处理speedup')
         mapped=project(normal,ep,normal_doc);records=[]
         def record(response,key,cached,stage):records.append({'key':key,'cached':cached,'stage':stage})
         checked,evidence,_=refine_all(ep,mapped['segments'],self.root/'processing'/ep.id,client,record,records,128,server.progress)
@@ -225,6 +250,8 @@ class Workspace:
                     if self.stage_path(id_,'fine').exists() or current['status']=='reviewed':
                         self.queue[id_]={'state':'ready'};self._checkpoint()
                         results.append({'id':id_,'state':'preserved'});continue
+                dependency=self.normal_dependency(id_)
+                if dependency and not dependency['ready']:raise WaitingForNormal(dependency['reason'])
                 docs={key:self.store.load(self.store.episode(key)) for key in self.store.entries}
                 for key in docs:
                     saved=self.stage_path(key,'fine')
@@ -253,6 +280,8 @@ class Workspace:
                             raise ValueError('normal标注在处理期间变化，未保存旧映射')
                     self.store.save(ep,{**current,'segments':result['segments'],'review_events':events},origin=result['method'],provenance={k:v for k,v in result.items() if k!='segments'})
                     self.queue[id_]={'state':'ready'};self._checkpoint()
+            except WaitingForNormal as exc:
+                with self.lock:self.queue[id_]={'state':'waiting_normal','error':str(exc)};self._checkpoint()
             except Exception as exc:
                 with self.lock:self.queue[id_]={'state':'failed','error':str(exc)};self._checkpoint()
             results.append({'id':id_,**self.queue[id_]})

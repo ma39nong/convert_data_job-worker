@@ -134,3 +134,31 @@ def web_inventory(value):
     except (subprocess.SubprocessError,OSError,ValueError):raise ValueError('读取28数据集失败，请检查目录及SSH连接') from None
     if dataset_path(data['dataset'])!=selected['path']:raise ValueError('远端目录在读取期间发生变化')
     return data
+
+
+def discover(value=DATA_ROOT):
+    """Bounded metadata-only package index; never downloads videos."""
+    path=dataset_path(value)
+    script=r'''
+import json,pathlib,sys
+base=pathlib.Path(sys.argv[1]).resolve(strict=True);root=pathlib.Path(sys.argv[2]).resolve(strict=True)
+if not root.is_relative_to(base):raise ValueError('Outside dataset tree')
+stack=[root];seen=set();items=[]
+while stack:
+ p=stack.pop().resolve(strict=True)
+ if p in seen or not p.is_relative_to(base):continue
+ seen.add(p)
+ if len(seen)>12000:raise ValueError('目录太大，请选择机器人或批次子目录')
+ if (p/'meta/info.json').is_file():
+  info=json.loads((p/'meta/info.json').read_text())
+  if info.get('codebase_version')!='v2.1':continue
+  eps=[json.loads(x) for x in (p/'meta/episodes.jsonl').read_text().splitlines() if x.strip()]
+  items.append({'path':str(p),'fps':info['fps'],'episodes':[{k:(str(e[k]) if k in ('source_start_ns','source_end_ns') and e.get(k) is not None else e.get(k)) for k in ('episode_index','length','source_recording_id','source_start_ns','source_end_ns')} for e in eps]})
+  if len(items)>1000:raise ValueError('数据包过多，请选择更小目录')
+ else:
+  stack.extend(c for c in p.iterdir() if c.is_dir() and not c.name.startswith('.') and c.name not in {'annotations','subtask_training'})
+print(json.dumps({'root':str(root),'packages':sorted(items,key=lambda x:x['path'])}))
+'''
+    result=subprocess.run(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=10','28',shlex.join(['python3','-c',script,DATA_ROOT,path])],capture_output=True,text=True,timeout=120)
+    if result.returncode:raise ValueError('扫描28数据包失败，请缩小到机器人或批次目录')
+    return json.loads(result.stdout)

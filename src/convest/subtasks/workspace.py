@@ -75,7 +75,7 @@ class Workspace:
             out[stage]=value
         return out
 
-    def save_stage(self,ep,stage,body):
+    def save_stage(self,ep,stage,body,*,projection=None):
         with self.lock,self.store.lock:
             doc=self.store.load(ep);current=self.stages(ep,doc)[stage]
             if type(body.get('revision')) is not int or body['revision']!=current['revision']:raise ValueError('这一阶段已在其他窗口更新，请重新载入')
@@ -89,6 +89,7 @@ class Workspace:
                 if any(s['label'] not in ACTION_LABELS for s in rows):raise ValueError('仅保存主要细动作')
             else:rows=validate_coarse(body.get('segments'),ep.length,ep.fps)
             saved={**current,'revision':current['revision']+1,'segments':rows,'note':note,'saved_at':time.time(),'inherited':False}
+            if projection is not None:saved['projection']=projection
             if stage=='fine':
                 for key in ('review_events','training_review','outcome'):
                     if key in doc:saved[key]=doc[key]
@@ -116,12 +117,20 @@ class Workspace:
                 item={**entry,'directory_id':group_id,'remote_directory':directory,'state':status,
                     'coarse_saved':saved['coarse'],'fine_saved':saved['fine'],'error':q.get('error',''),
                     'human_reviewed':reviewed}
+                for key in ('source_start_ns','source_end_ns'):
+                    if item.get(key) is not None:item[key]=str(item[key])
                 episodes.append(item)
                 group=groups.setdefault(group_id,{'id':group_id,'path':directory,'host':host,'total':0,'ready':0,'pending':0,'running':0,'failed':0,'coarse_saved':0,'fine_saved':0})
                 group['total']+=1
                 if status in {'ready','running','failed'}:group[status]+=1
                 else:group['pending']+=1
                 for s in saved:group[s+'_saved']+=int(saved[s])
+            for item in episodes:
+                opposite='speedup' if item['variant']=='normal' else 'normal'
+                keys=('source_recording_id','source_start_ns','source_end_ns')
+                matches=[other for other in episodes if other['variant']==opposite and all(item.get(k) is not None and item.get(k)==other.get(k) for k in keys)]
+                item['pair_ids']=[other['id'] for other in matches]
+                item['pair_state']='matched' if len(matches)==1 else 'ambiguous' if matches else 'missing'
             return {'directories':list(groups.values()),'episodes':episodes}
 
     def import_directory(self,value,selection=None):
@@ -142,6 +151,38 @@ class Workspace:
         matches=[e for e in self.catalog()['episodes'] if e['remote_directory']==canonical and e['episode_index'] in selected]
         if len({e['episode_index'] for e in matches})!=len(selected):raise ValueError('缓存片段未完整注册')
         return {'directory':canonical,'imported':len(missing),'reused':len(selected)-len(missing),'episodes':len(matches)}
+
+    def import_many(self,items):
+        if not isinstance(items,list) or not 1<=len(items)<=100:raise ValueError('请选择1–100个数据包')
+        results=[]
+        for item in items:
+            try:results.append({'path':item['path'],**self.import_directory(item['path'],item.get('episodes'))})
+            except Exception as exc:results.append({'path':item.get('path',''),'error':str(exc)})
+        return {'packages':results,'imported':sum(r.get('imported',0) for r in results),'reused':sum(r.get('reused',0) for r in results),'failed':sum('error' in r for r in results)}
+
+    def map_saved(self,normal_id,speedup_id,stages,*,replace=False):
+        from .core import project
+        if not isinstance(stages,list) or not stages or any(s not in {'coarse','fine'} for s in stages):raise ValueError('请选择粗阶段或细阶段')
+        with self.lock,self.store.lock:
+            normal=self.store.episode(normal_id);speedup=self.store.episode(speedup_id)
+            if normal.entry.get('source_recording_id')!=speedup.entry.get('source_recording_id'):raise ValueError('不是同一录制')
+            if self.store.entries[normal_id]['variant']!='normal' or self.store.entries[speedup_id]['variant']!='speedup':raise ValueError('映射方向必须normal到speedup')
+            sources=self.stages(normal);targets=self.stages(speedup);proposals=[]
+            coarse_labels={'pickup':'grasp_truss','harvest':'grasp_fruit','return':'return_truss','adjust':'rotate_stem','unknown':'unknown'}
+            for stage in dict.fromkeys(stages):
+                source=sources[stage];target=targets[stage]
+                if not source['saved_at']:raise ValueError('请先保存normal的'+stage+'阶段')
+                if target['saved_at'] and not replace:raise ValueError('speedup这一层已有保存结果，未覆盖；如需更新请勾选替换并保留历史')
+                rows=source['segments']
+                if stage=='coarse':rows=[{**r,'label':coarse_labels[r['label']]} for r in rows]
+                annotation={**self.store.load(normal),'segments':rows,'revision':source['revision'],'status':'reviewed' if all(r['reviewed'] for r in rows) else 'draft'}
+                mapped=project(normal,speedup,annotation)
+                rows=mapped['segments'] if stage=='fine' else coarse_segments(mapped['segments'])
+                projection={k:v for k,v in mapped.items() if k not in {'segments','source'}}
+                projection.update(normal_id=normal_id,normal_stage=stage,normal_stage_revision=source['revision'],normal_stage_inherited=source.get('inherited',False))
+                proposals.append((stage,{**target,'segments':rows},projection))
+            saved={stage:self.save_stage(speedup,stage,doc,projection=projection) for stage,doc,projection in proposals}
+            return {'normal_id':normal_id,'speedup_id':speedup_id,'stages':saved,'warning':'按实际来源帧映射，speedup需看片确认；没有按时间比例缩放。'}
 
     def _proposal(self,ep,current,server,client):
         from .doubao import annotate

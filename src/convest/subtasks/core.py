@@ -225,6 +225,7 @@ class Store:
                     id_ = hashlib.sha256((str(dataset)+'#'+str(ep)).encode()).hexdigest()[:24]
                     entries[id_] = {'id': id_, 'dataset': str(dataset), 'episode_index': ep,
                                     'length': entry['length'], 'fps': info['fps'], 'source_recording_id':entry.get('source_recording_id'),
+                                    'source_start_ns':entry.get('source_start_ns'),'source_end_ns':entry.get('source_end_ns'),
                                     'variant':'speedup' if (dataset/f'processing/episode_{ep:06d}.json').exists() else 'normal'}
         self.entries = entries
         return list(entries.values())

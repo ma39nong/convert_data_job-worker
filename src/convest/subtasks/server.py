@@ -106,13 +106,29 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(self.server.workspace.catalog())
             if route.path == '/api/workspace/episode':
                 ep=self.server.episode(q['id'][0]);doc=self.server.store.load(ep)
-                return self.send({'episode':ep.detail(),'annotation':doc,'stages':self.server.workspace.stages(ep,doc)})
+                from .delivery import locations
+                stages=self.server.workspace.stages(ep,doc);catalog=self.server.workspace.catalog()
+                entry=next(e for e in catalog['episodes'] if e['id']==ep.id)
+                paired=[e for e in catalog['episodes'] if e['id'] in entry['pair_ids']]
+                mapping={}
+                mapping_stages=stages
+                if entry['variant']=='normal' and len(paired)==1:
+                    mapping_stages=self.server.workspace.stages(self.server.episode(paired[0]['id']))
+                for stage in ('coarse','fine'):
+                    projection=mapping_stages[stage].get('projection')
+                    if projection:
+                        normal=self.server.episode(projection['normal_id']);current=self.server.workspace.stages(normal)[stage]
+                        mapping[stage]={'normal_id':normal.id,'source_revision':projection['normal_stage_revision'],'current_revision':current['revision'],'stale':projection['normal_stage_revision']!=current['revision'],'policy':projection['policy']}
+                return self.send({'episode':ep.detail(),'annotation':doc,'stages':stages,'locations':locations(self.server.workspace,ep),'pair':{'state':entry['pair_state'],'episodes':paired,'mapping':mapping}})
             if route.path == '/api/workspace/download':
                 ep=self.server.episode(q['id'][0]);stage=q['stage'][0]
                 if stage not in {'coarse','fine'}:raise ValueError('未知阶段')
                 doc=self.server.workspace.stages(ep)[stage]
                 if not doc['saved_at']:raise ValueError('请先保存这个阶段')
                 return self.send(doc,attachment=f'episode_{ep.index:06d}_{ep.id}_{stage}.json')
+            if route.path == '/api/remote/packages':
+                from .remote import discover,DATA_ROOT
+                return self.send(discover(q.get('path',[DATA_ROOT])[0]))
             if route.path == '/api/remote/browse':
                 from .remote import browse,DATA_ROOT
                 return self.send(browse(q.get('path',[DATA_ROOT])[0]))
@@ -184,6 +200,15 @@ class Handler(BaseHTTPRequestHandler):
             store = self.server.store
             if route in {'/api/models/connect','/api/jev-plan'}:
                 return self.send({'error':'该入口已移除；当前仅使用豆包'},404)
+            if route == '/api/workspace/export':
+                from .delivery import publish,DEFAULT_TASK_PROMPT
+                ep=self.server.episode(body['id'])
+                return self.send(self.server.submit(lambda:publish(self.server.workspace,ep,body.get('stage'),target=body.get('target','dataset'),root=body.get('root'),kind=body.get('kind','json'),revision=body.get('revision'),prompt_mode=body.get('prompt_mode','goal'),task_prompt=body.get('task_prompt',DEFAULT_TASK_PROMPT)),lock_store=False))
+            if route == '/api/workspace/map':
+                return self.send({'result':self.server.workspace.map_saved(body['normal_id'],body['speedup_id'],body.get('stages'),replace=body.get('replace') is True)})
+            if route == '/api/workspace/import-many':
+                items=body.get('items')
+                return self.send(self.server.submit(lambda:self.server.workspace.import_many(items),lock_store=False))
             if route == '/api/workspace/import':
                 path=body.get('path');selection=body.get('episodes')
                 from .remote import dataset_path

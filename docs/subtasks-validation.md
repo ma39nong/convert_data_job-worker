@@ -211,3 +211,19 @@ Sharpa additional normal 2 的提起候选为88帧（约2.93秒），模型逐�
 修复阶段切换重复提交旧输入框导致误报“边界要连续覆盖”问题。真实浏览器对11条的全部粗细阶段累计351次点击，未报错且区间数组前后相等；另验证下一待审核段、逐帧按钮。新增Node回归覆盖切换只提交一次、边界前后移动、跨内部切点、受影响确认取消、不兼容标签unknown及幂等。
 
 完整Python回归373 passed / 7 skipped；Node回归、语法及git diff检查通过。原11份legacy annotations与UI修改前逐字段一致，用户本轮在workspace中自行保存的粗细版本保留。最终证据在outputs/subtasks/ui-v2-validation/，ui-v2-final-verification.json通过；ui-v2.png为真实页面。仅8766 PID132697服务更新；8765、18766、源数据、质量阈值和维护队列未改。
+
+## 2026-11-06：交付路径、版本映射与整串任务prompt
+
+用户明确本地下载不能代替训练服务器交付。查阅旧工具 `/home/user/apps/data_clean_tomato_eaafe4e/data_clean_tomato/`：默认exports，YAML计划在.bagcut_plans，LeRobot结果新目录内有stage_annotations.json，同时重写task_index/meta/tasks.jsonl。旧工具本机默认exports目录当前不存在，不能把默认位置当作已存在结果。实际旧浏览器粗阶段JSON在/home/user/Downloads/episode_000002_723f2e11248e806f2b2401b9_coarse.json。
+
+新增两层独立导出按钮、28原数据集标注目录/28自选目录/本机自选目录/浏览器下载四种目标，界面显示源包、工作稿、最新交付的完整路径和版本。新delivery.py发布前验证来源SHA，不覆盖既有结果；独立文件带revision+内容指纹，保留交付收据。训练副本通过本机PyArrow准备新的Parquet/元数据，服务器标准库核对来源并复制原视频到新的单episode v2.1目录；不依赖28系统Python安装PyArrow，不修改源meta/Parquet/视频。
+
+用户补充旧单果prompt后，再明确当前为整串任务。核对官方OpenPI config.py的prompt_from_task、README公开flow/action支持与pi05论文：总任务更新为逐颗摘完全部番茄、放左侧果盘、最后放回裸杆。**训练默认goal模式，全部帧使用整串总prompt，阶段标签另存**；stage模式为显式实验选项，需要部署时配套阶段指令切换，不能等同自动学得高层规划。meta/subtask_prompts.json保留原总prompt、推荐新总prompt、阶段中英文和模式。原数据包prompt未改。先前仅阶段文本的试验副本保留历史，最终收据指向goal版。
+
+新增跨目录包扫描与多选导入，真实扫描Sharpa根显示26个包。配对用recording_id+source起止纳秒，网页纳秒用字符串避免JS精度丢失；缺失包可按同源搜索，不按episode号猜。normal已保存粗细层分别用既有project()映射到speedup；保持源帧映射、action跨界与压缩丢段信息、normal层版本，映射后全未确认。替换已有保存版本需明确勾选并保留历史；页面标明过期/待更新。
+
+实际Sharpa additional ep2：normal coarse r3/fine r2保留不变；映射生成speedup coarse/fine r1未审核，并分别发布两版本两层JSON至各自 `<dataset>/annotations/subtasks/{coarse,fine}/`。人工参考normal0另生成goal模式训练副本：
+`28:/mnt/data/train_platform/datasets/tomato_sharpa/normal/no-block-more/A/1102_588_616_normal_lerobot/subtask_training/fine/episode_000000_r0_439652cb025a2d30/`。
+独立回读11个输出文件SHA，7658帧、1个task、新整串prompt；原state/action/timestamp等逐列相等，原视频SHA一致。原11份legacy标注及本轮前已有用户层保存逐字段不变；未替用户勾确认、未训练。此为单episode格式/传输验收，不代表PI0.5机器人适配、批次训练或部署成功。
+
+全工程380 passed / 7 skipped，Node阶段联动/导航回归和语法、compile/diff检查通过。新测试覆盖不同层/路径、幂等不覆盖、源不变、训练副本逐帧任务与状态、goal/stage模式、原prompt保留、拒绝未审稿、输出篡改检测、同源映射与历史保护、错配拒绝、批量导入单包失败继续。证据在outputs/subtasks/delivery-validation/，final-verification.json passed，delivery-overview.png与training-prompt.png为真实浏览器。8766正常收尾并沿用HTTP token，当前PID291031；8765/18766、原清洗阈值与维护队列不变。

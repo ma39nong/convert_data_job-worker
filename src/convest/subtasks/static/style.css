@@ -2,3 +2,5 @@
 
 /* Keep the first screen focused on the three videos. */
 .library{padding-top:16px}.library-heading p{margin:3px 0 5px}.directories{padding-bottom:10px}.directory{padding:9px 12px}.directory small{line-height:1.5;margin-top:3px}.library-bottom{min-height:48px}
+
+.pair-panel,.locations{padding:14px 18px;background:#fff;border:1px solid var(--border,#d5e2dc);border-radius:10px;margin:12px 0;overflow-wrap:anywhere}.pair-panel p,.locations p{margin:7px 0;font-size:13px}.pair-panel button{margin:4px 6px 4px 0}.pair-panel .check{display:inline-flex;margin:6px}.locations{background:#f6faf7}.path-note{overflow-wrap:anywhere;white-space:pre-wrap;line-height:1.6}.package-row{display:flex;gap:12px;padding:12px;border:1px solid #d5e2dc;border-radius:8px;margin:8px 0}.package-row span{white-space:pre-wrap;overflow-wrap:anywhere}.package-row input{width:auto;flex:none}#exportDialog{max-width:720px}#exportDialog select{width:100%;margin:6px 0 14px}.savebar>div{flex-wrap:wrap}.directories .directory strong{white-space:normal;overflow-wrap:anywhere}

@@ -247,3 +247,9 @@ verify_batch.py独立验证6目录/52条/26normal+26speedup，每条唯一对应
 当前PID397857的normal ep2仍运行，**没有重启、中断、重复提交或更改正在写的队列文件**。前端兼容修复已实时验收；新的Python依赖预检需当前任务结束后正常重启才能加载，不能误报已热更新Python类。当前旧API仍可保留两条failed历史，网页按确切依赖原因显示waiting_normal。此分离只对指定旧依赖错误生效，不隐藏其他错误。
 
 26项workspace/delivery测试通过，Node导航/边界/依赖兼容测试、compile/语法/diff通过。真实浏览器1102 speedup显示ep0草稿、ep1/2等待normal，选ep1显示“等待同源normal处理完成，再处理speedup”和对应normal入口。仅只读导航，无模型请求/人工确认/保存，截图outputs/subtasks/waiting-normal-validation/waiting-normal.png。新批次数据及参考保持。
+
+## 2026-11-06：审核按钮与多步撤销
+
+编辑卡右上三个按钮为撤销、当前段确认、当前层整条确认；下方保留拆分、合并、下一待审核段。Node回归覆盖连续撤销/重做、粗细联动恢复、未知标签阻止整条确认、合并/拆分与服务器版本保护。
+
+18767隔离合成片段真实浏览器验证：边界修改与连续撤销、拆分合并、标签恢复、逐段与整条确认/撤销、保存fine v1后撤销再保存v2、键盘重做与撤销、刷新后持久化一致。只保存测试fine层，原测试模型稿和正式人工参考SHA未变；未对正式片段进行确认或保存。测试服务正常停止。正式8766静态页面直接使用新控件，无需重启运行中的豆包队列。截图与浏览器证明位于outputs/subtasks/review-controls-validation。

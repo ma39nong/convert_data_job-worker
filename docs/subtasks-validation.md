@@ -227,3 +227,13 @@ Sharpa additional normal 2 的提起候选为88帧（约2.93秒），模型逐�
 独立回读11个输出文件SHA，7658帧、1个task、新整串prompt；原state/action/timestamp等逐列相等，原视频SHA一致。原11份legacy标注及本轮前已有用户层保存逐字段不变；未替用户勾确认、未训练。此为单episode格式/传输验收，不代表PI0.5机器人适配、批次训练或部署成功。
 
 全工程380 passed / 7 skipped，Node阶段联动/导航回归和语法、compile/diff检查通过。新测试覆盖不同层/路径、幂等不覆盖、源不变、训练副本逐帧任务与状态、goal/stage模式、原prompt保留、拒绝未审稿、输出篡改检测、同源映射与历史保护、错配拒绝、批量导入单包失败继续。证据在outputs/subtasks/delivery-validation/，final-verification.json passed，delivery-overview.png与training-prompt.png为真实浏览器。8766正常收尾并沿用HTTP token，当前PID291031；8765/18766、原清洗阈值与维护队列不变。
+
+## 2026-11-06：清空测试工作列表并准备1102/1103/1104正式批次
+
+按用户截图选择Sharpa/no-block-more/A三个日期包及对应speedup，实际6包52条：1102各3、1103各7、1104各16。26组recording_id+源起止纳秒配对完整。独立新输出为outputs/subtasks/batches/sharpa-A-1102-1104，旧outputs/subtasks/review原地归档保留，不删除旧视频缓存、15份原标注/层保存或服务器既有交付。新输出只继承人工000000完整原稿及独立参考快照，其他旧测试草稿和工作层不复制。
+
+导入全部完成：新增47条、复用5条、失败0；新增媒体/数据约2.406 GB，每包使用原有下载前后远端SHA、下载后本地SHA一致验收。来源一致的1102缓存复用，续启脚本resume.sh保存于新输出。8766正常SIGINT收尾并沿用HTTP token，当前PID397857；仅切换审核输出与数据根，8765/18766和维护队列不变。
+
+verify_batch.py独立验证6目录/52条/26normal+26speedup，每条唯一对应；26组用真实source_index/action_source_index和source_timestamp_ns重新调用project通过，包含长度/时序/源观测对齐检查。人工000000原稿逐字段一致、全部15份旧标注/工作层SHA不变；新批次只1份人工参考头，51条待处理，无模型草稿从旧测试偷带入。未发模型请求、未训练。reference-verification.json验证其他录制得到10张人工转场例图，目标/同录制排除；不是识别准确率测试。
+
+界面缩短数据包名与统计，默认仅显示所选包，片段按编号排序并优先打开待处理项。当前1102 normal只显示3条，000000标“人工参考·已完成”，不是把全部52条默认堆在左侧。完整来源路径仍可查看；批次栏提示人工参考已保留。24项定向单元回归、Node导航/联动和语法、compile/diff通过；不为纯展示改动重跑无关全工程。证据在outputs/subtasks/batch-1102-1104-preparation/，final-verification.json passed。保留人工参考能维持标法依据，不是新批次无误的保证，仍需逐帧人工复核。

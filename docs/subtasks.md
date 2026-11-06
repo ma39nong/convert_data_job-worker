@@ -79,3 +79,13 @@ JSON本身不会让训练代码自动读取subtask。因此导出内容还可选
 训练副本默认选 **整串任务指令**：全部帧使用同一个总目标，粗/细标签和阶段序号独立保留。`meta/subtask_prompts.json`记录旧总prompt、新总prompt、阶段中英文及指令模式。不会改原包的task文本。normal与其speedup使用相同任务目标。
 
 可另选 **阶段指令实验**：按当前段写英文任务文本，部署时需提供匹配阶段指令或配套调度/高层模型，不能以为给每帧换task_index就自动训练出阶段规划。官方OpenPI的prompt_from_task会把数据集task作为prompt；默认公开流程不能直接等同论文完整的高层预测训练。参考[官方配置](https://github.com/Physical-Intelligence/openpi/blob/main/src/openpi/training/config.py)、[官方README](https://github.com/Physical-Intelligence/openpi)、[论文](https://www.physicalintelligence.company/download/pi05.pdf)。
+
+## 当前正式审核批次：Sharpa A 1102／1103／1104
+
+2026-11-06开始使用新的独立审核工作区 `outputs/subtasks/batches/sharpa-A-1102-1104/`，包含三个A批次的normal与对应speedup，共6包52条。旧测试工作区 `outputs/subtasks/review/` 完整保留，不再作为当前审核输出，既有服务器交付文件也没有删除。来源相同的已有缓存复用，其余在本批次旁边的 `sharpa-A-1102-1104-imports/` 校验后登记。
+
+1102 normal的人工000000原稿完整继承，为已完成参考；其余旧试验草稿不进入新批次。参考快照保存在新工作区reference-library。实际预标注读取已审核原稿，提供其他录制的动作含义/粒度样例；同一录制或目标本身不作为参考例图，不套用参考的时间、果数与画面。新视频仍需人工看边界，保留参考不等于识别准确率承诺。
+
+页面默认选中一个数据包，只列该包片段，并优先打开待处理项；包名简化为机器人、批次、评级和版本，完整来源路径在悬停与保存位置中可查。“全部目录”可查看全部52条。预标注尚未自动启动，准备好后点击当前包的“开始逐个处理”，先审核normal，再映射/核对对应speedup。
+
+重启当前批次可运行 `bash outputs/subtasks/batches/sharpa-A-1102-1104/resume.sh`，不要与已运行的8766服务重复启动；这不会启动8765工作流、旧清洗或训练任务。

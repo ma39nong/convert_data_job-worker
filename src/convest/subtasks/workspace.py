@@ -131,7 +131,8 @@ class Workspace:
                 matches=[other for other in episodes if other['variant']==opposite and all(item.get(k) is not None and item.get(k)==other.get(k) for k in keys)]
                 item['pair_ids']=[other['id'] for other in matches]
                 item['pair_state']='matched' if len(matches)==1 else 'ambiguous' if matches else 'missing'
-            return {'directories':list(groups.values()),'episodes':episodes}
+            batch_path=self.root/'batch.json'
+            return {'directories':list(groups.values()),'episodes':episodes,'batch':json.loads(batch_path.read_text()) if batch_path.exists() else None}
 
     def import_directory(self,value,selection=None):
         from .remote import dataset_path,web_inventory,fetch

@@ -53,6 +53,9 @@ class Workspace:
         for item in self.queue.values():
             if item['state']=='running':item.update(state='interrupted',error='上次处理中断，可重新开始')
         self._checkpoint()
+        self.organizing_ids=set()
+        from .organization import recover
+        recover(self)
 
     def _checkpoint(self):atomic_json(self.queue_path,self.queue)
 
@@ -81,6 +84,9 @@ class Workspace:
 
     def save_stage(self,ep,stage,body,*,projection=None):
         with self.lock,self.store.lock:
+            from .organization import registry
+            if ep.id in self.organizing_ids:raise ValueError('本包正在整理，请完成后再保存')
+            if ep.id in registry(self)['retired']:raise ValueError('片段已重新编号，请重新载入后保存')
             doc=self.store.load(ep);current=self.stages(ep,doc)[stage]
             if type(body.get('revision')) is not int or body['revision']!=current['revision']:raise ValueError('这一阶段已在其他窗口更新，请重新载入')
             if body.get('source')!=doc['source']:raise ValueError('标注来源不一致')
@@ -102,10 +108,12 @@ class Workspace:
             return saved
 
     def normal_dependency(self,id_):
+        from .organization import registry
+        retired=registry(self)['retired']
         entry=self.store.entries[id_]
         if entry['variant']!='speedup':return None
         keys=('source_recording_id','source_start_ns','source_end_ns')
-        matches=[e for e in self.store.entries.values() if e['variant']=='normal' and all(entry.get(k) is not None and entry[k]==e.get(k) for k in keys)]
+        matches=[e for e in self.store.entries.values() if e['id'] not in retired and e['variant']=='normal' and all(entry.get(k) is not None and entry[k]==e.get(k) for k in keys)]
         if len(matches)>1:raise ValueError('同源normal不唯一，请核对数据包')
         if not matches:return {'id':None,'ready':False,'reason':'等待导入同源normal'}
         normal=matches[0];path=self.stage_path(normal['id'],'fine')
@@ -118,12 +126,17 @@ class Workspace:
         with self.lock,self.store.lock:
             from .quarantine import read
             exclusions=read(self)['entries']
+            from .organization import registry
+            organized=registry(self)
             groups={};episodes=[]
             for entry in self.store.entries.values():
+                if entry['id'] in organized['retired']:continue
+                override=organized['entries'].get(entry['id'],{})
                 receipt=Path(entry['dataset'])/'cache-source.json'
                 remote=json.loads(receipt.read_text()) if receipt.exists() else {}
                 directory=remote.get('manifest',{}).get('dataset',entry['dataset']);host=remote.get('host','local')
-                group_id=hashlib.sha256((host+':'+directory).encode()).hexdigest()[:16]
+                group_directory=override.get('directory_override',directory)
+                group_id=hashlib.sha256((host+':'+group_directory).encode()).hexdigest()[:16]
                 doc_path=self.store.path(entry['id']);doc=json.loads(doc_path.read_text()) if doc_path.exists() else None
                 ready=bool(doc and all(s['label']!='unknown' for s in doc['segments']))
                 fine_path=self.stage_path(entry['id'],'fine')
@@ -140,7 +153,7 @@ class Workspace:
                     if not dependency['ready']:status='waiting_normal'
                     elif status=='waiting_normal' or legacy_wait:status='pending'
                 item={**entry,'directory_id':group_id,'remote_directory':directory,'state':status,
-                    'coarse_saved':saved['coarse'],'fine_saved':saved['fine'],'error':q.get('error',''),
+                    'archived':override.get('archived',False),'original_episode_index':override.get('original_episode_index',entry['episode_index']),'coarse_saved':saved['coarse'],'fine_saved':saved['fine'],'error':q.get('error',''),
                     'human_reviewed':reviewed,'depends_on':dependency['id'] if dependency else None}
                 if status=='waiting_normal':item['error']=dependency['reason']
                 elif legacy_wait:item['error']=''
@@ -150,7 +163,7 @@ class Workspace:
                 item['excluded']=bool(exclusion.get('excluded'));item['exclusion']=exclusion
                 if item['excluded']:status=item['state']='excluded'
                 episodes.append(item)
-                group=groups.setdefault(group_id,{'id':group_id,'path':directory,'host':host,'total':0,'ready':0,'pending':0,'running':0,'failed':0,'coarse_saved':0,'fine_saved':0,'excluded':0})
+                group=groups.setdefault(group_id,{'id':group_id,'path':group_directory,'host':host,'total':0,'ready':0,'pending':0,'running':0,'failed':0,'coarse_saved':0,'fine_saved':0,'excluded':0})
                 group['total']+=1
                 if status in {'ready','running','failed','excluded'}:group[status]+=1
                 else:group['pending']+=1
@@ -162,7 +175,7 @@ class Workspace:
                 item['pair_ids']=[other['id'] for other in matches]
                 item['pair_state']='matched' if len(matches)==1 else 'ambiguous' if matches else 'missing'
             batch_path=self.root/'batch.json'
-            return {'directories':list(groups.values()),'episodes':episodes,'batch':json.loads(batch_path.read_text()) if batch_path.exists() else None}
+            return {'redirects':organized['retired'],'directories':list(groups.values()),'episodes':episodes,'batch':json.loads(batch_path.read_text()) if batch_path.exists() else None}
 
     def import_directory(self,value,selection=None):
         from .remote import dataset_path,web_inventory,fetch
@@ -218,11 +231,13 @@ class Workspace:
             return {'normal_id':normal_id,'speedup_id':speedup_id,'stages':saved,'warning':'按实际来源帧映射，speedup需看片确认；没有按时间比例缩放。'}
 
     def _proposal(self,ep,current,server,client):
+        from .organization import registry
+        retired=registry(self)['retired']
         from .doubao import annotate
         from .core import project
         from .template import POLICY
         from .boundaries import refine_all
-        matches=[e for e in self.store.entries.values() if e['variant']=='normal' and e['source_recording_id'] and e['source_recording_id']==ep.entry.get('source_recording_id')]
+        matches=[e for e in self.store.entries.values() if e['id'] not in retired and e['variant']=='normal' and e['source_recording_id'] and e['source_recording_id']==ep.entry.get('source_recording_id')]
         if self.store.entries[ep.id]['variant']!='speedup' or not matches:
             return annotate(ep,self.store.output,api_key=server.doubao_key,model=server.doubao_model,client=client,max_requests=128,progress=server.progress)
         if len(matches)!=1:raise ValueError('存在多个同源normal，请先核对导入目录')
@@ -252,7 +267,8 @@ class Workspace:
         for id_ in ids:
             from .quarantine import read
             with self.lock:
-                if read(self)['entries'].get(id_,{}).get('excluded'):
+                from .organization import registry
+                if id_ in registry(self)['retired'] or id_ in self.organizing_ids or read(self)['entries'].get(id_,{}).get('excluded'):
                     results.append({'id':id_,'state':'excluded'});continue
                 self.queue[id_]={'state':'running'};self._checkpoint()
             try:
@@ -264,7 +280,7 @@ class Workspace:
                 dependency=self.normal_dependency(id_)
                 if dependency and not dependency['ready']:raise WaitingForNormal(dependency['reason'])
                 excluded=read(self)['entries']
-                docs={key:self.store.load(self.store.episode(key)) for key in self.store.entries if not excluded.get(key,{}).get('excluded')}
+                docs={key:self.store.load(self.store.episode(key)) for key in self.store.entries if not excluded.get(key,{}).get('excluded') and key not in registry(self)['retired']}
                 for key in docs:
                     saved=self.stage_path(key,'fine')
                     if saved.exists():

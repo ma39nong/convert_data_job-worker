@@ -60,11 +60,11 @@ def test_conflict_running_missing_pair_and_invalid_reason(tmp_path):
 def test_plan_preview_blocks_unreviewed_then_lists_reindex_without_source_writes(tmp_path):
     store,ws,ids=make_pair(tmp_path)
     try:
-        p=plan(ws,ids['normal']);assert not p['ready'] and len(p['blockers'])==2
+        p=plan(ws,ids['normal']);assert p['ready'] and len(p['review_warnings'])==2
         before={i:store.episode(i).identity() for i in ids.values()}
         change(ws,ids['normal'],True,'invalid demonstration',0)
-        p=plan(ws,ids['normal']);assert p['ready'] and p['operation']=='preview_only'
-        assert all(pack['rejected']==[{'id':ids[pack['variant']],'source_episode_index':0,'new_episode_index':0}] for pack in p['packages'])
+        p=plan(ws,ids['normal']);assert p['ready'] and p['operation']=='compact_pair'
+        assert all(len(pack['rejected'])==1 and pack['rejected'][0]['id']==ids[pack['variant']] and pack['rejected'][0]['new_episode_index']==0 for pack in p['packages'])
         assert all(store.episode(i).identity()==before[i] for i in ids.values())
         assert not (tmp_path/'out').exists()
     finally:store.lockfile.close()
@@ -82,5 +82,5 @@ def test_http_quarantine_is_authenticated_and_roundtrips(tmp_path):
         assert exc.value.code==403
         req.add_header('X-Subtasks-Token',server.token)
         assert json.load(urllib.request.urlopen(req))['excluded']
-        assert json.load(urllib.request.urlopen(base+'/api/workspace/organize-plan?id='+ids['normal']))['operation']=='preview_only'
+        assert json.load(urllib.request.urlopen(base+'/api/workspace/organize-plan?id='+ids['normal']))['operation']=='compact_pair'
     finally:server.shutdown();server.server_close();worker.join()

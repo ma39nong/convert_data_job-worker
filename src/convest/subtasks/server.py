@@ -35,6 +35,7 @@ class Server(ThreadingHTTPServer):
         self.jobs, self.jobs_lock = {}, threading.Lock()
         self.cached_episodes = {}
         self.export_lock = threading.Lock()
+        self.process_job = None
         super().__init__(address, Handler)
 
     def doubao_status(self):
@@ -100,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send({'app': 'subtasks-review', 'token': self.server.token,
                                   'labels': {k: {'coarse': v[0], 'text': v[1]} for k, v in LABELS.items()},
                                   'action_labels':list(ACTION_LABELS),'behavior_kinds':KINDS,'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
-                                  'quarantine_available':True,'export_profile':PROMPT_PROFILE,'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status()})
+                                  'active_process_job':({'id':self.server.process_job,'kind':'process'} if self.server.process_job and self.server.jobs.get(self.server.process_job,{}).get('state') in ('queued','running') else None),'quarantine_available':True,'export_profile':PROMPT_PROFILE,'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status()})
             if route.path == '/api/quality-review':
                 path=self.server.store.output/'quality-review'/'report.json'
                 return self.send(json.loads(path.read_text()) if path.exists() else {'state':'not_started','episodes':[]})
@@ -113,7 +114,9 @@ class Handler(BaseHTTPRequestHandler):
             if route.path == '/api/workspace':
                 return self.send(self.server.workspace.catalog())
             if route.path == '/api/workspace/episode':
-                ep=self.server.episode(q['id'][0]);doc=self.server.store.load(ep)
+                from .organization import registry
+                selected=q['id'][0];selected=registry(self.server.workspace)['retired'].get(selected,selected)
+                ep=self.server.episode(selected);doc=self.server.store.load(ep)
                 from .delivery import locations
                 stages=self.server.workspace.stages(ep,doc);catalog=self.server.workspace.catalog()
                 entry=next(e for e in catalog['episodes'] if e['id']==ep.id)
@@ -211,6 +214,11 @@ class Handler(BaseHTTPRequestHandler):
             if route == '/api/workspace/quarantine':
                 from .quarantine import change
                 return self.send(change(self.server.workspace,body['id'],body.get('excluded'),body.get('reason',''),body.get('revision')))
+            if route == '/api/workspace/organize':
+                from .organization import execute
+                if not self.server.export_lock.acquire(blocking=False):raise ValueError('导出或整理正在执行，请稍后')
+                try:return self.send({'result':execute(self.server.workspace,body['id'],body.get('plan_hash'))})
+                finally:self.server.export_lock.release()
             if route == '/api/workspace/export-direct':
                 from .delivery import publish,DEFAULT_TASK_PROMPT
                 if not self.server.export_lock.acquire(blocking=False):raise ValueError('已有导出正在执行，请稍后再试')
@@ -220,6 +228,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send({'result':result})
                 finally:self.server.export_lock.release()
             if route == '/api/workspace/export':
+                if self.server.workspace.organizing_ids:raise ValueError('整理期间请勿使用旧版导出，请刷新后再试')
                 from .delivery import publish,DEFAULT_TASK_PROMPT
                 ep=self.server.episode(body['id'])
                 return self.send(self.server.submit(lambda:publish(self.server.workspace,ep,body.get('stage'),target=body.get('target','dataset'),root=body.get('root'),kind=body.get('kind','json'),revision=body.get('revision'),prompt_mode=body.get('prompt_mode','goal'),task_prompt=body.get('task_prompt',DEFAULT_TASK_PROMPT)),lock_store=False))
@@ -237,7 +246,9 @@ class Handler(BaseHTTPRequestHandler):
                 ids=body.get('ids')
                 if not isinstance(ids,list) or not ids or len(ids)!=len(set(ids)) or any(i not in store.entries for i in ids):raise ValueError('请选择有效片段')
                 if not self.server.doubao_key:raise ValueError('豆包连接不可用，请检查启动凭据')
-                return self.send(self.server.submit(lambda:self.server.workspace.process(ids,self.server),lock_store=False))
+                job=self.server.submit(lambda:self.server.workspace.process(ids,self.server),lock_store=False)
+                self.server.process_job=job['job']
+                return self.send(job)
             if route == '/api/workspace/save':
                 ep=self.server.episode(body['id']);stage=body.get('stage')
                 if stage not in {'coarse','fine'}:raise ValueError('未知标注阶段')

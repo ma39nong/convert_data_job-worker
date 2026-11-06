@@ -175,7 +175,8 @@ def publish(ws,ep,stage,*,target='dataset',root=None,kind='json',revision=None,p
     if kind=='json':doc=english_document(doc)
     digest=hashlib.sha256(json.dumps(doc,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
     export_digest=hashlib.sha256(json.dumps([digest,PROMPT_PROFILE,prompt_mode,task_prompt],ensure_ascii=False).encode()).hexdigest() if kind=='training' else digest
-    name=f'episode_{ep.index:06d}_r{doc["revision"]}_{export_digest[:16]}'
+    name=f'episode_{ep.index:06d}_r{doc["revision"]}'
+    if kind=='training':name+='_'+export_digest[:16]
     # Custom roots retain source-package identity, avoiding collisions across batches.
     if target!='dataset':selected=str(Path(selected)/(Path(loc['source_dataset']).name+'_'+hashlib.sha256(loc['source_dataset'].encode()).hexdigest()[:8]))
     dest=str(Path(selected)/stage/(name+'.json' if kind=='json' else name))

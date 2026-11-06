@@ -24,6 +24,7 @@ def test_local_json_separate_paths_idempotent_and_no_source_mutation(tmp_path):
         before=ep.identity();fine=reviewed(ws,ep);coarse=reviewed(ws,ep,'coarse')
         f=publish(ws,ep,'fine',target='local',root=str(tmp_path/'chosen'),revision=fine['revision'])
         c=publish(ws,ep,'coarse',target='local',root=str(tmp_path/'chosen'),revision=coarse['revision'])
+        assert Path(f['path']).name=='episode_000000_r1.json'
         assert '/fine/' in f['path'] and '/coarse/' in c['path'] and f['path']!=c['path']
         assert json.loads(Path(f['path']).read_text())['stage']=='fine'
         assert publish(ws,ep,'fine',target='local',root=str(tmp_path/'chosen'),revision=fine['revision'])['path']==f['path']

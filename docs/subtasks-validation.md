@@ -269,3 +269,5 @@ verify_batch.py独立验证6目录/52条/26normal+26speedup，每条唯一对应
 全部subtasks回归101passed、4项新Python测试通过、四组Node回归通过；语法/compile/diff检查通过。18767隔离真实浏览器完成填写原因→剔除→已剔除筛选→本包预览→恢复→普通列表恢复的完整往返，normal/speedup同步，原数据身份不变。正式8766仅打开窗口预览，确认按钮因旧后端仍在批次处理中禁用，没有提交真实剔除。证据outputs/subtasks/quarantine-validation，正式界面截图quarantine-button.png和quarantine-dialog.png。
 
 2026-11-06独立导出：新增真实HTTP回归，在模型job占用executor时完成实际本机JSON发布，断言model仍running，成功/错误均释放导出锁。正式1102 normal ep2 coarse r1已通过新版UI发布到28，文件episode_000002_r1_54d60566062c8c27.json，远端回读英文且SHA256一致，后台模型job继续running。证据outputs/subtasks/independent-export-validation。部署短暂重启仅8766，29份原标注/层文件SHA未变，1103normal4/5/6按原队列继续，未新启动其他数据包。
+
+2026-11-06JSON简洁命名：8项delivery/independent-export回归通过，新增断言服务器/本机JSON叶文件名episode_000000_r1.json，原幂等/不同内容拒绝覆盖/粗细分离/源不变用例继续通过。真实UI已导出1102normal0粗层r1到28的coarse/episode_000000_r1.json，旧哈希文件不移动、不删除；校验码在收据保留。证据outputs/subtasks/simple-json-names。后端PID1764753，29份保存文件SHA不变，1103剩余4/5/6恢复原任务，job4ea2d40d70634af285d410816f007954。

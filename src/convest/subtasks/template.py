@@ -171,6 +171,7 @@ def left_motion_candidate(episode, center, *, lower_bound=None, upper_bound=None
 def annotate_template(episode,output,*,api_key=None,model=None,references=(),max_requests=128,client=None,progress=None,initial_proposal=None,coarse_only=False,**unused):
     from .doubao import Client,MODEL,make_montage,parse_segments,DESCRIPTIONS
     model=model or MODEL;root=Path(output)/'doubao'
+    if coarse_only:raise ValueError('独立粗概览路径已停用；请使用完整分析后汇总粗阶段')
     if type(max_requests) is not int or not 1<=max_requests<=256:raise ValueError('豆包请求上限必须为1–256')
     if episode.length/episode.fps>480:raise ValueError('七阶段整段分析目前支持8分钟以内录制')
     identity=episode.identity();episode.validate_media(Path(output),identity)
@@ -190,42 +191,6 @@ def annotate_template(episode,output,*,api_key=None,model=None,references=(),max
     else:
         manifest=make_montage(episode,video,0,episode.length,sample_fps=1)
         atomic_json(manifest_path,manifest)
-    if coarse_only:
-        from .workspace import validate_coarse
-        prompt=f"""Analyze only the large task phases of this entire three-camera tomato harvesting video.
-Return JSON only: {{"segments":[{{"end_seconds":3.0,"label":"pickup"}},...]}}.
-Use exactly seven consecutive phases: pickup harvest return adjust pickup harvest return.
-Pickup: right hand grasps and lifts the truss to the center. Harvest: the entire period of left-hand picking and placing fruit in the left basket while the right hand holds the truss. Do not split individual picks, missed grasps, retries, or left-hand trips to the basket.
-Return: right hand returns the truss or remaining stem to the right plate. Adjust: repositioning the truss on the right plate between the two harvesting rounds, only once.
-First segment starts at 0, each starts at the previous end. End times must strictly increase and the last end must be {episode.length/episode.fps:.6f} seconds.
-Estimate the real transitions from this target video, do not copy example durations. This is an approximate coarse draft for human review, not frame-level fine-action annotation."""
-        response,key,cached=client.call(video,prompt,manifest['sample_fps']);record(response,key,cached,'coarse_overview')
-        rows=text_json(response).get('segments',[]);end=0;segments=[]
-        for row in rows:
-            value=row.get('end_seconds')
-            if type(value) not in (int,float) or not math.isfinite(value):raise ValueError('粗阶段时间无效')
-            stop=round(value*episode.fps)
-            segments.append({'start_frame':end,'end_frame':stop,'label':row.get('label'),'reviewed':False});end=stop
-        segments=validate_coarse(segments,episode.length,episode.fps)
-        if [r['label'] for r in segments]!=['pickup','harvest','return','adjust','pickup','harvest','return']:raise ValueError('粗阶段不符合七阶段流程，请人工检查')
-        if episode.identity()!=identity:raise ValueError('粗阶段分析期间来源变化')
-        from .boundaries import refine_all
-        from .workspace import coarse_segments
-        # Proxy labels are private to the shared audit engine; never published as fine actions.
-        proxies=['grasp_truss','grasp_fruit','return_truss','rotate_stem','grasp_truss','grasp_fruit','return_stem']
-        proxy=[{**r,'label':label} for r,label in zip(segments,proxies)]
-        checked,evidence,cues=refine_all(episode,proxy,run/'coarse-boundaries-v2',client,record,records,
-                                       max_requests,progress,coarse_labels=[r['label'] for r in segments])
-        if episode.identity()!=identity:raise ValueError('粗阶段复核期间来源变化')
-        unresolved=[int(i) for i,v in evidence.items() if v['source_frame']['needs_review']]
-        result={'method':'doubao_coarse_source_frames_v2','source':identity,'coarse_segments':coarse_segments(checked),
-            'requests':records,'boundary_evidence':evidence,'left_motion_cues':cues,'unresolved_boundaries':unresolved,
-            'boundary_audit':{'scope':'every_coarse_boundary','source_fps':episode.fps,'dense_stride':1,
-                              'all_boundaries_checked':len(evidence)==6},
-            'warning':'六个粗阶段分界经过上下文定位与连续原帧复核；不生成细动作。结果仍需人工确认。'}
-        if unresolved:result['warning']+=' 证据不足需重点复核：'+ '、'.join(f"第{i+1}处分界（帧{result['coarse_segments'][i]['end_frame']}）" for i in unresolved)+'。'
-        atomic_json(run/'coarse-completed-v2.json',result)
-        return result
     from .actions import ACTION_LABELS
     prompt=RULES+'\nFine descriptions: '+json.dumps({k:v for k,v in DESCRIPTIONS.items() if k in ACTION_LABELS},ensure_ascii=False)+f'''
 Analyze the ENTIRE continuous target video, not independently restarted clips.
@@ -277,6 +242,7 @@ and last end equals {episode.length/episode.fps:.6f} seconds. This GLOBAL pass l
     atomic_json(run/'global-proposal.json',{'source':identity,'segments':result,'requests':records})
     from .boundaries import refine_all
     judge=Client(root,api_key or getattr(client,'key',None),model,style_examples=getattr(client,'style_examples',())) if isinstance(client,Client) else client
+    if isinstance(judge,Client):judge.retry_namespace=getattr(client,'retry_namespace',None)
     result,evidence,motion_cues=refine_all(episode,result,run/'all-boundaries',judge,record,records,max_requests,progress)
     validate_template(result)
     hints={};known_attached=[]

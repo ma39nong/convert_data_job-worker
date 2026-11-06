@@ -250,10 +250,10 @@ def test_coarse_processing_is_independent_and_can_expand_to_fine(tmp_path,monkey
     server=SimpleNamespace(doubao_key='test',doubao_model='test',progress=lambda *a:None)
     calls=[]
     def overview(*args,**kw):
-        assert kw['coarse_only'] is True;calls.append('coarse')
-        return {'coarse_segments':[dict(start_frame=0,end_frame=61,label='pickup',reviewed=False)],'warning':'概览，需审核'}
-    monkeypatch.setattr(template,'annotate_template',overview)
-    monkeypatch.setattr(behavior,'scan',lambda *a,**kw:pytest.fail('粗处理不能做逐帧行为扫描'))
+        assert not kw.get('coarse_only');assert kw.get('client') is not None;calls.append('coarse')
+        return {'method':'original_full','segments':[segment(0,61,'grasp_truss')],'warning':'完整分析'}
+    monkeypatch.setattr(doubao,'annotate',overview)
+    monkeypatch.setattr(behavior,'scan',lambda *a,**kw:{'events':[]})
     try:
         original=store.load(ep)
         assert ws.process([ep.id],server,mode='coarse')['episodes'][0]['state']=='ready'
@@ -300,5 +300,23 @@ def test_legacy_overview_is_not_counted_as_frame_audited_coarse(tmp_path):
             'warning':'old overview','provenance':{'method':'doubao_coarse_overview_v1'}})
         item=ws.catalog()['episodes'][0]
         assert not item['coarse_ready'] and not item['fine_ready']
-        assert ws.stages(ep)['coarse']['processing_warning']=='old overview'
+        assert '已停用' in ws.stages(ep)['coarse']['processing_warning']
+    finally:store.lockfile.close()
+
+
+def test_suspicious_short_return_is_recorded_as_error_not_published(tmp_path,monkeypatch):
+    from convest.subtasks import behavior
+    ep=dataset(tmp_path/'normal');store=Store([ep.root],tmp_path/'review');ws=Workspace(store)
+    rows=[segment(a,b,label) for a,b,label in [(0,10,'grasp_truss'),(10,25,'grasp_fruit'),
+          (25,27,'return_truss'),(27,35,'rotate_stem'),(35,40,'grasp_truss'),(40,55,'grasp_fruit'),(55,61,'return_stem')]]
+    monkeypatch.setattr(ws,'_proposal',lambda *a,**kw:{'method':'original_full','segments':rows})
+    monkeypatch.setattr(behavior,'scan',lambda *a,**kw:{'events':[]})
+    try:
+        original=store.load(ep)
+        result=ws.process([ep.id],SimpleNamespace(doubao_key='test',doubao_model='test'),mode='coarse')
+        assert result['episodes'][0]['state']=='failed'
+        assert '可疑放回' in result['episodes'][0]['error']
+        assert not (ws.root/'coarse-proposals'/(ep.id+'.json')).exists()
+        assert list((ws.root/'processing-errors'/ep.id).glob('*.json'))
+        assert store.load(ep)==original and not ws.stage_path(ep.id,'fine').exists()
     finally:store.lockfile.close()

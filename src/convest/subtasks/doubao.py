@@ -260,6 +260,7 @@ class Client:
     def _perform(self,identity,content,*,effort='medium',max_output_tokens=12000):
         if effort!='medium' or max_output_tokens!=12000:
             identity={**identity,'generation':{'effort':effort,'max_output_tokens':max_output_tokens}}
+        if getattr(self,'retry_namespace',None):identity={**identity,'retry_namespace':self.retry_namespace}
         key=hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()
         path=self.root/'responses'/f'{key}.json'
         if path.exists():

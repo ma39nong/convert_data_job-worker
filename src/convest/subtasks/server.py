@@ -32,21 +32,34 @@ class Server(ThreadingHTTPServer):
         self.doubao_key = doubao_key or os.environ.get('ARK_API_KEY', '')
         self.doubao_model = doubao_model
         self.pool = ThreadPoolExecutor(max_workers=1)
-        self.jobs, self.jobs_lock = {}, threading.Lock()
+        self.jobs, self.jobs_lock = {}, threading.RLock()
         self.cached_episodes = {}
         self.export_lock = threading.Lock()
         self.process_job = None
         super().__init__(address, Handler)
+        from .processing_queue import active
+        pending=active(self.workspace)
+        if pending and pending['state'] in {'queued','running'}:self.start_processing(resume=pending)
+
+    def start_processing(self,ids=None,mode='fine',resume=None):
+        from .processing_queue import create,run
+        with self.jobs_lock:
+            if any(j['state'] in ('running','queued') for j in self.jobs.values()):raise ValueError('已有任务正在处理')
+            batch=resume or create(self.workspace,ids,mode)
+            job=self.submit(lambda:run(self.workspace,self,batch['id']),lock_store=False)
+            self.process_job=job['job']
+            return {**job,'batch_id':batch['id'],'mode':batch['mode']}
 
     def doubao_status(self):
         return {'enabled': bool(self.doubao_key), 'configured': bool(self.doubao_key),
                 'model': self.doubao_model}
 
     def progress(self, done, total):
+        from .processing_queue import summary
         with self.jobs_lock:
             for job in self.jobs.values():
                 if job['state'] == 'running':
-                    job['progress'] = {'completed_chunks': done, 'total_chunks': total}
+                    job['progress'] = {'completed_chunks': done, 'total_chunks': total,'batch':summary(self.workspace)}
 
     def episode(self, id_):
         # Reload after edits so source changes cannot be hidden behind an in-memory table.
@@ -98,10 +111,11 @@ class Handler(BaseHTTPRequestHandler):
         route = urlsplit(self.path); q = parse_qs(route.query)
         try:
             if route.path == '/api/bootstrap':
+                from .processing_queue import summary
                 return self.send({'app': 'subtasks-review', 'token': self.server.token,
                                   'labels': {k: {'coarse': v[0], 'text': v[1]} for k, v in LABELS.items()},
                                   'action_labels':list(ACTION_LABELS),'behavior_kinds':KINDS,'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
-                                  'active_process_job':({'id':self.server.process_job,'kind':'process'} if self.server.process_job and self.server.jobs.get(self.server.process_job,{}).get('state') in ('queued','running') else None),'quarantine_available':True,'coarse_boundary_policy':'source_frames_v2','processing_modes':['coarse','fine'],'training_binding_profile':'derived-dataset-source-v1','export_profile':PROMPT_PROFILE,'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status()})
+                                  'active_process_job':({'id':self.server.process_job,'kind':'process'} if self.server.process_job and self.server.jobs.get(self.server.process_job,{}).get('state') in ('queued','running') else None),'quarantine_available':True,'processing_batch':summary(self.server.workspace),'coarse_boundary_policy':'full_analysis_v3','processing_modes':['coarse','fine'],'training_binding_profile':'derived-dataset-source-v1','export_profile':PROMPT_PROFILE,'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status()})
             if route.path == '/api/quality-review':
                 path=self.server.store.output/'quality-review'/'report.json'
                 return self.send(json.loads(path.read_text()) if path.exists() else {'state':'not_started','episodes':[]})
@@ -243,14 +257,13 @@ class Handler(BaseHTTPRequestHandler):
                 dataset_path(path)
                 return self.send(self.server.submit(lambda:self.server.workspace.import_directory(path,selection),lock_store=False))
             if route == '/api/workspace/process':
-                ids=body.get('ids')
-                if not isinstance(ids,list) or not ids or len(ids)!=len(set(ids)) or any(i not in store.entries for i in ids):raise ValueError('请选择有效片段')
-                if not self.server.doubao_key:raise ValueError('豆包连接不可用，请检查启动凭据')
+                from .processing_queue import remaining
                 mode=body.get('mode','fine')
                 if mode not in {'coarse','fine'}:raise ValueError('无效处理模式')
-                job=self.server.submit(lambda:self.server.workspace.process(ids,self.server,mode=mode),lock_store=False)
-                self.server.process_job=job['job']
-                return self.send(job)
+                ids=remaining(self.server.workspace,mode) if body.get('all_remaining') is True else body.get('ids')
+                if not isinstance(ids,list):raise ValueError('请选择有效片段')
+                if not self.server.doubao_key:raise ValueError('豆包连接不可用，请检查启动凭据')
+                return self.send(self.server.start_processing(ids,mode))
             if route == '/api/workspace/save':
                 ep=self.server.episode(body['id']);stage=body.get('stage')
                 if stage not in {'coarse','fine'}:raise ValueError('未知标注阶段')

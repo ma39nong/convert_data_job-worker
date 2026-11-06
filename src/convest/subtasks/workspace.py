@@ -85,6 +85,8 @@ class Workspace:
                     proposal=json.loads(proposal_path.read_text())
                     if proposal['source']==doc['source'] and proposal['base_annotation_revision']==doc['revision']:
                         value={**value,'segments':proposal['segments'],'processing_mode':'coarse','processing_warning':proposal['warning'],'boundary_audit':proposal.get('provenance',{}).get('boundary_audit'),'unresolved_boundaries':proposal.get('provenance',{}).get('unresolved_boundaries',[])}
+                        if proposal.get('provenance',{}).get('method') in {'doubao_coarse_overview_v1','doubao_coarse_source_frames_v2'}:
+                            value['processing_warning']='旧版粗处理草稿已停用，保留作对照；等待完整分析重做，请勿将它视为新结果。'
             out[stage]=value
         return out
 
@@ -152,7 +154,7 @@ class Workspace:
                 saved['fine'] |= bool(doc and doc['status']=='reviewed')
                 proposal_path=self.root/'coarse-proposals'/(entry['id']+'.json')
                 proposal=json.loads(proposal_path.read_text()) if proposal_path.exists() else None
-                rough_ready=bool(proposal and proposal.get('provenance',{}).get('method')!='doubao_coarse_overview_v1' and ((doc and proposal['source']==doc['source'] and proposal['base_annotation_revision']==doc['revision']) or (not doc and proposal['base_annotation_revision']==0 and proposal['source']['dataset']==entry['dataset'] and proposal['source']['episode_index']==entry['episode_index'])))
+                rough_ready=bool(proposal and proposal.get('provenance',{}).get('method') not in {'doubao_coarse_overview_v1','doubao_coarse_source_frames_v2'} and ((doc and proposal['source']==doc['source'] and proposal['base_annotation_revision']==doc['revision']) or (not doc and proposal['base_annotation_revision']==0 and proposal['source']['dataset']==entry['dataset'] and proposal['source']['episode_index']==entry['episode_index'])))
                 q=self.queue.get(entry['id'],{});status=q.get('state','ready' if ready else 'pending')
                 if status not in {'running','failed','interrupted'} and ready:status='ready'
                 dependency=None
@@ -267,9 +269,25 @@ class Workspace:
             'mapping_visual_disagreements':disagreements,'unresolved_boundaries':sorted(set(disagreements)|{int(i) for i,v in evidence.items() if v['source_frame']['needs_review']}),
             'warning':'按同源normal映射，speedup已另查连续原帧；分歧保留待核。'}
 
-    def process_coarse_episode(self,ep,current,server):
+    def model_client(self,ep,server,retry_namespace=None):
+        from .doubao import Client
+        from .style import transition_examples
+        from .quarantine import read
+        from .organization import registry
+        excluded=read(self)['entries']
+        docs={key:self.store.load(self.store.episode(key)) for key in self.store.entries if not excluded.get(key,{}).get('excluded') and key not in registry(self)['retired']}
+        for key in docs:
+            saved=self.stage_path(key,'fine')
+            if saved.exists():
+                fine=json.loads(saved.read_text())
+                if fine['source']!=docs[key]['source']:raise ValueError('人工样例来源变化')
+                docs[key]={**docs[key],'segments':fine['segments'],'status':'reviewed' if all(s['reviewed'] for s in fine['segments']) else 'draft'}
+        client=Client(self.store.output/'doubao',server.doubao_key,server.doubao_model,style_examples=transition_examples(docs,ep))
+        if retry_namespace:client.retry_namespace=retry_namespace
+        return client
+
+    def process_coarse_episode(self,ep,current,server,retry_namespace=None):
         """Generate an independent unsaved coarse proposal; never fabricate fine labels."""
-        from .template import annotate_template
         before=self.stages(ep,current)
         if before['coarse']['saved_at']:
             return 'preserved'
@@ -292,8 +310,37 @@ class Workspace:
             result={'coarse_segments':coarse_segments(mapped['segments']),'method':'source_frame_coarse_projection',
                     'warning':'按normal来源帧映射粗阶段，需人工复核；没有生成细阶段。'}
         else:
-            result=annotate_template(ep,self.store.output,api_key=server.doubao_key,model=server.doubao_model,
-                                     coarse_only=True,progress=server.progress)
+            client=self.model_client(ep,server,retry_namespace)
+            analysis=self._proposal(ep,current,server,client)
+            result={**analysis,'method':'coarse_from_full_analysis_v3',
+                    'analysis_method':analysis['method'],'coarse_segments':coarse_segments(analysis['segments']),
+                    'warning':'沿用完整细动作分析、人工参考及原帧边界复核后汇总粗阶段；结果仍需人工审核。'}
+            from .behavior import scan
+            try:
+                behavior=scan(ep,self.store.output,api_key=server.doubao_key,model=server.doubao_model)
+                result['behavior_review']=behavior
+            except Exception as exc:result['behavior_review_error']=str(exc)
+            # Fine actions are evidence, not a published fine-stage layer.
+            result['internal_fine_segments']=result.pop('segments')
+            fine_rows=result['internal_fine_segments']
+            cuts=[i for i in range(len(fine_rows)-1) if COARSE_FROM_FINE.get(fine_rows[i]['label'])!=COARSE_FROM_FINE.get(fine_rows[i+1]['label'])]
+            internal_evidence=result.pop('boundary_evidence',{})
+            result['internal_boundary_evidence']=internal_evidence
+            result['boundary_evidence']={str(i):internal_evidence[str(j)] for i,j in enumerate(cuts) if str(j) in internal_evidence}
+            unresolved=result.pop('unresolved_boundaries',[])
+            result['unresolved_fine_boundaries']=unresolved
+            result['unresolved_boundaries']=[i for i,j in enumerate(cuts) if j in unresolved]
+            result['analysis_boundary_audit']=result.get('boundary_audit')
+            result['boundary_audit']={'scope':'coarse_from_full_analysis','coarse_boundary_to_fine_boundary':cuts,
+                'coarse_boundaries':len(cuts),'all_boundaries_checked':bool((result.get('analysis_boundary_audit') or {}).get('all_boundaries_checked'))}
+            short=[r for r in result['coarse_segments'] if r['label']=='return' and r['end_frame']-r['start_frame']<ep.fps*.5]
+            if short:
+                error='完整分析后出现不足0.5秒的可疑放回阶段，需重查，未发布新粗结果'
+                atomic_json(self.root/'processing-errors'/ep.id/(str(time.time_ns())+'.json'),{'error':error,'result':result})
+                raise ValueError(error)
+            if analysis.get('unresolved_boundaries'):
+                result['warning']+=f" 内部分析有{len(analysis['unresolved_boundaries'])}个分界仍需复核。"
+
         with self.lock,self.store.lock:
             fresh=self.store.load(ep)
             if fresh['source']!=current['source'] or fresh['revision']!=current['revision']:raise ValueError('处理期间草稿变化，未覆盖')
@@ -304,10 +351,13 @@ class Workspace:
             proposal={'source':ep.identity(),'base_annotation_revision':current['revision'],
                       'segments':validate_coarse(result['coarse_segments'],ep.length,ep.fps),
                       'warning':result['warning'],'provenance':result,'created_at':time.time()}
-            atomic_json(self.root/'coarse-proposals'/(ep.id+'.json'),proposal)
+            proposal_path=self.root/'coarse-proposals'/(ep.id+'.json')
+            if proposal_path.exists():
+                atomic_json(self.root/'coarse-proposal-history'/ep.id/(str(time.time_ns())+'.json'),json.loads(proposal_path.read_text()))
+            atomic_json(proposal_path,proposal)
         return 'ready'
 
-    def process(self,ids,server,mode='fine'):
+    def process(self,ids,server,mode='fine',retry_namespace=None):
         if mode not in {'coarse','fine'}:raise ValueError('请选择粗阶段或完整细阶段处理')
         from .doubao import Client
         from .style import transition_examples
@@ -320,12 +370,12 @@ class Workspace:
                 from .organization import registry
                 if id_ in registry(self)['retired'] or id_ in self.organizing_ids or read(self)['entries'].get(id_,{}).get('excluded'):
                     results.append({'id':id_,'state':'excluded'});continue
-                self.queue[id_]={'state':'running'};self._checkpoint()
+                self.queue[id_]={'state':'running','mode':mode};self._checkpoint()
             try:
                 with self.lock,self.store.lock:
                     ep=self.store.episode(id_);current=self.store.load(ep)
                 if mode=='coarse':
-                    status=self.process_coarse_episode(ep,current,server)
+                    status=self.process_coarse_episode(ep,current,server,retry_namespace)
                     with self.lock:
                         self.queue[id_]={'state':'ready','mode':'coarse'};self._checkpoint()
                     results.append({'id':id_,'state':status,'mode':'coarse'});continue
@@ -335,15 +385,7 @@ class Workspace:
                         results.append({'id':id_,'state':'preserved'});continue
                 dependency=self.normal_dependency(id_)
                 if dependency and not dependency['ready']:raise WaitingForNormal(dependency['reason'])
-                excluded=read(self)['entries']
-                docs={key:self.store.load(self.store.episode(key)) for key in self.store.entries if not excluded.get(key,{}).get('excluded') and key not in registry(self)['retired']}
-                for key in docs:
-                    saved=self.stage_path(key,'fine')
-                    if saved.exists():
-                        fine=json.loads(saved.read_text())
-                        if fine['source']!=docs[key]['source']:raise ValueError('人工样例来源变化')
-                        docs[key]={**docs[key],'segments':fine['segments'],'status':'reviewed' if all(s['reviewed'] for s in fine['segments']) else 'draft'}
-                client=Client(self.store.output/'doubao',server.doubao_key,server.doubao_model,style_examples=transition_examples(docs,ep))
+                client=self.model_client(ep,server,retry_namespace)
                 result=self._proposal(ep,current,server,client)
                 from .behavior import scan,merge_candidates
                 events=current.get('review_events',[])

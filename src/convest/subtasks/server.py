@@ -34,6 +34,7 @@ class Server(ThreadingHTTPServer):
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.jobs, self.jobs_lock = {}, threading.Lock()
         self.cached_episodes = {}
+        self.export_lock = threading.Lock()
         super().__init__(address, Handler)
 
     def doubao_status(self):
@@ -210,6 +211,14 @@ class Handler(BaseHTTPRequestHandler):
             if route == '/api/workspace/quarantine':
                 from .quarantine import change
                 return self.send(change(self.server.workspace,body['id'],body.get('excluded'),body.get('reason',''),body.get('revision')))
+            if route == '/api/workspace/export-direct':
+                from .delivery import publish,DEFAULT_TASK_PROMPT
+                if not self.server.export_lock.acquire(blocking=False):raise ValueError('已有导出正在执行，请稍后再试')
+                try:
+                    ep=self.server.episode(body['id'])
+                    result=publish(self.server.workspace,ep,body.get('stage'),target=body.get('target','dataset'),root=body.get('root'),kind=body.get('kind','json'),revision=body.get('revision'),prompt_mode=body.get('prompt_mode','goal'),task_prompt=body.get('task_prompt',DEFAULT_TASK_PROMPT))
+                    return self.send({'result':result})
+                finally:self.server.export_lock.release()
             if route == '/api/workspace/export':
                 from .delivery import publish,DEFAULT_TASK_PROMPT
                 ep=self.server.episode(body['id'])

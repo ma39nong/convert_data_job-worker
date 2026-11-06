@@ -246,7 +246,9 @@ def install(ws,state):
                 atomic_json(ws.store.path(new),legacy)
                 rough=snap['stages']['coarse']
                 if rough.get('processing_mode')=='coarse' and not rough['saved_at']:
-                    atomic_json(ws.root/'coarse-proposals'/(new+'.json'),{'source':identity,
+                    original_proposal=ws.root/'coarse-proposals'/(old+'.json')
+                    original_proposal=json.loads(original_proposal.read_text()) if original_proposal.exists() else {}
+                    atomic_json(ws.root/'coarse-proposals'/(new+'.json'),{**original_proposal,'source':identity,
                         'base_annotation_revision':legacy['revision'],'segments':rough['segments'],
                         'warning':rough.get('processing_warning','粗阶段概览草稿，需人工复核'),
                         'created_at':time.time(),'reorganization':state['operation']})

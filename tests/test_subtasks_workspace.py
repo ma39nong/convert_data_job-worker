@@ -288,3 +288,17 @@ def test_coarse_processing_preserves_manual_layer_and_maps_speedup(tmp_path,monk
         assert ws.stages(speed)['fine']['segments'][0]['label']=='unknown'
         with pytest.raises(ValueError,match='粗阶段'):ws.process([normal.id],server,mode='invalid')
     finally:store.lockfile.close()
+
+
+def test_legacy_overview_is_not_counted_as_frame_audited_coarse(tmp_path):
+    from convest.subtasks.core import atomic_json
+    ep=dataset(tmp_path/'normal');store=Store([ep.root],tmp_path/'review');ws=Workspace(store)
+    try:
+        doc=store.load(ep)
+        atomic_json(ws.root/'coarse-proposals'/(ep.id+'.json'),{'source':doc['source'],
+            'base_annotation_revision':doc['revision'],'segments':[dict(start_frame=0,end_frame=ep.length,label='pickup',reviewed=False)],
+            'warning':'old overview','provenance':{'method':'doubao_coarse_overview_v1'}})
+        item=ws.catalog()['episodes'][0]
+        assert not item['coarse_ready'] and not item['fine_ready']
+        assert ws.stages(ep)['coarse']['processing_warning']=='old overview'
+    finally:store.lockfile.close()

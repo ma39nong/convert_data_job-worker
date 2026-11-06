@@ -209,8 +209,23 @@ Estimate the real transitions from this target video, do not copy example durati
         segments=validate_coarse(segments,episode.length,episode.fps)
         if [r['label'] for r in segments]!=['pickup','harvest','return','adjust','pickup','harvest','return']:raise ValueError('粗阶段不符合七阶段流程，请人工检查')
         if episode.identity()!=identity:raise ValueError('粗阶段分析期间来源变化')
-        return {'method':'doubao_coarse_overview_v1','source':identity,'coarse_segments':segments,'requests':records,
-            'warning':'仅整段概览生成粗阶段草稿；边界为估计，需人工复核；未生成细动作或逐帧边界证据。'}
+        from .boundaries import refine_all
+        from .workspace import coarse_segments
+        # Proxy labels are private to the shared audit engine; never published as fine actions.
+        proxies=['grasp_truss','grasp_fruit','return_truss','rotate_stem','grasp_truss','grasp_fruit','return_stem']
+        proxy=[{**r,'label':label} for r,label in zip(segments,proxies)]
+        checked,evidence,cues=refine_all(episode,proxy,run/'coarse-boundaries-v2',client,record,records,
+                                       max_requests,progress,coarse_labels=[r['label'] for r in segments])
+        if episode.identity()!=identity:raise ValueError('粗阶段复核期间来源变化')
+        unresolved=[int(i) for i,v in evidence.items() if v['source_frame']['needs_review']]
+        result={'method':'doubao_coarse_source_frames_v2','source':identity,'coarse_segments':coarse_segments(checked),
+            'requests':records,'boundary_evidence':evidence,'left_motion_cues':cues,'unresolved_boundaries':unresolved,
+            'boundary_audit':{'scope':'every_coarse_boundary','source_fps':episode.fps,'dense_stride':1,
+                              'all_boundaries_checked':len(evidence)==6},
+            'warning':'六个粗阶段分界经过上下文定位与连续原帧复核；不生成细动作。结果仍需人工确认。'}
+        if unresolved:result['warning']+=' 证据不足需重点复核：'+ '、'.join(f"第{i+1}处分界（帧{result['coarse_segments'][i]['end_frame']}）" for i in unresolved)+'。'
+        atomic_json(run/'coarse-completed-v2.json',result)
+        return result
     from .actions import ACTION_LABELS
     prompt=RULES+'\nFine descriptions: '+json.dumps({k:v for k,v in DESCRIPTIONS.items() if k in ACTION_LABELS},ensure_ascii=False)+f'''
 Analyze the ENTIRE continuous target video, not independently restarted clips.

@@ -84,7 +84,7 @@ class Workspace:
                 if proposal_path.exists():
                     proposal=json.loads(proposal_path.read_text())
                     if proposal['source']==doc['source'] and proposal['base_annotation_revision']==doc['revision']:
-                        value={**value,'segments':proposal['segments'],'processing_mode':'coarse','processing_warning':proposal['warning']}
+                        value={**value,'segments':proposal['segments'],'processing_mode':'coarse','processing_warning':proposal['warning'],'boundary_audit':proposal.get('provenance',{}).get('boundary_audit'),'unresolved_boundaries':proposal.get('provenance',{}).get('unresolved_boundaries',[])}
             out[stage]=value
         return out
 
@@ -152,7 +152,7 @@ class Workspace:
                 saved['fine'] |= bool(doc and doc['status']=='reviewed')
                 proposal_path=self.root/'coarse-proposals'/(entry['id']+'.json')
                 proposal=json.loads(proposal_path.read_text()) if proposal_path.exists() else None
-                rough_ready=bool(proposal and ((doc and proposal['source']==doc['source'] and proposal['base_annotation_revision']==doc['revision']) or (not doc and proposal['base_annotation_revision']==0 and proposal['source']['dataset']==entry['dataset'] and proposal['source']['episode_index']==entry['episode_index'])))
+                rough_ready=bool(proposal and proposal.get('provenance',{}).get('method')!='doubao_coarse_overview_v1' and ((doc and proposal['source']==doc['source'] and proposal['base_annotation_revision']==doc['revision']) or (not doc and proposal['base_annotation_revision']==0 and proposal['source']['dataset']==entry['dataset'] and proposal['source']['episode_index']==entry['episode_index'])))
                 q=self.queue.get(entry['id'],{});status=q.get('state','ready' if ready else 'pending')
                 if status not in {'running','failed','interrupted'} and ready:status='ready'
                 dependency=None

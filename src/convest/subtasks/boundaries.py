@@ -151,7 +151,7 @@ Return only {"boundaries":[{"id":0,"first_after_frame":123|null,"confidence":0.8
 '''
 
 
-def refine_all(episode,segments,run,client,record,records,max_requests=128,progress=None):
+def refine_all(episode,segments,run,client,record,records,max_requests=128,progress=None,*,coarse_labels=None):
     """Audit every boundary. No confidence-only acceptance, no subframe interpolation.
 
     Broad sampled context locates a candidate; acceptance requires consecutive
@@ -163,6 +163,14 @@ def refine_all(episode,segments,run,client,record,records,max_requests=128,progr
     ends=[s['end_frame'] for s in result[:-1]];evidence={};motion={}
     run=Path(run);run.mkdir(parents=True,exist_ok=True)
     prompt=boundary_prompt()
+    if coarse_labels is not None:
+        if list(coarse_labels)!=['pickup','harvest','return','adjust','pickup','harvest','return'] or len(result)!=7:
+            raise ValueError('粗阶段复核必须是七阶段六个边界')
+        prompt+='\nCOARSE PHASE AUDIT: before/after denote entire large phases, NOT individual fine actions.\nfirst_left_approach (pickup -> harvest): the first sustained LEFT arm preparation/approach toward fruit after the right hand brings the held truss to the center. Do not wait for left contact or successful grip. Inspect cam0 and both wrist views.\ncoarse_harvest_to_return: the RIGHT hand starts deliberately returning the entire truss or bare stem toward the right plate after the harvesting block; left-hand basket trips, missed picks or empty-hand returns are still harvest, not this boundary.\ncoarse_return_to_adjust: right-hand return/release has finished and purposeful finger repositioning of the truss on the right plate BEGINS. Do not use the middle of the adjustment.\ncoarse_adjust_to_pickup: adjustment has ended and the RIGHT hand begins the new grasp/pickup attempt. This is the start of grasping, not the later lift onset, since grasp and lift are one coarse pickup phase.\nFor every event, choose the first physically supported AFTER frame with an immediately preceding BEFORE witness in the dense pass. A high confidence or a sampled overview is not dense evidence. If unclear, abstain.\n'
+    def event_at(i):
+        if coarse_labels is None:return event_name(result[i]['label'],result[i+1]['label'])
+        return ['first_left_approach','coarse_harvest_to_return','coarse_return_to_adjust',
+                'coarse_adjust_to_pickup','first_left_approach','coarse_harvest_to_return'][i]
     def check(ids,stage,*,wide=False,dense=False):
         batch_size=1 if wide or dense else 2
         for offset in range(0,len(ids),batch_size):
@@ -174,8 +182,8 @@ def refine_all(episode,segments,run,client,record,records,max_requests=128,progr
                 if wide:radius=round(6*episode.fps)
                 lo=max(lower,center-radius);hi=min(upper,center+radius)
                 stride=1 if dense else max(1,round(episode.fps/5))
-                event=event_name(result[i]['label'],result[i+1]['label'])
-                if not dense and event in {'first_extraction_motion','grasp_truss -> lift_truss'}:
+                event=event_at(i)
+                if not dense and (coarse_labels is not None or event in {'first_extraction_motion','grasp_truss -> lift_truss'}):
                     # Start localization from the complete neighboring actions,
                     # not from a narrow window around a potentially late guess.
                     lo,hi=lower,upper
@@ -184,7 +192,7 @@ def refine_all(episode,segments,run,client,record,records,max_requests=128,progr
                 frames=sorted(set(range(lo,hi+1,stride))|{hi})
                 if dense or event not in {'first_extraction_motion','grasp_truss -> lift_truss'}:frames=sorted(set(frames)|{center})
                 task={'id':local,'event':event,
-                      'before':result[i]['label'],'after':result[i+1]['label'],'frames':frames}
+                      'before':('coarse_'+coarse_labels[i]) if coarse_labels is not None else result[i]['label'],'after':('coarse_'+coarse_labels[i+1]) if coarse_labels is not None else result[i+1]['label'],'frames':frames}
                 if i in motion:
                     task['left_motion_cue']=motion[i]
                     task['cue_meaning']='FIRST sustained LEFT arm movement after a stationary prefix. Preparation/approach starts here, not at first contact or later hand arrival. If visual interpretation conflicts, abstain.'
@@ -225,14 +233,14 @@ def refine_all(episode,segments,run,client,record,records,max_requests=128,progr
     hand_cues={}
     check(ids,'event_window')
     for i in ids:
-        if event_name(result[i]['label'],result[i+1]['label'])=='grasp_truss -> lift_truss':
+        if event_at(i)=='grasp_truss -> lift_truss':
             states=evidence[str(i)]['event_window'].get('states',[])
             lifts=[s['frame'] for s in states if s.get('right_motion') in {'lift_onset','lifting'}]
             if lifts:
                 cue=hand_settling_cue(episode,ends[i-1] if i else 0,min(lifts))
                 if cue and (ends[i-1] if i else 0)<cue['frame']<(ends[i+1] if i+1<len(ends) else episode.length):
                     hand_cues[i]=cue
-        if event_name(result[i]['label'],result[i+1]['label'])=='first_left_approach':
+        if event_at(i)=='first_left_approach':
             cue=left_motion_candidate(episode,ends[i],lower_bound=ends[i-1]+1 if i else 1,upper_bound=ends[i+1] if i+1<len(ends) else episode.length-1)
             if cue is not None and (ends[i-1] if i else 0)<cue<(ends[i+1] if i+1<len(ends) else episode.length):
                 motion[i]=cue;ends[i]=cue

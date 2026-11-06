@@ -932,7 +932,8 @@ def test_transition_style_excludes_target_and_same_recording(pair,tmp_path,monke
     assert style.transition_examples({normal.id:{**doc,'status':'draft'}},target)==[]
 
 
-def test_coarse_overview_uses_one_call_and_skips_local_fine_passes(pair,tmp_path,monkeypatch):
+@pytest.mark.parametrize('abstain',[False,True])
+def test_coarse_overview_refines_all_six_boundaries_and_skips_local_fine_passes(pair,tmp_path,monkeypatch,abstain):
     from convest.subtasks import template,doubao,harvest,boundaries
     normal,_=pair;calls=[]
     def montage(ep,path,*args,**kw):
@@ -940,14 +941,32 @@ def test_coarse_overview_uses_one_call_and_skips_local_fine_passes(pair,tmp_path
         return {'sample_fps':1,'sha256':sha(path)}
     monkeypatch.setattr(doubao,'make_montage',montage)
     monkeypatch.setattr(harvest,'propose_harvest',lambda *a,**kw:pytest.fail('粗处理不能推断细采摘循环'))
-    monkeypatch.setattr(boundaries,'refine_all',lambda *a,**kw:pytest.fail('粗处理不能进行细边界逐帧复查'))
+    monkeypatch.setattr(template,'images_at',lambda ep,indices,**kw:[{'frame':i,'data_url':'data:image/jpeg;base64,aW1hZ2U='} for i in indices])
     class Client:
         def call(self,*args):
             calls.append(1)
             labels=['pickup','harvest','return','adjust','pickup','harvest','return']
             rows=[{'end_seconds':(i+1)*.7 if i<6 else 6.1,'label':label} for i,label in enumerate(labels)]
             return {'output_text':json.dumps({'segments':rows})},'overview',False
+        def call_images(self,groups,prompt):
+            assert 'COARSE PHASE AUDIT' in prompt
+            rows=[]
+            for g in groups:
+                task=g['task'];assert task['before'].startswith('coarse_')
+                f=task['frames'][len(task['frames'])//2]
+                rows.append({'id':task['id'],'first_after_frame':None if abstain else f,'confidence':.99,
+                    'states':[] if abstain else [{'frame':i,'side':'before' if i<f else 'after'} for i in task['frames']]})
+            return {'output_text':json.dumps({'boundaries':rows})},'audit',False
     result=template.annotate_template(normal,tmp_path/'out',client=Client(),coarse_only=True)
     assert calls==[1]
+    assert len(result['boundary_evidence'])==6
+    assert result['boundary_audit']['all_boundaries_checked']
+    for evidence in result['boundary_evidence'].values():
+        assert evidence['source_frame']['consecutive_source_frames']
+        assert evidence['source_frame']['before_after_witness'] is (not abstain)
+        assert evidence['source_frame']['needs_review'] is abstain
+        if abstain:assert 'expanded_window' in evidence and 'source_retry' in evidence
+    assert result['unresolved_boundaries']==(list(range(6)) if abstain else [])
+    assert all(not r['reviewed'] for r in result['coarse_segments'])
     assert [r['label'] for r in result['coarse_segments']]==['pickup','harvest','return','adjust','pickup','harvest','return']
     assert result['coarse_segments'][-1]['end_frame']==normal.length and 'segments' not in result

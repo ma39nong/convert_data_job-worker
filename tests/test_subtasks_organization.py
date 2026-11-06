@@ -195,10 +195,11 @@ def test_compaction_preserves_unsaved_coarse_only_proposal(tmp_path,monkeypatch)
         ws.stage_path(old,'coarse').unlink()
         atomic_json(ws.root/'coarse-proposals'/(old+'.json'),{'source':doc['source'],
             'base_annotation_revision':doc['revision'],'segments':[{'start_frame':0,'end_frame':ep.length,'label':'harvest','reviewed':False}],
-            'warning':'coarse overview'})
+            'warning':'coarse overview','provenance':{'method':'doubao_coarse_source_frames_v2','boundary_audit':{'scope':'every_coarse_boundary'}}})
         result=org.execute(ws,old,plan(ws,old)['plan_hash'])
         new=result['selected_id'];layers=ws.stages(ws.store.episode(new))
         assert layers['coarse']['segments'][0]['label']=='harvest'
         assert layers['coarse']['saved_at'] is None and layers['coarse']['processing_mode']=='coarse'
+        assert layers['coarse']['boundary_audit']['scope']=='every_coarse_boundary'
         assert layers['fine']['segments'][0]['label']=='unknown'
     finally:ws.store.lockfile.close()

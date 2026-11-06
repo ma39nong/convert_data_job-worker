@@ -74,9 +74,9 @@ JSON本身不会让训练代码自动读取subtask。因此导出内容还可选
 
 原prompt“Pick up a tomato truss ... pick a cherry tomato ...”只描述一次单果摘放。整串任务的推荐总指令：
 
-> Hold and reposition the tomato truss with the right hand and pick all the cherry tomatoes one by one with the left hand and place them in the left basket until none remain then return the bare stem to the right plate
+> Harvest all tomatoes into the left basket and return stem to right plate
 
-训练副本默认选 **整串任务指令**：全部帧使用同一个总目标，粗/细标签和阶段序号独立保留。`meta/subtask_prompts.json`记录旧总prompt、新总prompt、阶段中英文及指令模式。不会改原包的task文本。normal与其speedup使用相同任务目标。
+训练副本默认选 **整串任务指令**：全部帧使用同一个总目标，粗/细标签和阶段序号独立保留。`meta/subtask_prompts.json`记录旧总prompt、新总prompt、阶段英文及指令模式。不会改原包的task文本。normal与其speedup使用相同任务目标。
 
 可另选 **阶段指令实验**：按当前段写英文任务文本，部署时需提供匹配阶段指令或配套调度/高层模型，不能以为给每帧换task_index就自动训练出阶段规划。官方OpenPI的prompt_from_task会把数据集task作为prompt；默认公开流程不能直接等同论文完整的高层预测训练。参考[官方配置](https://github.com/Physical-Intelligence/openpi/blob/main/src/openpi/training/config.py)、[官方README](https://github.com/Physical-Intelligence/openpi)、[论文](https://www.physicalintelligence.company/download/pi05.pdf)。
 
@@ -97,3 +97,13 @@ JSON本身不会让训练代码自动读取subtask。因此导出内容还可选
 “确认当前段无误”再次点击可取消确认；“确认整条无误”供完整看过当前层全部分段后使用，不会确认另一层或同源speedup。两者都可撤销，仍需点击对应保存按钮。
 
 保存normal本身不会自动映射或确认speedup。点击映射按钮会保存speedup映射草稿，并取消其中的人工确认；之后切到对应speedup看片核对、确认并手动保存相应粗/细层。
+
+## 双语界面与英文交付（2026-11-06）
+
+粗阶段选择为“编号 · 中文 · 英文”，数字固定1拿起、2摘取、3放回、4盘上调整；时间条显示对应动作编号，重复动作重复编号。细动作选项显示中文与英文，细时间条保留分段序号；悬停两层时间条可读双语。正常七段粗模板的最后放回单独使用bare stem英文，其他异常序列不猜测套用末段含义；`label`仍是原来的稳定英文ID，`segment_index`保留本条出现次序，供七阶段训练工具读取。
+
+本机审核稿仍保留中文与个人备注，已有保存和历史交付不重写。新下载/发布JSON和训练副本的stage_annotations使用英文text、英文task_prompt，不附带中文审核备注或模型解释；保留帧范围、label、reviewed、revision、来源身份/SHA、必要映射信息。来源路径和标识不翻译。训练副本的原任务来源仍留档。
+
+下方直接显示新整串总目标，原数据包任务文本折叠作来源记录。默认goal使用精简无标点英文，上述粗阶段英文按A/B方案同步（去标点后重新做256tokens检查）；细阶段英文仅保留作标注，不声称其长文本符合本轮粗阶段token预算。更改总目标/状态/分词器后需重新检查。此次不启动训练、不批量交付数据、不改变现有标注边界。
+
+若运行中的旧服务仍在豆包批量处理中，静态UI先更新；浏览器下载兼容转换为英文，服务器导出检查export_profile，未加载新版时明确阻止旧格式导出。一次性reload_when_idle.py等待模型批次自然完成后排空重启并保留HTTPtoken，deployment.json记录是否完成；不能把等待状态当作已部署完成。

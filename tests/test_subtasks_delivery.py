@@ -46,8 +46,8 @@ def test_training_copy_has_frame_tasks_intact_state_and_videos(tmp_path):
         info=json.loads((root/'meta/info.json').read_text());assert info['total_episodes']==1 and info['total_frames']==61 and info['total_tasks']==1
         tasks=[json.loads(s) for s in (root/'meta/tasks.jsonl').read_text().splitlines()];assert len(tasks)==1
         assert tasks[0]['task']==DEFAULT_TASK_PROMPT
-        prompt=json.loads((root/'meta/subtask_prompts.json').read_text());assert prompt['original_task_prompts']==['pick'] and prompt['stages'][0]['text_zh']
-        assert prompt['profile']=='tomato-goal-and-stages-en-v2' and prompt['prompt_mode']=='goal'
+        prompt=json.loads((root/'meta/subtask_prompts.json').read_text());assert prompt['original_task_prompts']==['pick'] and prompt['stages'][0]['task_en']
+        assert prompt['profile']=='tomato-coarse-ab-en-v3' and prompt['prompt_mode']=='goal'
         for camera,path in ep.cameras.items():assert (root/f'videos/chunk-000/{camera}/episode_000000.mp4').read_bytes()==path.read_bytes()
         assert ep.identity()==before
         again=publish(ws,ep,'fine',kind='training',target='local',root=str(tmp_path/'training'),revision=1);assert again['path']==str(root)

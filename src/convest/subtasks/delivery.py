@@ -19,22 +19,7 @@ import pyarrow.parquet as pq
 from .core import atomic_json
 from .remote import DATA_ROOT,dataset_path
 
-PROMPT_PROFILE='tomato-goal-and-stages-en-v2'
-DEFAULT_TASK_PROMPT='Hold and reposition the tomato truss with the right hand and pick all the cherry tomatoes one by one with the left hand and place them in the left basket until none remain then return the bare stem to the right plate'
-STAGE_PROMPTS={
-    'fine':{
-        'grasp_truss':'Grasp and secure the entire tomato truss with the right hand',
-        'lift_truss':'Lift the tomato truss with the right hand and move it to the center',
-        'grasp_fruit':'Approach and firmly grasp one cherry tomato with the left hand while holding the tomato truss steady with the right hand',
-        'pick_and_place':'Detach the grasped cherry tomato with the left hand and place it in the left basket while holding the tomato truss steady with the right hand',
-        'return_truss':'Place the tomato truss back on the right white plate with the right hand and release it',
-        'rotate_stem':'Adjust the tomato truss with the right hand',
-        'return_stem':'After all tomatoes have been picked place the remaining stem back on the right white plate with the right hand'},
-    'coarse':{
-        'pickup':'Grasp and lift the tomato truss with the right hand and move it to the center',
-        'harvest':'Pick cherry tomatoes with the left hand and place them in the left basket while holding the tomato truss steady with the right hand',
-        'return':'Place the tomato truss or remaining stem back on the right white plate with the right hand and release it',
-        'adjust':'Adjust the tomato truss with the right hand'}}
+from .vocabulary import DEFAULT_TASK_PROMPT, PROMPT_PROFILE, STAGE_PROMPTS, stage_prompt, english_document
 
 
 def original_tasks(ep):
@@ -135,7 +120,7 @@ def training_files(ep,doc,*,prompt_mode='goal',task_prompt=DEFAULT_TASK_PROMPT):
     if any(r['label']=='unknown' or not r.get('reviewed') for r in rows):raise ValueError('生成训练副本前，请完成人工确认：这一层全部分段且不含待标注')
     ends=np.asarray([r['end_frame'] for r in rows]);ids=np.searchsorted(ends,np.arange(ep.length),side='right')
     if prompt_mode not in {'goal','stage'} or not isinstance(task_prompt,str) or not task_prompt.strip() or len(task_prompt)>1000:raise ValueError('请选择有效任务prompt，最长1000字')
-    stage_prompts=[STAGE_PROMPTS[doc['stage']][r['label']] for r in rows]
+    stage_prompts=[stage_prompt(doc['stage'],rows,i) for i in range(len(rows))]
     prompts=[task_prompt.strip()]*len(rows) if prompt_mode=='goal' else stage_prompts
     texts=list(dict.fromkeys(prompts));lookup={text:i for i,text in enumerate(texts)}
     table=ep.table
@@ -158,8 +143,8 @@ def training_files(ep,doc,*,prompt_mode='goal',task_prompt=DEFAULT_TASK_PROMPT):
         if a.ndim!=2 or not np.isfinite(a).all():continue
         stats[key]={name:value.tolist() for name,value in [('min',a.min(0)),('max',a.max(0)),('mean',a.mean(0)),('std',a.std(0))]};stats[key]['count']=[len(a)]
     raw={'data/chunk-000/episode_000000.parquet':sink.getvalue().to_pybytes()}
-    documents={'meta/info.json':info,'meta/episodes.jsonl':entry,'meta/stats.json':stats,'stage_annotations.json':doc,
-        'meta/subtask_prompts.json':{'profile':PROMPT_PROFILE,'prompt_mode':prompt_mode,'task_prompt':task_prompt.strip(),'original_task_prompts':original_tasks(ep),'training_task_field':'task_index -> meta/tasks.jsonl','stage':doc['stage'],'stages':[{'label':r['label'],'text_zh':r['text'],'task_en':prompt} for r,prompt in zip(rows,stage_prompts)]}}
+    documents={'meta/info.json':info,'meta/episodes.jsonl':entry,'meta/stats.json':stats,'stage_annotations.json':english_document(doc),
+        'meta/subtask_prompts.json':{'profile':PROMPT_PROFILE,'prompt_mode':prompt_mode,'task_prompt':task_prompt.strip(),'original_task_prompts':original_tasks(ep),'training_task_field':'task_index -> meta/tasks.jsonl','stage':doc['stage'],'stages':[{'label':r['label'],'task_en':prompt} for r,prompt in zip(rows,stage_prompts)]}}
     for name,obj in documents.items():raw[name]=(json.dumps(obj,ensure_ascii=False,allow_nan=False)+'\n').encode()
     raw['meta/tasks.jsonl']=''.join(json.dumps({'task_index':i,'task':text},ensure_ascii=False)+'\n' for i,text in enumerate(texts)).encode()
     videos={str(p.relative_to(ep.root)):f'videos/chunk-000/{camera}/episode_000000.mp4' for camera,p in ep.cameras.items()}
@@ -184,6 +169,7 @@ def publish(ws,ep,stage,*,target='dataset',root=None,kind='json',revision=None,p
         p=p.resolve()
         if any(p==r or p.is_relative_to(r) for r in ws.store.roots):raise ValueError('本机导出不能覆盖输入数据目录')
         selected=str(p)
+    if kind=='json':doc=english_document(doc)
     digest=hashlib.sha256(json.dumps(doc,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
     export_digest=hashlib.sha256(json.dumps([digest,PROMPT_PROFILE,prompt_mode,task_prompt],ensure_ascii=False).encode()).hexdigest() if kind=='training' else digest
     name=f'episode_{ep.index:06d}_r{doc["revision"]}_{export_digest[:16]}'

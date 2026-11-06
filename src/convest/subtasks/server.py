@@ -16,6 +16,7 @@ from .core import LABELS, Store, project
 from .behavior import KINDS
 from .actions import ACTION_LABELS,simplify
 from .workspace import Workspace,COARSE_LABELS
+from .vocabulary import PROMPT_PROFILE, english_document
 from .learning import predict, train
 
 STATIC = Path(__file__).parent/'static'
@@ -98,7 +99,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send({'app': 'subtasks-review', 'token': self.server.token,
                                   'labels': {k: {'coarse': v[0], 'text': v[1]} for k, v in LABELS.items()},
                                   'action_labels':list(ACTION_LABELS),'behavior_kinds':KINDS,'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
-                                  'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status()})
+                                  'export_profile':PROMPT_PROFILE,'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status()})
             if route.path == '/api/quality-review':
                 path=self.server.store.output/'quality-review'/'report.json'
                 return self.send(json.loads(path.read_text()) if path.exists() else {'state':'not_started','episodes':[]})
@@ -125,7 +126,7 @@ class Handler(BaseHTTPRequestHandler):
                 if stage not in {'coarse','fine'}:raise ValueError('未知阶段')
                 doc=self.server.workspace.stages(ep)[stage]
                 if not doc['saved_at']:raise ValueError('请先保存这个阶段')
-                return self.send(doc,attachment=f'episode_{ep.index:06d}_{ep.id}_{stage}.json')
+                return self.send(english_document(doc),attachment=f'episode_{ep.index:06d}_{ep.id}_{stage}.json')
             if route.path == '/api/remote/packages':
                 from .remote import discover,DATA_ROOT
                 return self.send(discover(q.get('path',[DATA_ROOT])[0]))
@@ -149,7 +150,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.video(path)
             if route.path == '/api/download':
                 ep = self.server.episode(q['id'][0]); doc = self.server.store.load(ep)
-                return self.send(doc, attachment=f'episode_{ep.index:06d}_{ep.id}_subtasks.json')
+                return self.send(english_document({**doc,'stage':'fine'}), attachment=f'episode_{ep.index:06d}_{ep.id}_subtasks.json')
             files = {'/': ('index.html','text/html; charset=utf-8'),
                      '/app.js': ('app.js','text/javascript; charset=utf-8'), '/style.css': ('style.css','text/css; charset=utf-8')}
             if route.path in files:

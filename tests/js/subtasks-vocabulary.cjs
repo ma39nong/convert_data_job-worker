@@ -1,0 +1,15 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const s=fs.readFileSync('src/convest/subtasks/static/app.js','utf8');
+const labels=['pickup','harvest','return','adjust','pickup','harvest','return'];
+const context={state:{mode:'coarse',selected:{coarse:6},coarseLabels:{return:'放回番茄'},stages:{coarse:{segments:labels.map(label=>({label}))}}},copy:v=>JSON.parse(JSON.stringify(v))};vm.createContext(context);
+vm.runInContext(s.slice(s.indexOf('const vocabulary='),s.indexOf('function stageColor(')),context);
+assert.equal(context.englishLabel('return'),'Right hand returns the bare stem to the right plate');
+assert.equal(context.bilingualLabel('return'),'3. 放回番茄 · Right hand returns the bare stem to the right plate');
+const doc={stage:'coarse',note:'中文',projection:{policy:'nearest',review_events:[{note:'中文'}]},segments:labels.map((label,i)=>({label,start_frame:i,end_frame:i+1,text:'中文',reviewed:true}))};
+const out=context.englishDocument(doc);
+assert.equal(out.segments[2].text,'Right hand returns the truss to the right plate');
+assert.equal(out.segments[6].text,'Right hand returns the bare stem to the right plate');
+assert(!/[\u4e00-\u9fff]/.test(JSON.stringify(out)));
+assert.equal(doc.segments[0].text,'中文');
+assert.equal(out.segments[6].segment_index,7);
+console.log('subtasks bilingual UI: numbering English export final return and nonmutation passed');

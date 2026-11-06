@@ -1,3 +1,4 @@
+from convest.subtasks.vocabulary import english_document
 """Import/queue and independently versioned stage results preserve old review data."""
 import copy
 import json
@@ -107,7 +108,7 @@ def test_http_independent_stage_download_and_catalog(tmp_path):
         req=urllib.request.Request(base+'/api/workspace/save',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json','X-Subtasks-Token':server.token})
         saved=json.load(urllib.request.urlopen(req))['saved'];assert saved['stage']=='coarse' and saved['revision']==1
         with urllib.request.urlopen(base+'/api/workspace/download?id='+ep.id+'&stage=coarse') as r:
-            assert 'coarse.json' in r.headers['Content-Disposition'] and json.load(r)==saved
+            assert 'coarse.json' in r.headers['Content-Disposition'] and json.load(r)==english_document(saved)
         c=json.load(urllib.request.urlopen(base+'/api/workspace'));assert c['episodes'][0]['coarse_saved'] and not c['episodes'][0]['fine_saved']
         assert server.store.load(ep)['revision']==0
     finally:server.shutdown();server.server_close();thread.join()

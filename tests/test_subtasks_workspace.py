@@ -242,3 +242,49 @@ def test_missing_normal_waits_for_import_instead_of_independent_inference(tmp_pa
         assert result['episodes'][0]['state']=='waiting_normal'
         item=ws.catalog()['episodes'][0];assert item['depends_on'] is None and '导入' in item['error']
     finally:store.lockfile.close()
+
+
+def test_coarse_processing_is_independent_and_can_expand_to_fine(tmp_path,monkeypatch):
+    from convest.subtasks import template,doubao,behavior
+    ep=dataset(tmp_path/'normal');store=Store([ep.root],tmp_path/'review');ws=Workspace(store)
+    server=SimpleNamespace(doubao_key='test',doubao_model='test',progress=lambda *a:None)
+    calls=[]
+    def overview(*args,**kw):
+        assert kw['coarse_only'] is True;calls.append('coarse')
+        return {'coarse_segments':[dict(start_frame=0,end_frame=61,label='pickup',reviewed=False)],'warning':'概览，需审核'}
+    monkeypatch.setattr(template,'annotate_template',overview)
+    monkeypatch.setattr(behavior,'scan',lambda *a,**kw:pytest.fail('粗处理不能做逐帧行为扫描'))
+    try:
+        original=store.load(ep)
+        assert ws.process([ep.id],server,mode='coarse')['episodes'][0]['state']=='ready'
+        assert store.load(ep)==original
+        assert not ws.stage_path(ep.id,'fine').exists() and not ws.stage_path(ep.id,'coarse').exists()
+        layers=ws.stages(ep);assert layers['coarse']['segments'][0]['label']=='pickup'
+        assert layers['coarse']['saved_at'] is None and layers['fine']['segments'][0]['label']=='unknown'
+        item=ws.catalog()['episodes'][0];assert item['coarse_ready'] and not item['fine_ready']
+        monkeypatch.setattr(doubao,'annotate',lambda *a,**kw:{'method':'test','segments':[segment(0,61,'grasp_fruit')]})
+        monkeypatch.setattr(behavior,'scan',lambda *a,**kw:{'events':[]})
+        assert ws.process([ep.id],server,mode='fine')['episodes'][0]['state']=='ready'
+        assert ws.stages(ep)['coarse']['segments'][0]['label']=='harvest' # stale rough proposal must not warp new fine results
+        assert ws.catalog()['episodes'][0]['fine_ready']
+        assert calls==['coarse']
+    finally:store.lockfile.close()
+
+
+def test_coarse_processing_preserves_manual_layer_and_maps_speedup(tmp_path,monkeypatch):
+    from convest.subtasks import template
+    normal=dataset(tmp_path/'normal');speed=dataset(tmp_path/'speedup',speedup=True)
+    store=Store([normal.root,speed.root],tmp_path/'review');ws=Workspace(store)
+    server=SimpleNamespace(doubao_key='test',doubao_model='test',progress=lambda *a:None)
+    monkeypatch.setattr(template,'annotate_template',lambda *a,**kw:pytest.fail('映射/人工结果不应调用视觉模型'))
+    try:
+        coarse=ws.stages(normal)['coarse'];coarse['segments']=[dict(start_frame=0,end_frame=20,label='pickup',reviewed=True),dict(start_frame=20,end_frame=61,label='harvest',reviewed=True)]
+        ws.save_stage(normal,'coarse',coarse);before=ws.stage_path(normal.id,'coarse').read_bytes()
+        assert ws.process([normal.id],server,mode='coarse')['episodes'][0]['state']=='preserved'
+        assert before==ws.stage_path(normal.id,'coarse').read_bytes()
+        result=ws.process([speed.id],server,mode='coarse');assert result['episodes'][0]['state']=='ready'
+        rows=ws.stages(speed)['coarse']['segments'];assert [r['label'] for r in rows]==['pickup','harvest']
+        assert all(not r['reviewed'] for r in rows) and rows[-1]['end_frame']==speed.length
+        assert ws.stages(speed)['fine']['segments'][0]['label']=='unknown'
+        with pytest.raises(ValueError,match='粗阶段'):ws.process([normal.id],server,mode='invalid')
+    finally:store.lockfile.close()

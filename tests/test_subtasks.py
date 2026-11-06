@@ -930,3 +930,24 @@ def test_transition_style_excludes_target_and_same_recording(pair,tmp_path,monke
     content=style.content(examples)
     assert all(str(normal.root) not in c.get('text','') for c in content)
     assert style.transition_examples({normal.id:{**doc,'status':'draft'}},target)==[]
+
+
+def test_coarse_overview_uses_one_call_and_skips_local_fine_passes(pair,tmp_path,monkeypatch):
+    from convest.subtasks import template,doubao,harvest,boundaries
+    normal,_=pair;calls=[]
+    def montage(ep,path,*args,**kw):
+        path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'video')
+        return {'sample_fps':1,'sha256':sha(path)}
+    monkeypatch.setattr(doubao,'make_montage',montage)
+    monkeypatch.setattr(harvest,'propose_harvest',lambda *a,**kw:pytest.fail('粗处理不能推断细采摘循环'))
+    monkeypatch.setattr(boundaries,'refine_all',lambda *a,**kw:pytest.fail('粗处理不能进行细边界逐帧复查'))
+    class Client:
+        def call(self,*args):
+            calls.append(1)
+            labels=['pickup','harvest','return','adjust','pickup','harvest','return']
+            rows=[{'end_seconds':(i+1)*.7 if i<6 else 6.1,'label':label} for i,label in enumerate(labels)]
+            return {'output_text':json.dumps({'segments':rows})},'overview',False
+    result=template.annotate_template(normal,tmp_path/'out',client=Client(),coarse_only=True)
+    assert calls==[1]
+    assert [r['label'] for r in result['coarse_segments']]==['pickup','harvest','return','adjust','pickup','harvest','return']
+    assert result['coarse_segments'][-1]['end_frame']==normal.length and 'segments' not in result

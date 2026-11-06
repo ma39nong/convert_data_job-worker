@@ -168,7 +168,7 @@ def left_motion_candidate(episode, center, *, lower_bound=None, upper_bound=None
     return None
 
 
-def annotate_template(episode,output,*,api_key=None,model=None,references=(),max_requests=128,client=None,progress=None,initial_proposal=None,**unused):
+def annotate_template(episode,output,*,api_key=None,model=None,references=(),max_requests=128,client=None,progress=None,initial_proposal=None,coarse_only=False,**unused):
     from .doubao import Client,MODEL,make_montage,parse_segments,DESCRIPTIONS
     model=model or MODEL;root=Path(output)/'doubao'
     if type(max_requests) is not int or not 1<=max_requests<=256:raise ValueError('豆包请求上限必须为1–256')
@@ -190,6 +190,27 @@ def annotate_template(episode,output,*,api_key=None,model=None,references=(),max
     else:
         manifest=make_montage(episode,video,0,episode.length,sample_fps=1)
         atomic_json(manifest_path,manifest)
+    if coarse_only:
+        from .workspace import validate_coarse
+        prompt=f"""Analyze only the large task phases of this entire three-camera tomato harvesting video.
+Return JSON only: {{"segments":[{{"end_seconds":3.0,"label":"pickup"}},...]}}.
+Use exactly seven consecutive phases: pickup harvest return adjust pickup harvest return.
+Pickup: right hand grasps and lifts the truss to the center. Harvest: the entire period of left-hand picking and placing fruit in the left basket while the right hand holds the truss. Do not split individual picks, missed grasps, retries, or left-hand trips to the basket.
+Return: right hand returns the truss or remaining stem to the right plate. Adjust: repositioning the truss on the right plate between the two harvesting rounds, only once.
+First segment starts at 0, each starts at the previous end. End times must strictly increase and the last end must be {episode.length/episode.fps:.6f} seconds.
+Estimate the real transitions from this target video, do not copy example durations. This is an approximate coarse draft for human review, not frame-level fine-action annotation."""
+        response,key,cached=client.call(video,prompt,manifest['sample_fps']);record(response,key,cached,'coarse_overview')
+        rows=text_json(response).get('segments',[]);end=0;segments=[]
+        for row in rows:
+            value=row.get('end_seconds')
+            if type(value) not in (int,float) or not math.isfinite(value):raise ValueError('粗阶段时间无效')
+            stop=round(value*episode.fps)
+            segments.append({'start_frame':end,'end_frame':stop,'label':row.get('label'),'reviewed':False});end=stop
+        segments=validate_coarse(segments,episode.length,episode.fps)
+        if [r['label'] for r in segments]!=['pickup','harvest','return','adjust','pickup','harvest','return']:raise ValueError('粗阶段不符合七阶段流程，请人工检查')
+        if episode.identity()!=identity:raise ValueError('粗阶段分析期间来源变化')
+        return {'method':'doubao_coarse_overview_v1','source':identity,'coarse_segments':segments,'requests':records,
+            'warning':'仅整段概览生成粗阶段草稿；边界为估计，需人工复核；未生成细动作或逐帧边界证据。'}
     from .actions import ACTION_LABELS
     prompt=RULES+'\nFine descriptions: '+json.dumps({k:v for k,v in DESCRIPTIONS.items() if k in ACTION_LABELS},ensure_ascii=False)+f'''
 Analyze the ENTIRE continuous target video, not independently restarted clips.

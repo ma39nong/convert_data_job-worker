@@ -79,6 +79,12 @@ class Workspace:
                 if inherited:
                     for key in ('review_events','training_review','outcome'):
                         if key in doc:value[key]=doc[key]
+            if stage=='coarse' and not path.exists():
+                proposal_path=self.root/'coarse-proposals'/(ep.id+'.json')
+                if proposal_path.exists():
+                    proposal=json.loads(proposal_path.read_text())
+                    if proposal['source']==doc['source'] and proposal['base_annotation_revision']==doc['revision']:
+                        value={**value,'segments':proposal['segments'],'processing_mode':'coarse','processing_warning':proposal['warning']}
             out[stage]=value
         return out
 
@@ -144,6 +150,9 @@ class Workspace:
                 reviewed=all(s['reviewed'] for s in explicit_fine['segments']) if explicit_fine else bool(doc and doc['status']=='reviewed')
                 saved={s:self.stage_path(entry['id'],s).exists() for s in ('coarse','fine')}
                 saved['fine'] |= bool(doc and doc['status']=='reviewed')
+                proposal_path=self.root/'coarse-proposals'/(entry['id']+'.json')
+                proposal=json.loads(proposal_path.read_text()) if proposal_path.exists() else None
+                rough_ready=bool(proposal and ((doc and proposal['source']==doc['source'] and proposal['base_annotation_revision']==doc['revision']) or (not doc and proposal['base_annotation_revision']==0 and proposal['source']['dataset']==entry['dataset'] and proposal['source']['episode_index']==entry['episode_index'])))
                 q=self.queue.get(entry['id'],{});status=q.get('state','ready' if ready else 'pending')
                 if status not in {'running','failed','interrupted'} and ready:status='ready'
                 dependency=None
@@ -154,7 +163,7 @@ class Workspace:
                     elif status=='waiting_normal' or legacy_wait:status='pending'
                 item={**entry,'directory_id':group_id,'remote_directory':directory,'state':status,
                     'archived':override.get('archived',False),'original_episode_index':override.get('original_episode_index',entry['episode_index']),'coarse_saved':saved['coarse'],'fine_saved':saved['fine'],'error':q.get('error',''),
-                    'human_reviewed':reviewed,'depends_on':dependency['id'] if dependency else None}
+                    'fine_ready':ready or bool(explicit_fine and all(s['label']!='unknown' for s in explicit_fine['segments'])),'coarse_ready':ready or saved['coarse'] or rough_ready,'processing_mode':q.get('mode','fine'),'human_reviewed':reviewed,'depends_on':dependency['id'] if dependency else None}
                 if status=='waiting_normal':item['error']=dependency['reason']
                 elif legacy_wait:item['error']=''
                 for key in ('source_start_ns','source_end_ns'):
@@ -258,7 +267,48 @@ class Workspace:
             'mapping_visual_disagreements':disagreements,'unresolved_boundaries':sorted(set(disagreements)|{int(i) for i,v in evidence.items() if v['source_frame']['needs_review']}),
             'warning':'按同源normal映射，speedup已另查连续原帧；分歧保留待核。'}
 
-    def process(self,ids,server):
+    def process_coarse_episode(self,ep,current,server):
+        """Generate an independent unsaved coarse proposal; never fabricate fine labels."""
+        from .template import annotate_template
+        before=self.stages(ep,current)
+        if before['coarse']['saved_at']:
+            return 'preserved'
+        fine=before['fine']['segments']
+        normal_snapshot=None
+        if all(s['label']!='unknown' for s in fine):
+            result={'coarse_segments':coarse_segments(fine),'method':'derived_from_existing_fine',
+                    'warning':'粗阶段来自已有细阶段，没有重新调用模型。'}
+        elif self.store.entries[ep.id]['variant']=='speedup':
+            from .core import project
+            pair=next(e for e in self.catalog()['episodes'] if e['id']==ep.id)
+            if pair['pair_state']!='matched':raise WaitingForNormal('请先导入唯一对应normal并处理粗阶段')
+            normal=self.store.episode(pair['pair_ids'][0]);normal_doc=self.store.load(normal)
+            normal_stage=self.stages(normal,normal_doc)['coarse']
+            if any(r['label']=='unknown' for r in normal_stage['segments']):raise WaitingForNormal('请先处理对应normal粗阶段')
+            normal_snapshot=(normal.id,normal_stage)
+            labels={'pickup':'grasp_truss','harvest':'grasp_fruit','return':'return_truss','adjust':'rotate_stem'}
+            annotation={**normal_doc,'segments':[{**r,'label':labels[r['label']]} for r in normal_stage['segments']]}
+            mapped=project(normal,ep,annotation)
+            result={'coarse_segments':coarse_segments(mapped['segments']),'method':'source_frame_coarse_projection',
+                    'warning':'按normal来源帧映射粗阶段，需人工复核；没有生成细阶段。'}
+        else:
+            result=annotate_template(ep,self.store.output,api_key=server.doubao_key,model=server.doubao_model,
+                                     coarse_only=True,progress=server.progress)
+        with self.lock,self.store.lock:
+            fresh=self.store.load(ep)
+            if fresh['source']!=current['source'] or fresh['revision']!=current['revision']:raise ValueError('处理期间草稿变化，未覆盖')
+            if self.stage_path(ep.id,'coarse').exists():return 'preserved'
+            if normal_snapshot:
+                normal=self.store.episode(normal_snapshot[0])
+                if self.stages(normal)['coarse']!=normal_snapshot[1]:raise ValueError('normal粗阶段在映射期间变化')
+            proposal={'source':ep.identity(),'base_annotation_revision':current['revision'],
+                      'segments':validate_coarse(result['coarse_segments'],ep.length,ep.fps),
+                      'warning':result['warning'],'provenance':result,'created_at':time.time()}
+            atomic_json(self.root/'coarse-proposals'/(ep.id+'.json'),proposal)
+        return 'ready'
+
+    def process(self,ids,server,mode='fine'):
+        if mode not in {'coarse','fine'}:raise ValueError('请选择粗阶段或完整细阶段处理')
         from .doubao import Client
         from .style import transition_examples
         if not server.doubao_key:raise ValueError('豆包连接不可用，请检查启动凭据')
@@ -274,6 +324,12 @@ class Workspace:
             try:
                 with self.lock,self.store.lock:
                     ep=self.store.episode(id_);current=self.store.load(ep)
+                if mode=='coarse':
+                    status=self.process_coarse_episode(ep,current,server)
+                    with self.lock:
+                        self.queue[id_]={'state':'ready','mode':'coarse'};self._checkpoint()
+                    results.append({'id':id_,'state':status,'mode':'coarse'});continue
+                with self.lock,self.store.lock:
                     if self.stage_path(id_,'fine').exists() or current['status']=='reviewed':
                         self.queue[id_]={'state':'ready'};self._checkpoint()
                         results.append({'id':id_,'state':'preserved'});continue

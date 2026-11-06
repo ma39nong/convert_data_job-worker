@@ -244,6 +244,12 @@ def install(ws,state):
                 legacy=copy.deepcopy(snap['annotation']);legacy['source']=identity
                 legacy['provenance']={**legacy.get('provenance',{}),'reorganization':{'old_id':old,'source':snap['annotation']['source'],'operation':state['operation']}}
                 atomic_json(ws.store.path(new),legacy)
+                rough=snap['stages']['coarse']
+                if rough.get('processing_mode')=='coarse' and not rough['saved_at']:
+                    atomic_json(ws.root/'coarse-proposals'/(new+'.json'),{'source':identity,
+                        'base_annotation_revision':legacy['revision'],'segments':rough['segments'],
+                        'warning':rough.get('processing_warning','粗阶段概览草稿，需人工复核'),
+                        'created_at':time.time(),'reorganization':state['operation']})
                 for stage,doc in snap['stages'].items():
                     if not doc['saved_at']:continue
                     updated=copy.deepcopy(doc);updated['source']=identity

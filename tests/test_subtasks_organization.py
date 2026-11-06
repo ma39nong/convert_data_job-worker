@@ -186,3 +186,19 @@ def test_second_compaction_appends_to_existing_c_and_flattens_old_links(tmp_path
             c=physical(next(p for p in preview['packages'] if p['variant']==variant)['c_target'])
             assert json.loads((c/'meta/info.json').read_text())['total_episodes']==2
     finally:store.lockfile.close()
+
+
+def test_compaction_preserves_unsaved_coarse_only_proposal(tmp_path,monkeypatch):
+    store,ws,ids,sources,physical=setup_pair(tmp_path,monkeypatch)
+    try:
+        old=ids['normal',2];ep=ws.store.episode(old);doc=ws.store.load(ep)
+        ws.stage_path(old,'coarse').unlink()
+        atomic_json(ws.root/'coarse-proposals'/(old+'.json'),{'source':doc['source'],
+            'base_annotation_revision':doc['revision'],'segments':[{'start_frame':0,'end_frame':ep.length,'label':'harvest','reviewed':False}],
+            'warning':'coarse overview'})
+        result=org.execute(ws,old,plan(ws,old)['plan_hash'])
+        new=result['selected_id'];layers=ws.stages(ws.store.episode(new))
+        assert layers['coarse']['segments'][0]['label']=='harvest'
+        assert layers['coarse']['saved_at'] is None and layers['coarse']['processing_mode']=='coarse'
+        assert layers['fine']['segments'][0]['label']=='unknown'
+    finally:ws.store.lockfile.close()

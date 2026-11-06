@@ -1,0 +1,13 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('src/convest/subtasks/static/app.js','utf8');
+const c={state:{variant:'normal',directory:null,processMode:'coarse'}};vm.createContext(c);
+for(const name of ['inVariant','canProcess'])vm.runInContext(source.split('\n').find(l=>l.startsWith('function '+name+'(')),c);
+const e={variant:'normal',state:'pending',coarse_ready:false,fine_ready:false};
+assert(c.canProcess(e));assert(!c.canProcess({...e,excluded:true}));assert(!c.canProcess({...e,variant:'speedup'}));
+const rough={...e,state:'ready',coarse_ready:true};assert(!c.canProcess(rough));
+c.state.processMode='fine';assert(c.canProcess(rough));assert(!c.canProcess({...rough,fine_ready:true}));
+assert(!c.canProcess({...rough,fine_saved:true}));
+c.state.stages={fine:{segments:[{start_frame:0,end_frame:60,label:'unknown'}]},coarse:{segments:[]}};
+vm.runInContext(source.match(/function syncFine\(\)\{[\s\S]*?\n\}/)[0],c);
+const before=JSON.stringify(c.state.stages);c.syncFine();assert.equal(JSON.stringify(c.state.stages),before);
+console.log('processing modes: coarse-to-fine continuation, version scope, preservation, and unknown fine nonmutation passed');

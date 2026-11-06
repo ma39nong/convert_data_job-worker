@@ -101,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send({'app': 'subtasks-review', 'token': self.server.token,
                                   'labels': {k: {'coarse': v[0], 'text': v[1]} for k, v in LABELS.items()},
                                   'action_labels':list(ACTION_LABELS),'behavior_kinds':KINDS,'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
-                                  'active_process_job':({'id':self.server.process_job,'kind':'process'} if self.server.process_job and self.server.jobs.get(self.server.process_job,{}).get('state') in ('queued','running') else None),'quarantine_available':True,'training_binding_profile':'derived-dataset-source-v1','export_profile':PROMPT_PROFILE,'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status()})
+                                  'active_process_job':({'id':self.server.process_job,'kind':'process'} if self.server.process_job and self.server.jobs.get(self.server.process_job,{}).get('state') in ('queued','running') else None),'quarantine_available':True,'processing_modes':['coarse','fine'],'training_binding_profile':'derived-dataset-source-v1','export_profile':PROMPT_PROFILE,'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status()})
             if route.path == '/api/quality-review':
                 path=self.server.store.output/'quality-review'/'report.json'
                 return self.send(json.loads(path.read_text()) if path.exists() else {'state':'not_started','episodes':[]})
@@ -246,7 +246,9 @@ class Handler(BaseHTTPRequestHandler):
                 ids=body.get('ids')
                 if not isinstance(ids,list) or not ids or len(ids)!=len(set(ids)) or any(i not in store.entries for i in ids):raise ValueError('请选择有效片段')
                 if not self.server.doubao_key:raise ValueError('豆包连接不可用，请检查启动凭据')
-                job=self.server.submit(lambda:self.server.workspace.process(ids,self.server),lock_store=False)
+                mode=body.get('mode','fine')
+                if mode not in {'coarse','fine'}:raise ValueError('无效处理模式')
+                job=self.server.submit(lambda:self.server.workspace.process(ids,self.server,mode=mode),lock_store=False)
                 self.server.process_job=job['job']
                 return self.send(job)
             if route == '/api/workspace/save':

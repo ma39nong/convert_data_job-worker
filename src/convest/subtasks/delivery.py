@@ -1,6 +1,6 @@
 """Explicit per-stage JSON publication and single-episode training copies.
 
-Never rewrites source Parquet, tasks, media or existing published results.
+Never rewrites source Parquet, tasks or media. JSON exports update a fixed output file.
 """
 import base64
 import copy
@@ -52,13 +52,15 @@ def publish_file(path,data):
  path.parent.mkdir(parents=True,exist_ok=True)
  if not path.parent.resolve().is_relative_to(base):raise ValueError('Unsafe output symlink')
  if path.exists():
-  if path.read_bytes()!=data:raise ValueError('Output already exists with different content')
-  return
+  if path.read_bytes()==data:return
+  old=json.loads(path.read_bytes());new=json.loads(data)
+  if old.get('stage')!=new.get('stage') or any(old.get('source',{}).get(k)!=new.get('source',{}).get(k) for k in ('episode_index','source_recording_id')):raise ValueError('Existing output belongs to another source')
  fd,name=tempfile.mkstemp(prefix='.subtask-',dir=path.parent)
  try:
   with os.fdopen(fd,'wb') as f:f.write(data);f.flush();os.fsync(f.fileno())
-  os.link(name,path)
- finally:os.unlink(name)
+  os.replace(name,path)
+ finally:
+  if os.path.exists(name):os.unlink(name)
 if body['kind']=='json':
  data=canonical(body['document']);publish_file(dest,data)
  result={'path':str(dest),'sha256':hashlib.sha256(data).hexdigest(),'kind':'json'}
@@ -175,8 +177,8 @@ def publish(ws,ep,stage,*,target='dataset',root=None,kind='json',revision=None,p
     if kind=='json':doc=english_document(doc)
     digest=hashlib.sha256(json.dumps(doc,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
     export_digest=hashlib.sha256(json.dumps([digest,PROMPT_PROFILE,prompt_mode,task_prompt],ensure_ascii=False).encode()).hexdigest() if kind=='training' else digest
-    name=f'episode_{ep.index:06d}_r{doc["revision"]}'
-    if kind=='training':name+='_'+export_digest[:16]
+    name=f'episode_{ep.index:06d}'
+    if kind=='training':name+=f'_r{doc["revision"]}_'+export_digest[:16]
     # Custom roots retain source-package identity, avoiding collisions across batches.
     if target!='dataset':selected=str(Path(selected)/(Path(loc['source_dataset']).name+'_'+hashlib.sha256(loc['source_dataset'].encode()).hexdigest()[:8]))
     dest=str(Path(selected)/stage/(name+'.json' if kind=='json' else name))

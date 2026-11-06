@@ -271,3 +271,5 @@ verify_batch.py独立验证6目录/52条/26normal+26speedup，每条唯一对应
 2026-11-06独立导出：新增真实HTTP回归，在模型job占用executor时完成实际本机JSON发布，断言model仍running，成功/错误均释放导出锁。正式1102 normal ep2 coarse r1已通过新版UI发布到28，文件episode_000002_r1_54d60566062c8c27.json，远端回读英文且SHA256一致，后台模型job继续running。证据outputs/subtasks/independent-export-validation。部署短暂重启仅8766，29份原标注/层文件SHA未变，1103normal4/5/6按原队列继续，未新启动其他数据包。
 
 2026-11-06JSON简洁命名：8项delivery/independent-export回归通过，新增断言服务器/本机JSON叶文件名episode_000000_r1.json，原幂等/不同内容拒绝覆盖/粗细分离/源不变用例继续通过。真实UI已导出1102normal0粗层r1到28的coarse/episode_000000_r1.json，旧哈希文件不移动、不删除；校验码在收据保留。证据outputs/subtasks/simple-json-names。后端PID1764753，29份保存文件SHA不变，1103剩余4/5/6恢复原任务，job4ea2d40d70634af285d410816f007954。
+
+2026-11-06固定JSON覆盖策略：9项delivery/独立导出回归通过，覆盖不同保存版本仍同一路径且内容更新、源数据不变。真实28迁移5个固定英文JSON，验证替代文件SHA后删除7份已识别旧版本/哈希JSON；未操作其他文件。outputs/subtasks/fixed-json-names包含完整旧清单、新收据、删除清单和验证，UI重复导出normal0 coarse证实仍episode_000000.json。PID1782538，29份工作文件SHA不变，剩余模型任务恢复。

@@ -24,7 +24,7 @@ def test_local_json_separate_paths_idempotent_and_no_source_mutation(tmp_path):
         before=ep.identity();fine=reviewed(ws,ep);coarse=reviewed(ws,ep,'coarse')
         f=publish(ws,ep,'fine',target='local',root=str(tmp_path/'chosen'),revision=fine['revision'])
         c=publish(ws,ep,'coarse',target='local',root=str(tmp_path/'chosen'),revision=coarse['revision'])
-        assert Path(f['path']).name=='episode_000000_r1.json'
+        assert Path(f['path']).name=='episode_000000.json'
         assert '/fine/' in f['path'] and '/coarse/' in c['path'] and f['path']!=c['path']
         assert json.loads(Path(f['path']).read_text())['stage']=='fine'
         assert publish(ws,ep,'fine',target='local',root=str(tmp_path/'chosen'),revision=fine['revision'])['path']==f['path']
@@ -123,4 +123,19 @@ def test_stage_prompt_experiment_is_explicit_and_preserves_original_goal(tmp_pat
         prompts=json.loads(base64.b64decode(files['meta/subtask_prompts.json']))
         assert prompts['task_prompt']==DEFAULT_TASK_PROMPT and prompts['original_task_prompts']==['pick']
         assert prompts['prompt_mode']=='stage'
+    finally:store.lockfile.close()
+
+
+def test_json_reexport_updates_fixed_filename_without_touching_source(tmp_path):
+    ep=dataset(tmp_path/'source');store=Store([ep.root],tmp_path/'review');ws=Workspace(store)
+    try:
+        before=ep.identity();first=reviewed(ws,ep)
+        a=publish(ws,ep,'fine',target='local',root=str(tmp_path/'out'),revision=first['revision'])
+        first['segments'][0]['label']='lift_truss'
+        second=ws.save_stage(ep,'fine',first)
+        b=publish(ws,ep,'fine',target='local',root=str(tmp_path/'out'),revision=second['revision'])
+        assert a['path']==b['path'] and a['sha256']!=b['sha256']
+        assert json.loads(Path(b['path']).read_text())['revision']==2
+        assert len(list(Path(b['path']).parent.glob('episode_*.json')))==1
+        assert ep.identity()==before
     finally:store.lockfile.close()

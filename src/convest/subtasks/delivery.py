@@ -5,6 +5,7 @@ Never rewrites source Parquet, tasks or media. JSON exports update a fixed outpu
 import base64
 import copy
 import hashlib
+import inspect
 import json
 from pathlib import Path
 import shlex
@@ -16,6 +17,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from . import binding
 from .core import atomic_json
 from .remote import DATA_ROOT,dataset_path
 
@@ -29,7 +31,7 @@ def original_tasks(ep):
 
 
 # Same standalone writer is exercised locally in tests and remotely on alias 28.
-WRITER=r'''
+WRITER=inspect.getsource(binding)+r'''
 import base64,hashlib,json,os,pathlib,shutil,subprocess,sys,tempfile
 body=json.load(sys.stdin);base=pathlib.Path(sys.argv[1]).resolve(strict=True)
 source=pathlib.Path(body['source']).resolve(strict=True);dest=pathlib.Path(body['destination']).resolve()
@@ -71,6 +73,7 @@ else:
   if receipt['export_digest']!=body['export_digest']:raise ValueError('Existing training copy differs')
   for rel,digest in receipt['files'].items():
    if digest_file(dest/rel)!=digest:raise ValueError('Training copy changed')
+  verify_annotation(dest,json.loads((dest/'stage_annotations.json').read_text()))
   result={'path':str(dest),'kind':'training','sha256':body['export_digest']}
  else:
   dest.parent.mkdir(parents=True,exist_ok=True)
@@ -94,8 +97,12 @@ else:
    (stage/'meta/stats.json').write_bytes(canonical(stats))
    (stage/'meta/episodes_stats.jsonl').write_bytes(canonical({'episode_index':0,'stats':stats})+b'\n')
    if (source/'meta/modality.json').is_file():shutil.copy2(source/'meta/modality.json',stage/'meta/modality.json')
+   annotation=json.loads((stage/'stage_annotations.json').read_text())
+   annotation=bind_annotation(stage,dest,0,annotation,'provenance/source_stage_annotations.json')
+   (stage/'stage_annotations.json').write_bytes(canonical(annotation))
+   verify_annotation(stage,annotation)
    hashes={str(p.relative_to(stage)):digest_file(p) for p in stage.rglob('*') if p.is_file()}
-   (stage/'subtask_export.json').write_bytes(canonical({'export_digest':body['export_digest'],'source':str(source),'source_episode_index':body['source_episode'],'stage':body['stage'],'files':hashes}))
+   (stage/'subtask_export.json').write_bytes(canonical({'export_digest':body['export_digest'],'binding_profile':BINDING_PROFILE,'source':str(source),'source_episode_index':body['source_episode'],'stage':body['stage'],'files':hashes}))
    if dest.exists():raise ValueError('Destination appeared during export')
    stage.rename(dest)
   finally:
@@ -176,7 +183,7 @@ def publish(ws,ep,stage,*,target='dataset',root=None,kind='json',revision=None,p
         selected=str(p)
     if kind=='json':doc=english_document(doc)
     digest=hashlib.sha256(json.dumps(doc,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
-    export_digest=hashlib.sha256(json.dumps([digest,PROMPT_PROFILE,prompt_mode,task_prompt],ensure_ascii=False).encode()).hexdigest() if kind=='training' else digest
+    export_digest=hashlib.sha256(json.dumps([digest,PROMPT_PROFILE,binding.BINDING_PROFILE,prompt_mode,task_prompt],ensure_ascii=False).encode()).hexdigest() if kind=='training' else digest
     name=f'episode_{ep.index:06d}'
     if kind=='training':name+=f'_r{doc["revision"]}_'+export_digest[:16]
     # Custom roots retain source-package identity, avoiding collisions across batches.

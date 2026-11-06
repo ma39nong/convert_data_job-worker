@@ -131,3 +131,5 @@ JSON本身不会让训练代码自动读取subtask。因此导出内容还可选
 2026-11-06 已实际整理 Sharpa A 1102：normal/speedup 原0→0、原2→1，原1分别进C包0；原路径保留。事务20261106-173214-9f12baac。全量源备份、新包SHA、物理列/视频不变、审核状态与3对来源投影核验通过。证据 outputs/subtasks/organization-validation/final-verification.json。108项Python测试及4组JS回归通过。其他批次未整理。
 
 2026-11-06 目录按版本分开展示：默认normal标注，独立speedup映射结果视图；目录卡、全部目录统计、片段筛选和处理范围均限当前版本。对应版本入口会切换视图；原映射/审核/导出语义保留，不自动覆盖已保存的speedup。
+
+派生训练副本的有效标签在全部数据/元信息写完后绑定最终副本，source.episode_index 与新编号一致，source.sha256 覆盖副本的三项元数据、该条Parquet及全部视频（存在processing映射时亦覆盖）。provenance/source_stage_annotations.json 保存上游标签快照，source_migration保留上游来源与快照SHA。发布前及重复复用时检查标签来源，不能只检查subtask_export.json。新binding profile加入训练副本导出指纹，避免复用旧格式副本；普通JSON导出保持原包绑定。

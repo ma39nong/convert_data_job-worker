@@ -6,6 +6,7 @@ import numpy as np
 import pyarrow.parquet as pq
 import pytest
 
+from convest.subtasks.binding import verify_annotation
 from convest.subtasks.core import Store,segment,values
 from convest.subtasks.delivery import publish,DEFAULT_TASK_PROMPT
 from convest.subtasks.workspace import Workspace
@@ -50,6 +51,14 @@ def test_training_copy_has_frame_tasks_intact_state_and_videos(tmp_path):
         prompt=json.loads((root/'meta/subtask_prompts.json').read_text());assert prompt['original_task_prompts']==['pick'] and prompt['stages'][0]['task_en']
         assert prompt['profile']=='tomato-coarse-ab-en-v3' and prompt['prompt_mode']=='goal'
         for camera,path in ep.cameras.items():assert (root/f'videos/chunk-000/{camera}/episode_000000.mp4').read_bytes()==path.read_bytes()
+        active=json.loads((root/'stage_annotations.json').read_text())
+        verify_annotation(root,active)
+        assert active['source']['dataset']==str(root)
+        assert active['source']['episode_index']==0
+        assert active['source']['sha256']!=before['sha256']
+        snapshot=json.loads((root/active['source_migration']['upstream_annotation']).read_text())
+        assert snapshot['source']==before
+        assert snapshot['segments']==active['segments']
         assert ep.identity()==before
         again=publish(ws,ep,'fine',kind='training',target='local',root=str(tmp_path/'training'),revision=1);assert again['path']==str(root)
         (root/'meta/tasks.jsonl').write_text('tampered')
@@ -138,4 +147,19 @@ def test_json_reexport_updates_fixed_filename_without_touching_source(tmp_path):
         assert json.loads(Path(b['path']).read_text())['revision']==2
         assert len(list(Path(b['path']).parent.glob('episode_*.json')))==1
         assert ep.identity()==before
+    finally:store.lockfile.close()
+
+
+def test_reuse_checks_annotation_binding_even_when_receipt_is_consistent(tmp_path):
+    from convest.subtasks.core import sha
+    ep=dataset(tmp_path/'source');store=Store([ep.root],tmp_path/'review');ws=Workspace(store)
+    try:
+        reviewed(ws,ep)
+        result=publish(ws,ep,'fine',kind='training',target='local',root=str(tmp_path/'training'),revision=1)
+        root=Path(result['path']);path=root/'stage_annotations.json'
+        doc=json.loads(path.read_text());doc['source']=ep.identity();path.write_text(json.dumps(doc))
+        receipt_path=root/'subtask_export.json';receipt=json.loads(receipt_path.read_text())
+        receipt['files']['stage_annotations.json']=sha(path);receipt_path.write_text(json.dumps(receipt))
+        with pytest.raises(ValueError,match='Annotation source hash mismatch'):
+            publish(ws,ep,'fine',kind='training',target='local',root=str(tmp_path/'training'),revision=1)
     finally:store.lockfile.close()

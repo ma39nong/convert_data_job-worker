@@ -1,0 +1,217 @@
+"""Directory import, sequential processing and independent coarse/fine saves.
+
+Saved stage documents never rewrite source data or historical annotation heads.
+They are the review workspace's explicit, versioned user results.
+"""
+import hashlib
+import json
+from pathlib import Path
+import threading
+import time
+
+from .core import atomic_json, validate_segments
+
+COARSE_LABELS={'unknown':'待标注','pickup':'拿起番茄','harvest':'摘取番茄','return':'放回番茄','adjust':'调整番茄'}
+COARSE_FROM_FINE={'grasp_truss':'pickup','lift_truss':'pickup','grasp_fruit':'harvest','pick_and_place':'harvest',
+    'return_truss':'return','return_stem':'return','rotate_stem':'adjust'}
+
+
+def coarse_segments(segments):
+    result=[]
+    for s in segments:
+        label=COARSE_FROM_FINE.get(s['label'],'unknown')
+        if result and result[-1]['label']==label:
+            result[-1]['end_frame']=s['end_frame'];result[-1]['reviewed'] &= s.get('reviewed',False)
+        else:result.append({'start_frame':s['start_frame'],'end_frame':s['end_frame'],'label':label,'reviewed':s.get('reviewed',False)})
+    return result
+
+
+def validate_coarse(rows,length,fps):
+    if not isinstance(rows,list) or not rows or len(rows)>length:raise ValueError('粗阶段必须覆盖整个片段')
+    out=[];end=0
+    for s in rows:
+        a,b,label=s.get('start_frame'),s.get('end_frame'),s.get('label');reviewed=s.get('reviewed',False)
+        if type(a) is not int or type(b) is not int or a!=end or not a<b<=length:raise ValueError('粗阶段须连续、无重叠、无空段')
+        if label not in COARSE_LABELS or type(reviewed) is not bool or (label=='unknown' and reviewed):raise ValueError('粗阶段标签或确认状态无效')
+        out.append({'start_frame':a,'end_frame':b,'start_seconds':a/fps,'end_seconds':b/fps,'label':label,'text':COARSE_LABELS[label],'reviewed':reviewed});end=b
+    if end!=length:raise ValueError('粗阶段须覆盖片段结尾')
+    return out
+
+
+class Workspace:
+    def __init__(self,store):
+        self.store=store;self.root=store.output/'workspace';self.lock=threading.RLock()
+        self.cache_root=store.output.parent/(store.output.name+'-imports')
+        if self.cache_root.is_dir() and self.cache_root not in store.roots:
+            store.roots.append(self.cache_root.resolve());store.scan()
+        self.root.mkdir(exist_ok=True);self.queue_path=self.root/'queue.json'
+        self.queue=json.loads(self.queue_path.read_text()) if self.queue_path.exists() else {}
+        for item in self.queue.values():
+            if item['state']=='running':item.update(state='interrupted',error='上次处理中断，可重新开始')
+        self._checkpoint()
+
+    def _checkpoint(self):atomic_json(self.queue_path,self.queue)
+
+    def stage_path(self,id_,stage):
+        if id_ not in self.store.entries or stage not in {'coarse','fine'}:raise ValueError('未知片段或标注阶段')
+        return self.root/'stages'/id_/f'{stage}.json'
+
+    def stages(self,ep,doc=None):
+        doc=doc or self.store.load(ep);out={}
+        for stage in ('coarse','fine'):
+            path=self.stage_path(ep.id,stage)
+            if path.exists():
+                value=json.loads(path.read_text())
+                if value['source']!=doc['source']:raise ValueError('保存阶段的来源已变化，不能复用旧标注')
+            else:
+                inherited=stage=='fine' and doc['status']=='reviewed'
+                value={'schema_version':2,'stage':stage,'revision':0,'source':doc['source'],
+                    'saved_at':self.store.path(ep.id).stat().st_mtime if inherited else None,'note':'',
+                    'segments':coarse_segments(doc['segments']) if stage=='coarse' else validate_segments(doc['segments'],ep.length,ep.fps),
+                    'base_annotation_revision':doc['revision'],'inherited':inherited}
+                if inherited:
+                    for key in ('review_events','training_review','outcome'):
+                        if key in doc:value[key]=doc[key]
+            out[stage]=value
+        return out
+
+    def save_stage(self,ep,stage,body):
+        with self.lock,self.store.lock:
+            doc=self.store.load(ep);current=self.stages(ep,doc)[stage]
+            if type(body.get('revision')) is not int or body['revision']!=current['revision']:raise ValueError('这一阶段已在其他窗口更新，请重新载入')
+            if body.get('source')!=doc['source']:raise ValueError('标注来源不一致')
+            if body.get('base_annotation_revision')!=current['base_annotation_revision']:raise ValueError('草稿已更新，请重新载入后保存')
+            note=body.get('note','')
+            if not isinstance(note,str) or len(note)>10000:raise ValueError('备注最长10000字')
+            if stage=='fine':
+                from .actions import ACTION_LABELS
+                rows=validate_segments(body.get('segments'),ep.length,ep.fps)
+                if any(s['label'] not in ACTION_LABELS for s in rows):raise ValueError('仅保存主要细动作')
+            else:rows=validate_coarse(body.get('segments'),ep.length,ep.fps)
+            saved={**current,'revision':current['revision']+1,'segments':rows,'note':note,'saved_at':time.time(),'inherited':False}
+            if stage=='fine':
+                for key in ('review_events','training_review','outcome'):
+                    if key in doc:saved[key]=doc[key]
+            atomic_json(self.root/'history'/ep.id/stage/f"{saved['revision']:06d}.json",saved)
+            atomic_json(self.stage_path(ep.id,stage),saved)
+            return saved
+
+    def catalog(self):
+        with self.lock,self.store.lock:
+            groups={};episodes=[]
+            for entry in self.store.entries.values():
+                receipt=Path(entry['dataset'])/'cache-source.json'
+                remote=json.loads(receipt.read_text()) if receipt.exists() else {}
+                directory=remote.get('manifest',{}).get('dataset',entry['dataset']);host=remote.get('host','local')
+                group_id=hashlib.sha256((host+':'+directory).encode()).hexdigest()[:16]
+                doc_path=self.store.path(entry['id']);doc=json.loads(doc_path.read_text()) if doc_path.exists() else None
+                ready=bool(doc and all(s['label']!='unknown' for s in doc['segments']))
+                fine_path=self.stage_path(entry['id'],'fine')
+                explicit_fine=json.loads(fine_path.read_text()) if fine_path.exists() else None
+                reviewed=all(s['reviewed'] for s in explicit_fine['segments']) if explicit_fine else bool(doc and doc['status']=='reviewed')
+                saved={s:self.stage_path(entry['id'],s).exists() for s in ('coarse','fine')}
+                saved['fine'] |= bool(doc and doc['status']=='reviewed')
+                q=self.queue.get(entry['id'],{});status=q.get('state','ready' if ready else 'pending')
+                if status not in {'running','failed','interrupted'} and ready:status='ready'
+                item={**entry,'directory_id':group_id,'remote_directory':directory,'state':status,
+                    'coarse_saved':saved['coarse'],'fine_saved':saved['fine'],'error':q.get('error',''),
+                    'human_reviewed':reviewed}
+                episodes.append(item)
+                group=groups.setdefault(group_id,{'id':group_id,'path':directory,'host':host,'total':0,'ready':0,'pending':0,'running':0,'failed':0,'coarse_saved':0,'fine_saved':0})
+                group['total']+=1
+                if status in {'ready','running','failed'}:group[status]+=1
+                else:group['pending']+=1
+                for s in saved:group[s+'_saved']+=int(saved[s])
+            return {'directories':list(groups.values()),'episodes':episodes}
+
+    def import_directory(self,value,selection=None):
+        from .remote import dataset_path,web_inventory,fetch
+        path=dataset_path(value);inventory=web_inventory(path);canonical=dataset_path(inventory['dataset'])
+        available=[e['episode_index'] for e in inventory['episodes']]
+        selected=available if selection is None else selection
+        if not isinstance(selected,list) or not selected or any(type(i) is not int or i not in available for i in selected):raise ValueError('请选择目录中实际存在的片段')
+        selected=sorted(set(selected));known={(e['remote_directory'],e['episode_index']) for e in self.catalog()['episodes']}
+        missing=[i for i in selected if (canonical,i) not in known]
+        if missing:
+            digest=hashlib.sha256(json.dumps([canonical,missing]).encode()).hexdigest()[:24]
+            destination=self.cache_root/digest
+            fetch('28',canonical,missing,destination)
+            with self.store.lock:
+                if self.cache_root.resolve() not in self.store.roots:self.store.roots.append(self.cache_root.resolve())
+                self.store.scan()
+        matches=[e for e in self.catalog()['episodes'] if e['remote_directory']==canonical and e['episode_index'] in selected]
+        if len({e['episode_index'] for e in matches})!=len(selected):raise ValueError('缓存片段未完整注册')
+        return {'directory':canonical,'imported':len(missing),'reused':len(selected)-len(missing),'episodes':len(matches)}
+
+    def _proposal(self,ep,current,server,client):
+        from .doubao import annotate
+        from .core import project
+        from .template import POLICY
+        from .boundaries import refine_all
+        matches=[e for e in self.store.entries.values() if e['variant']=='normal' and e['source_recording_id'] and e['source_recording_id']==ep.entry.get('source_recording_id')]
+        if self.store.entries[ep.id]['variant']!='speedup' or not matches:
+            return annotate(ep,self.store.output,api_key=server.doubao_key,model=server.doubao_model,client=client,max_requests=128,progress=server.progress)
+        if len(matches)!=1:raise ValueError('存在多个同源normal，请先核对导入目录')
+        normal=self.store.episode(matches[0]['id']);normal_doc=self.store.load(normal)
+        fine_path=self.stage_path(normal.id,'fine');fine=json.loads(fine_path.read_text()) if fine_path.exists() else None
+        if fine:
+            if fine['source']!=normal_doc['source']:raise ValueError('normal保存阶段来源变化')
+            normal_doc={**normal_doc,'segments':fine['segments'],'outcome':fine.get('outcome',normal_doc['outcome'])}
+        if any(s['label']=='unknown' for s in normal_doc['segments']):raise ValueError('请先处理同源normal，再处理speedup')
+        mapped=project(normal,ep,normal_doc);records=[]
+        def record(response,key,cached,stage):records.append({'key':key,'cached':cached,'stage':stage})
+        checked,evidence,_=refine_all(ep,mapped['segments'],self.root/'processing'/ep.id,client,record,records,128,server.progress)
+        disagreements=[i for i,(a,b) in enumerate(zip(mapped['segments'][:-1],checked[:-1])) if a['end_frame']!=b['end_frame']]
+        projection={k:v for k,v in mapped.items() if k not in {'source','segments'}}
+        projection.update(normal_id=normal.id,normal_workspace_revision=fine['revision'] if fine else None)
+        return {'method':'doubao_template_source_frames_v1','policy':POLICY,'segments':mapped['segments'],
+            'projection':projection,'independent_visual_segments':checked,'boundary_evidence':evidence,'requests':records,
+            'mapping_visual_disagreements':disagreements,'unresolved_boundaries':sorted(set(disagreements)|{int(i) for i,v in evidence.items() if v['source_frame']['needs_review']}),
+            'warning':'按同源normal映射，speedup已另查连续原帧；分歧保留待核。'}
+
+    def process(self,ids,server):
+        from .doubao import Client
+        from .style import transition_examples
+        if not server.doubao_key:raise ValueError('豆包连接不可用，请检查启动凭据')
+        results=[]
+        ids=sorted(ids,key=lambda id_:self.store.entries[id_]['variant']=='speedup')
+        for id_ in ids:
+            with self.lock:self.queue[id_]={'state':'running'};self._checkpoint()
+            try:
+                with self.lock,self.store.lock:
+                    ep=self.store.episode(id_);current=self.store.load(ep)
+                    if self.stage_path(id_,'fine').exists() or current['status']=='reviewed':
+                        self.queue[id_]={'state':'ready'};self._checkpoint()
+                        results.append({'id':id_,'state':'preserved'});continue
+                docs={key:self.store.load(self.store.episode(key)) for key in self.store.entries}
+                for key in docs:
+                    saved=self.stage_path(key,'fine')
+                    if saved.exists():
+                        fine=json.loads(saved.read_text())
+                        if fine['source']!=docs[key]['source']:raise ValueError('人工样例来源变化')
+                        docs[key]={**docs[key],'segments':fine['segments'],'status':'reviewed' if all(s['reviewed'] for s in fine['segments']) else 'draft'}
+                client=Client(self.store.output/'doubao',server.doubao_key,server.doubao_model,style_examples=transition_examples(docs,ep))
+                result=self._proposal(ep,current,server,client)
+                from .behavior import scan,merge_candidates
+                events=current.get('review_events',[])
+                try:
+                    behavior=scan(ep,self.store.output,api_key=server.doubao_key,model=server.doubao_model)
+                    events=merge_candidates(events,behavior['events'],ep.length)
+                    result['behavior_review']={k:v for k,v in behavior.items() if k not in {'events','source'}}
+                except Exception as exc:
+                    result['behavior_review_error']='异常候选尚未检查完成：'+str(exc)
+
+                with self.lock,self.store.lock:
+                    if self.stage_path(id_,'fine').exists():raise ValueError('已保存人工细阶段，未覆盖新修改')
+                    projection=result.get('projection')
+                    if projection:
+                        source=self.store.episode(projection['normal_id']);fresh=self.store.load(source)
+                        p=self.stage_path(source.id,'fine');stage=json.loads(p.read_text()) if p.exists() else None
+                        if fresh['revision']!=projection['normal_revision'] or (stage['revision'] if stage else None)!=projection['normal_workspace_revision']:
+                            raise ValueError('normal标注在处理期间变化，未保存旧映射')
+                    self.store.save(ep,{**current,'segments':result['segments'],'review_events':events},origin=result['method'],provenance={k:v for k,v in result.items() if k!='segments'})
+                    self.queue[id_]={'state':'ready'};self._checkpoint()
+            except Exception as exc:
+                with self.lock:self.queue[id_]={'state':'failed','error':str(exc)};self._checkpoint()
+            results.append({'id':id_,**self.queue[id_]})
+        return {'episodes':results}

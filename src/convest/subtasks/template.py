@@ -10,7 +10,7 @@ import numpy as np
 
 from .core import LABELS, atomic_json, sha, validate_segments
 
-COARSE = ['拿起番茄','摘取番茄','放回番茄','旋转番茄杆','拿起番茄','摘取番茄','放回番茄']
+COARSE = ['拿起番茄','摘取番茄','放回番茄','调整番茄','拿起番茄','摘取番茄','放回番茄']
 POLICY = 'tomato_lift_motion_first_extraction_v8'
 RULES = '''The user requires the SAME global coarse workflow as reviewed episode 000000:
 pick up truss -> harvest individual fruits -> put truss back -> rotate stem ONCE

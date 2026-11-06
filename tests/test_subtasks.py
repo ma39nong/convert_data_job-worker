@@ -347,32 +347,25 @@ def test_jev_client_caches_and_keeps_key_out_of_audit(tmp_path,monkeypatch,injec
     assert all(b'not-a-real-secret-for-test' not in p.read_bytes() for p in tmp_path.rglob('*') if p.is_file())
 
 
-def test_jev_model_connection_keeps_secret_private(pair,tmp_path,monkeypatch):
-    from convest.subtasks import model_config
+def test_review_ui_has_only_doubao_and_no_jev_web_configuration(pair,tmp_path,monkeypatch):
     normal,_=pair
     monkeypatch.setenv('SUBTASKS_HTTP_TOKEN','preserved-browser-session')
-    monkeypatch.delenv('TYPESAFE_API_KEY',raising=False)
     server=Server(('127.0.0.1',0),[normal.root],tmp_path/'review')
-    assert server.token=='preserved-browser-session'
     thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
     base=f'http://127.0.0.1:{server.server_port}'
-    secret='private-test-key'
     try:
-        monkeypatch.setattr(model_config,'validate_key',lambda key:key if key==secret else (_ for _ in ()).throw(ValueError('invalid key')))
-        def connect(key,token=server.token):
-            req=urllib.request.Request(base+'/api/models/connect',data=json.dumps({'key':key}).encode(),headers={'X-Subtasks-Token':token,'Content-Type':'application/json'})
-            return urllib.request.urlopen(req)
-        with pytest.raises(urllib.error.HTTPError) as error:connect(secret,'bad-token')
-        assert error.value.code==403 and not server.jev_key
-        with connect(secret) as response:
-            raw=response.read();assert secret.encode() not in raw
-            assert json.loads(raw)=={'enabled':True,'configured':True,'verified':True,'model':'jev-1.14.0'}
-        with pytest.raises(urllib.error.HTTPError):connect('bad')
-        assert server.jev_key==secret
         bootstrap=json.load(urllib.request.urlopen(base+'/api/bootstrap'))
-        assert bootstrap['jev']['configured'] and secret not in json.dumps(bootstrap)
-        assert b'type="password"' in urllib.request.urlopen(base+'/models').read()
-        assert not any(secret.encode() in p.read_bytes() for p in (tmp_path/'review').rglob('*') if p.is_file())
+        assert server.token=='preserved-browser-session' and 'jev' not in bootstrap
+        html=urllib.request.urlopen(base).read().decode()
+        assert 'subtask阶段标注' in html and '保存粗阶段' in html and '保存细阶段' in html
+        assert 'JEV' not in html and '配置视觉模型' not in html and 'href="/quality"' not in html
+        for path in ['/models','/models.js','/api/models/status']:
+            with pytest.raises(urllib.error.HTTPError) as error:urllib.request.urlopen(base+path)
+            assert error.value.code==404
+        req=urllib.request.Request(base+'/api/models/connect',data=b'{"key":"not-a-real-key"}',headers={'Content-Type':'application/json','X-Subtasks-Token':server.token})
+        with pytest.raises(urllib.error.HTTPError) as error:urllib.request.urlopen(req)
+        assert error.value.code==404
+        assert urllib.request.urlopen(base+'/quality').geturl()==base+'/'
     finally:server.shutdown();server.server_close();thread.join()
 
 

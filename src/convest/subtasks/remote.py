@@ -85,3 +85,52 @@ def fetch(host, dataset, episodes, output):
                 'bytes': sum(v['size'] for v in before['files'].values())}
     finally:
         if stage.exists(): shutil.rmtree(stage)
+
+DATA_ROOT = '/mnt/data/train_platform/datasets'
+
+
+def dataset_path(value):
+    """The web importer reads only the configured dataset tree on SSH alias 28."""
+    from urllib.parse import urlsplit
+    if not isinstance(value,str):raise ValueError('请输入28服务器目录')
+    if value.startswith('sftp://'):
+        url=urlsplit(value)
+        if url.netloc!='28' or url.query or url.fragment:raise ValueError('仅支持28服务器的数据目录')
+        value=url.path
+    path=Path(value)
+    if not path.is_absolute() or '..' in path.parts or any(c in value for c in '\n\r\x00'):
+        raise ValueError('请输入数据根目录内的绝对路径')
+    if not path.is_relative_to(DATA_ROOT):raise ValueError('仅支持 /mnt/data/train_platform/datasets 下的目录')
+    return str(path)
+
+
+def browse(dataset=DATA_ROOT):
+    dataset=dataset_path(dataset)
+    script=r'''
+import json,pathlib,sys
+base=pathlib.Path(sys.argv[1]).resolve(strict=True);p=pathlib.Path(sys.argv[2]).resolve(strict=True)
+if not p.is_relative_to(base) or not p.is_dir():raise ValueError('Directory outside dataset tree')
+children=[]
+for child in sorted(p.iterdir(),key=lambda x:x.name):
+ if child.name.startswith('.'):continue
+ try:
+  resolved=child.resolve(strict=True)
+  if child.is_dir() and resolved.is_relative_to(base):children.append({'name':child.name,'path':str(resolved),'is_dataset':(resolved/'meta/info.json').is_file()})
+ except OSError:continue
+if len(children)>1000:raise ValueError('Too many subdirectories; enter a more specific path')
+print(json.dumps({'path':str(p),'parent':str(p.parent) if p!=base else None,'is_dataset':(p/'meta/info.json').is_file(),'directories':children}))
+'''
+    result=subprocess.run(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=10','28',
+        shlex.join(['python3','-c',script,DATA_ROOT,dataset])],capture_output=True,text=True,timeout=60)
+    if result.returncode:raise ValueError('无法读取28目录，请检查目录是否存在及SSH连接')
+    return json.loads(result.stdout)
+
+
+def web_inventory(value):
+    """Resolve inside the allowed tree before reading dataset metadata over SSH."""
+    selected=browse(dataset_path(value))
+    if not selected['is_dataset']:raise ValueError('请继续打开到一个LeRobot数据目录')
+    try:data=query('28',selected['path'])
+    except (subprocess.SubprocessError,OSError,ValueError):raise ValueError('读取28数据集失败，请检查目录及SSH连接') from None
+    if dataset_path(data['dataset'])!=selected['path']:raise ValueError('远端目录在读取期间发生变化')
+    return data

@@ -1,34 +1,16 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>番茄 · 阶段标注</title><link rel="stylesheet" href="/style.css"></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>subtask阶段标注</title><link rel="stylesheet" href="/style.css"></head>
 <body>
-<header><div><span class="brand">番茄 <b>／</b> 阶段标注</span><span class="tag">NORMAL ↔ SPEEDUP</span></div><a href="/quality" target="_blank" rel="noopener">全部片段复查</a><a href="/models" target="_blank" rel="noopener">配置视觉模型</a><span id="connection">正在连接…</span></header>
-<div class="workspace">
-<aside><div class="section-title">录制片段 <span id="count"></span></div><input id="search" placeholder="筛选机器人、版本、批次" aria-label="筛选片段"><div id="episodes"></div><div class="aside-note">原始数据只读<br>标签与修改历史另存<br><span id="output"></span></div></aside>
-<main>
-<div class="heading"><div><p class="eyebrow">SUBTASK REVIEW</p><h1 id="title">选择一条录制开始审核</h1><p id="subtitle"></p></div><div id="status" class="pill">未载入</div></div>
-<div id="message" role="status">先确认少量样例，再自动预标注。自动生成的标签均需人工审核。</div>
-<div class="videos" id="videos"></div>
-<div class="transport"><button id="previousFrame" title="左方向键">−1帧</button><button id="play">播放</button><button id="nextFrame" title="右方向键">+1帧</button><span id="time">0.00 / 0.00 秒</span><label>帧 <input id="frame" type="number" min="0" value="0"></label><button id="jump">定位</button><select id="rate" aria-label="播放速度"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></div>
-<input id="seek" type="range" min="0" max="1" value="0" step="1" aria-label="播放定位">
-<div class="timeline-title"><span>粗阶段</span><span>点击色块定位 · 区间采用 [开始帧, 结束帧)</span></div><div id="coarseTrack" class="track"></div>
-<div class="timeline-title"><span>细动作</span><span id="progress"></span></div><div id="fineTrack" class="track fine"></div>
-<div class="editor-grid"><section class="panel"><div class="section-title">当前片段 <span id="segmentNumber"></span></div>
-<div class="fields"><label>开始帧<input id="start" type="number" min="0"></label><label>结束帧<input id="end" type="number" min="1"></label><button id="boundary">更新边界</button></div>
-<label class="block">细动作<select id="label"></select></label><div id="coarseLabel" class="muted"></div><label class="check"><input id="reviewed" type="checkbox"> 已看片确认此片段与边界</label>
-<div class="button-row"><button id="split">在当前帧拆分 <kbd>M</kbd></button><button id="merge">合并下一段</button><button id="nextPending">下一待审核段</button></div><p id="score" class="muted"></p><div id="eventEvidence" class="event-evidence" aria-live="polite"></div>
-</section><section class="panel"><div class="section-title">预标注与交付</div><p class="muted">支持豆包三相机视频识别与本地样例检索；自动结果均需人工审核。</p><label class="block">预标注方式<select id="backend"><option value="local">本地样例检索（试验）</option><option value="doubao" disabled>豆包三相机视频识别（需配置）</option><option value="jev" disabled>JEV 多相机视觉识别（需配置）</option></select></label><p id="jevStatus" class="muted"></p><div class="button-row"><button id="jevPlan">生成 JEV 请求计划</button></div><div class="button-row"><button id="predict" class="accent">自动预标注</button><button id="train">从已确认片段学习</button></div>
-<div class="button-row"><button id="save" class="primary">保存标注</button><button id="download">下载 JSON</button></div><label class="block">整条任务结果<select id="outcome"><option value="unknown">尚未判断</option><option value="success">确认全部完成</option><option value="failure">任务失败</option><option value="incomplete">录制未完成整个任务</option></select></label>
-<label class="block">对应的 speedup<select id="target"><option value="">选择同源 speedup 片段</option></select></label><button id="project">将 normal 标签映射到 speedup</button>
-</section></div>
-<section class="panel behavior-panel"><div class="section-title">训练行为审核 · PI0.5 <span id="behaviorStatus">尚未检查</span></div>
-<p class="muted">掉果后继续采摘可接受；掉果后仍空手投放、左手拽走整串再交回右手，需人工确认。动作标签审核与训练取舍分别保存，不会自动删除或剔除数据。</p>
-<div class="button-row"><button id="scanBehavior">检查训练异常候选</button></div>
-<div class="fields"><label>异常开始帧<input id="behaviorStart" type="number" min="0"></label><label>异常结束帧<input id="behaviorEnd" type="number" min="1"></label></div>
-<label class="block">行为类型<select id="behaviorKind" aria-label="行为类型"></select></label><label class="block">异常说明<input id="behaviorNote" placeholder="例如：左手已空，仍移动到果盘执行投放"></label><div class="button-row"><button id="addBehavior">添加人工记录</button><button id="cancelBehaviorEdit">取消编辑</button></div>
-<div id="behaviorEvents"></div>
-<label class="block">整条数据的训练取舍<select id="trainingDecision" aria-label="整条数据的训练取舍"><option value="pending">尚未决定</option><option value="keep">人工决定保留</option><option value="exclude">人工决定不用于训练</option></select></label>
-<label class="block">取舍说明<input id="trainingNote" placeholder="仅记录人工决定，当前不会改变原始数据或训练文件"></label>
-</section>
-<div class="segment-list"><div class="section-title">全部动作片段</div><div id="segments"></div></div>
-<footer>空格 播放／暂停 · ← → 逐帧 · M 拆分 · Ctrl/Cmd+S 保存 · 点击片段后修改标签或边界</footer>
-</main></div><script src="/app.js"></script></body></html>
+<header><div class="brand">subtask<span>阶段标注</span></div><span class="header-hint">导入目录 → 豆包逐个处理 → 分别保存粗、细阶段</span><span id="connection" class="pill">正在连接</span></header>
+<section class="library"><div class="library-heading"><div><h2>数据目录 <span id="directoryCount"></span></h2><p>从28服务器导入 LeRobot 数据，原始数据只读。</p></div><button id="openImport" class="primary">＋ 导入28目录</button></div><div id="directories" class="directories"></div><div class="library-bottom"><nav class="filters" aria-label="片段筛选"><button id="filterAll" class="active">全部片段</button><button id="filterCoarse">粗阶段已保存</button><button id="filterFine">细阶段已保存</button></nav><div class="queue-actions"><span id="queueSummary"></span><button id="processAll" class="accent">开始逐个处理</button></div></div></section>
+<div id="jobBanner" class="job-banner" hidden role="status"></div>
+<div class="workspace"><aside><div class="section-title">片段列表 <span id="count"></span></div><input id="search" placeholder="搜索片段、机器人、版本" aria-label="搜索片段"><div id="episodes"></div><p class="aside-note">先选片段，再看片、调边界。<br>粗阶段与细阶段分别保存。</p></aside>
+<main><div class="heading"><div><p id="subtitle" class="subtitle"></p><h1 id="title">选择一个片段</h1></div><span id="status" class="pill">未选择</span></div><div id="message" role="status">导入目录后，选择一个片段开始。</div><div id="empty" class="empty" hidden>这里还没有片段。点击右上角“导入28目录”开始。</div><div id="reviewBody" hidden>
+<div id="videos" class="videos"></div><div class="transport"><button id="previousFrame" title="左方向键">−1帧</button><button id="play">播放</button><button id="nextFrame" title="右方向键">+1帧</button><span id="time"></span><label>帧 <input id="frame" type="number" min="0" value="0"></label><button id="jump">定位</button><select id="rate" aria-label="播放速度"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></div><input id="seek" type="range" min="0" max="1" value="0" aria-label="播放定位">
+<div class="timeline-title"><span>粗阶段</span><span id="coarseStatus"></span></div><div id="coarseTrack" class="track"></div><div class="timeline-title"><span>细阶段</span><span id="fineStatus"></span></div><div id="fineTrack" class="track fine"></div>
+<section class="editor"><div class="editor-heading"><nav class="stage-tabs" aria-label="标注阶段"><button id="tabCoarse" class="active">编辑粗阶段</button><button id="tabFine">编辑细阶段</button></nav><span id="segmentNumber"></span></div><p id="stageHint" class="muted"></p><div class="fields"><label>开始帧<input id="start" type="number" min="0"></label><label>结束帧<input id="end" type="number" min="1"></label><button id="boundary">更新边界</button><label class="action-field"><span id="labelTitle">阶段</span><select id="label"></select></label></div><div class="editor-tools"><label class="check"><input id="reviewed" type="checkbox"> 已看片确认这一段</label><div><button id="split">在当前帧拆分</button><button id="merge">合并下一段</button><button id="nextPending">下一待审核段</button></div></div></section>
+<details id="notesPanel" class="notes"><summary id="notesTitle">备注与疑点（可选）</summary><label class="block">当前阶段的备注<textarea id="note" rows="2" placeholder="例如：这里发生掉果，需要人工检查"></textarea></label><div id="issues"></div></details>
+<div class="savebar"><div><button id="saveCoarse" class="primary">保存粗阶段</button><button id="saveFine" class="primary secondary-save">保存细阶段</button><button id="download">下载当前阶段 JSON</button></div><button id="nextEpisode">下一个片段 →</button></div><p class="save-help">粗边界调整会联动细阶段范围，粗、细仍分别保存。保存草稿不等于已人工审核。</p>
+<details class="segment-list"><summary>查看当前阶段全部分段</summary><div id="segments"></div></details><footer>空格 播放／暂停 · ← → 逐帧 · M 拆分 · Ctrl/Cmd+S 保存当前阶段</footer></div></main></div>
+<dialog id="importDialog"><div class="dialog-heading"><div><h2>从28服务器导入</h2><p>打开一个包含 meta / data / videos 的 LeRobot 目录。</p></div><button id="closeImport" aria-label="关闭导入">×</button></div><label class="block">服务器目录<input id="remotePath" value="/mnt/data/train_platform/datasets" placeholder="也可粘贴 sftp://28/... 路径"></label><div class="button-row"><button id="browsePath" class="accent">读取目录</button><button id="parentPath">上一级</button></div><p id="remoteMessage" role="status">点击“读取目录”，或直接粘贴数据集路径。</p><div id="remoteFolders" class="remote-folders"></div><div id="importSelection" hidden><p id="inventorySummary"></p><label class="block">导入哪些片段<input id="episodeSelection" placeholder="留空导入全部；或填写 0,2-5"></label><p class="muted">仅下载所选视频和数据到本机；已导入的片段会复用。</p><button id="importDirectory" class="primary">导入目录</button></div></dialog>
+<script src="/app.js"></script></body></html>

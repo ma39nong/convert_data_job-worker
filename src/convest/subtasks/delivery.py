@@ -154,6 +154,9 @@ def training_files(ep,doc,*,prompt_mode='goal',task_prompt=DEFAULT_TASK_PROMPT):
 def publish(ws,ep,stage,*,target='dataset',root=None,kind='json',revision=None,prompt_mode='goal',task_prompt=DEFAULT_TASK_PROMPT):
     if stage not in {'coarse','fine'} or target not in {'dataset','remote','local'} or kind not in {'json','training'}:raise ValueError('无效导出选项')
     with ws.lock,ws.store.lock:
+        if kind=='training':
+            from .quarantine import assert_included
+            assert_included(ws,ep.id)
         doc=ws.stages(ep)[stage]
         if not doc['saved_at'] or doc['revision']!=revision:raise ValueError('请先保存当前阶段，并刷新导出版本')
         if doc['source']!=ep.identity():raise ValueError('来源已变化，拒绝导出')

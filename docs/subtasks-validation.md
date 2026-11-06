@@ -261,3 +261,9 @@ verify_batch.py独立验证6目录/52条/26normal+26speedup，每条唯一对应
 29项vocabulary/delivery/workspace定向回归通过；全部subtasks测试97passed，三组Node回归通过。隔离18767真实HTTP粗/细下载均无中文且末段bare stem正确；浏览器双语选项、数字时间条和新总prompt验证，浏览器下载按钮显示交付浏览器提示（IAB下载事件未返回文件路径，未据此宣称落盘文件验收）。18767正常停止。正式8766只读查看人工参考，没有确认/保存/改边界，截图outputs/subtasks/bilingual-validation/bilingual-ui.png。
 
 使用本机PaliGemma分词器逐一验证257种状态bin（58维统一值与逐项可加性），无标点总目标上界256，五种粗动作英文上界254/255/252/252/253，未改训练仓库或启动训练。报告token-budget.json。正在运行的1103normal批次保持，后端切换由一次性等待脚本完成，最终实际状态以deployment.json为准。
+
+## 2026-11-06：配对剔除到C和恢复
+
+新增quarantine原子配对登记、恢复和历史版本，HTTP鉴权、过期版本冲突、原因校验、缺失/歧义配对拒绝、当前处理对拒绝、C路径仅28 A/B包。catalog分离excluded计数；process锁内检查后跳过、映射及新建训练副本拦截。源文件和原标注不写。整包只读预览要求完整导入/配对、保留粗层审核完成，列出保留和剔除新旧编号。没有实现实体归档执行器，明确显示preview_only。
+
+全部subtasks回归101passed、4项新Python测试通过、四组Node回归通过；语法/compile/diff检查通过。18767隔离真实浏览器完成填写原因→剔除→已剔除筛选→本包预览→恢复→普通列表恢复的完整往返，normal/speedup同步，原数据身份不变。正式8766仅打开窗口预览，确认按钮因旧后端仍在批次处理中禁用，没有提交真实剔除。证据outputs/subtasks/quarantine-validation，正式界面截图quarantine-button.png和quarantine-dialog.png。

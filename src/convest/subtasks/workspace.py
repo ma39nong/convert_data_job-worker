@@ -116,6 +116,8 @@ class Workspace:
 
     def catalog(self):
         with self.lock,self.store.lock:
+            from .quarantine import read
+            exclusions=read(self)['entries']
             groups={};episodes=[]
             for entry in self.store.entries.values():
                 receipt=Path(entry['dataset'])/'cache-source.json'
@@ -144,10 +146,13 @@ class Workspace:
                 elif legacy_wait:item['error']=''
                 for key in ('source_start_ns','source_end_ns'):
                     if item.get(key) is not None:item[key]=str(item[key])
+                exclusion=exclusions.get(entry['id'],{})
+                item['excluded']=bool(exclusion.get('excluded'));item['exclusion']=exclusion
+                if item['excluded']:status=item['state']='excluded'
                 episodes.append(item)
-                group=groups.setdefault(group_id,{'id':group_id,'path':directory,'host':host,'total':0,'ready':0,'pending':0,'running':0,'failed':0,'coarse_saved':0,'fine_saved':0})
+                group=groups.setdefault(group_id,{'id':group_id,'path':directory,'host':host,'total':0,'ready':0,'pending':0,'running':0,'failed':0,'coarse_saved':0,'fine_saved':0,'excluded':0})
                 group['total']+=1
-                if status in {'ready','running','failed'}:group[status]+=1
+                if status in {'ready','running','failed','excluded'}:group[status]+=1
                 else:group['pending']+=1
                 for s in saved:group[s+'_saved']+=int(saved[s])
             for item in episodes:
@@ -187,9 +192,11 @@ class Workspace:
         return {'packages':results,'imported':sum(r.get('imported',0) for r in results),'reused':sum(r.get('reused',0) for r in results),'failed':sum('error' in r for r in results)}
 
     def map_saved(self,normal_id,speedup_id,stages,*,replace=False):
+        from .quarantine import assert_included
         from .core import project
         if not isinstance(stages,list) or not stages or any(s not in {'coarse','fine'} for s in stages):raise ValueError('请选择粗阶段或细阶段')
         with self.lock,self.store.lock:
+            assert_included(self,normal_id);assert_included(self,speedup_id)
             normal=self.store.episode(normal_id);speedup=self.store.episode(speedup_id)
             if normal.entry.get('source_recording_id')!=speedup.entry.get('source_recording_id'):raise ValueError('不是同一录制')
             if self.store.entries[normal_id]['variant']!='normal' or self.store.entries[speedup_id]['variant']!='speedup':raise ValueError('映射方向必须normal到speedup')
@@ -243,7 +250,11 @@ class Workspace:
         results=[]
         ids=sorted(ids,key=lambda id_:self.store.entries[id_]['variant']=='speedup')
         for id_ in ids:
-            with self.lock:self.queue[id_]={'state':'running'};self._checkpoint()
+            from .quarantine import read
+            with self.lock:
+                if read(self)['entries'].get(id_,{}).get('excluded'):
+                    results.append({'id':id_,'state':'excluded'});continue
+                self.queue[id_]={'state':'running'};self._checkpoint()
             try:
                 with self.lock,self.store.lock:
                     ep=self.store.episode(id_);current=self.store.load(ep)
@@ -252,7 +263,8 @@ class Workspace:
                         results.append({'id':id_,'state':'preserved'});continue
                 dependency=self.normal_dependency(id_)
                 if dependency and not dependency['ready']:raise WaitingForNormal(dependency['reason'])
-                docs={key:self.store.load(self.store.episode(key)) for key in self.store.entries}
+                excluded=read(self)['entries']
+                docs={key:self.store.load(self.store.episode(key)) for key in self.store.entries if not excluded.get(key,{}).get('excluded')}
                 for key in docs:
                     saved=self.stage_path(key,'fine')
                     if saved.exists():

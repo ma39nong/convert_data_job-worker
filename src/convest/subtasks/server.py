@@ -99,10 +99,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send({'app': 'subtasks-review', 'token': self.server.token,
                                   'labels': {k: {'coarse': v[0], 'text': v[1]} for k, v in LABELS.items()},
                                   'action_labels':list(ACTION_LABELS),'behavior_kinds':KINDS,'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
-                                  'export_profile':PROMPT_PROFILE,'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status()})
+                                  'quarantine_available':True,'export_profile':PROMPT_PROFILE,'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status()})
             if route.path == '/api/quality-review':
                 path=self.server.store.output/'quality-review'/'report.json'
                 return self.send(json.loads(path.read_text()) if path.exists() else {'state':'not_started','episodes':[]})
+            if route.path == '/api/workspace/quarantine':
+                from .quarantine import preview
+                return self.send(preview(self.server.workspace,q['id'][0]))
+            if route.path == '/api/workspace/organize-plan':
+                from .quarantine import plan
+                return self.send(plan(self.server.workspace,q['id'][0]))
             if route.path == '/api/workspace':
                 return self.send(self.server.workspace.catalog())
             if route.path == '/api/workspace/episode':
@@ -201,6 +207,9 @@ class Handler(BaseHTTPRequestHandler):
             store = self.server.store
             if route in {'/api/models/connect','/api/jev-plan'}:
                 return self.send({'error':'该入口已移除；当前仅使用豆包'},404)
+            if route == '/api/workspace/quarantine':
+                from .quarantine import change
+                return self.send(change(self.server.workspace,body['id'],body.get('excluded'),body.get('reason',''),body.get('revision')))
             if route == '/api/workspace/export':
                 from .delivery import publish,DEFAULT_TASK_PROMPT
                 ep=self.server.episode(body['id'])

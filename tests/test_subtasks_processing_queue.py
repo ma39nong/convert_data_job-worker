@@ -85,3 +85,40 @@ def test_server_automatically_resumes_durable_batch(tmp_path,monkeypatch):
         assert queue.active(server.workspace)['state']=='completed'
         assert server.process_job is not None
     finally:server.server_close()
+
+
+def test_parallel_workers_finish_first_pass_before_retry_and_resume_all_inflight(tmp_path,monkeypatch):
+    import threading
+    ws,ids=workspace(tmp_path)
+    barrier=threading.Barrier(3,timeout=5)
+    lock=threading.Lock();calls=[];snapshots=[]
+    original_checkpoint=queue.checkpoint
+    def checkpoint(ws,batch):
+        original_checkpoint(ws,batch)
+        snapshots.append(json.loads(json.dumps(batch)))
+    monkeypatch.setattr(queue,'checkpoint',checkpoint)
+    def process(selected,server,**kw):
+        id_=selected[0]
+        with lock:calls.append((id_,bool(kw['retry_namespace'])))
+        if not kw['retry_namespace']:barrier.wait()
+        return {'episodes':[{'id':id_,'state':'failed' if id_==ids[0] and not kw['retry_namespace'] else 'ready'}]}
+    monkeypatch.setattr(ws,'process',process)
+    try:
+        batch=queue.create(ws,ids,'coarse')
+        result=queue.run(ws,SimpleNamespace(processing_workers=3),batch['id'])
+        assert set(i for i,retry in calls[:3])==set(ids)
+        assert calls[3:]==[(ids[0],True)]
+        assert all(r['state']=='ready' for r in result['episodes'])
+        assert any(len(s.get('current_ids',[]))==3 for s in snapshots)
+        assert queue.summary(ws)['workers']==3
+        assert queue.active(ws)['current_ids']==[]
+        # Restart a checkpoint with two in-flight IDs; neither may be lost.
+        batch=queue.active(ws)
+        batch.update(state='running',initial_done=[ids[0]],results={ids[0]:batch['results'][ids[0]]},
+                     current_ids=ids[1:],current_id=ids[1],retry_order=None,retry_done=[])
+        queue.checkpoint(ws,batch)
+        resumed=[]
+        monkeypatch.setattr(ws,'process',lambda selected,server,**kw:(resumed.extend(selected) or {'episodes':[{'id':selected[0],'state':'ready'}]}))
+        queue.run(ws,SimpleNamespace(processing_workers=3),batch['id'])
+        assert sorted(resumed)==sorted(ids[1:])
+    finally:ws.store.lockfile.close()

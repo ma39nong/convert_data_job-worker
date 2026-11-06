@@ -36,6 +36,7 @@ class Server(ThreadingHTTPServer):
         self.cached_episodes = {}
         self.export_lock = threading.Lock()
         self.process_job = None
+        self.processing_workers=max(1,min(8,int(os.environ.get('SUBTASKS_PROCESSING_WORKERS','1'))))
         super().__init__(address, Handler)
         from .processing_queue import active
         pending=active(self.workspace)

@@ -20,21 +20,21 @@ from .core import atomic_json
 from .remote import DATA_ROOT,dataset_path
 
 PROMPT_PROFILE='tomato-goal-and-stages-en-v2'
-DEFAULT_TASK_PROMPT='Hold and reposition the tomato truss with the right hand. Pick all the cherry tomatoes one by one with the left hand and place them in the left basket. Finally, return the bare stem to the right plate.'
+DEFAULT_TASK_PROMPT='Hold and reposition the tomato truss with the right hand and pick all the cherry tomatoes one by one with the left hand and place them in the left basket until none remain then return the bare stem to the right plate'
 STAGE_PROMPTS={
     'fine':{
-        'grasp_truss':'Grasp and secure the entire tomato truss with the right hand.',
-        'lift_truss':'Lift the tomato truss with the right hand and move it to the center.',
-        'grasp_fruit':'Approach and firmly grasp one cherry tomato with the left hand while holding the tomato truss steady with the right hand.',
-        'pick_and_place':'Detach the grasped cherry tomato with the left hand and place it in the left basket while holding the tomato truss steady with the right hand.',
-        'return_truss':'Place the tomato truss back on the right white plate with the right hand and release it.',
-        'rotate_stem':'Adjust the tomato truss with the right hand.',
-        'return_stem':'After all tomatoes have been picked, place the remaining stem back on the right white plate with the right hand.'},
+        'grasp_truss':'Grasp and secure the entire tomato truss with the right hand',
+        'lift_truss':'Lift the tomato truss with the right hand and move it to the center',
+        'grasp_fruit':'Approach and firmly grasp one cherry tomato with the left hand while holding the tomato truss steady with the right hand',
+        'pick_and_place':'Detach the grasped cherry tomato with the left hand and place it in the left basket while holding the tomato truss steady with the right hand',
+        'return_truss':'Place the tomato truss back on the right white plate with the right hand and release it',
+        'rotate_stem':'Adjust the tomato truss with the right hand',
+        'return_stem':'After all tomatoes have been picked place the remaining stem back on the right white plate with the right hand'},
     'coarse':{
-        'pickup':'Grasp and lift the tomato truss with the right hand and move it to the center.',
-        'harvest':'Pick cherry tomatoes with the left hand and place them in the left basket while holding the tomato truss steady with the right hand.',
-        'return':'Place the tomato truss or remaining stem back on the right white plate with the right hand and release it.',
-        'adjust':'Adjust the tomato truss with the right hand.'}}
+        'pickup':'Grasp and lift the tomato truss with the right hand and move it to the center',
+        'harvest':'Pick cherry tomatoes with the left hand and place them in the left basket while holding the tomato truss steady with the right hand',
+        'return':'Place the tomato truss or remaining stem back on the right white plate with the right hand and release it',
+        'adjust':'Adjust the tomato truss with the right hand'}}
 
 
 def original_tasks(ep):

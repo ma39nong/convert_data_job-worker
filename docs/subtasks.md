@@ -74,7 +74,7 @@ JSON本身不会让训练代码自动读取subtask。因此导出内容还可选
 
 原prompt“Pick up a tomato truss ... pick a cherry tomato ...”只描述一次单果摘放。整串任务的推荐总指令：
 
-> Hold and reposition the tomato truss with the right hand. Pick all the cherry tomatoes one by one with the left hand and place them in the left basket. Finally, return the bare stem to the right plate.
+> Hold and reposition the tomato truss with the right hand and pick all the cherry tomatoes one by one with the left hand and place them in the left basket until none remain then return the bare stem to the right plate
 
 训练副本默认选 **整串任务指令**：全部帧使用同一个总目标，粗/细标签和阶段序号独立保留。`meta/subtask_prompts.json`记录旧总prompt、新总prompt、阶段中英文及指令模式。不会改原包的task文本。normal与其speedup使用相同任务目标。
 

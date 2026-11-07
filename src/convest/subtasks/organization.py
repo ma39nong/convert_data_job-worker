@@ -32,11 +32,13 @@ def remote_path(entry):
 
 def prepare(ws,id_):
     """Complete local caches for preview only; never rewrite server packages."""
-    from .quarantine import paired,plan
+    from .quarantine import paired,plan,exclude_missing_normal
     with ws.lock,ws.store.lock:
         paths=[remote_path(e) for e in paired(ws,id_)]
     imports=[ws._import_directory(path) for path in paths]
-    return {'imports':imports,'plan':plan(ws,id_)}
+    candidates=[e['id'] for e in ws.catalog()['episodes'] if e['variant']=='speedup' and e['remote_directory'] in paths and e['pair_state']=='missing' and not e['excluded']]
+    exclusions=exclude_missing_normal(ws,candidates) if candidates else {'excluded':[],'skipped':[]}
+    return {'imports':imports,'orphan_exclusions':exclusions,'plan':plan(ws,id_)}
 
 
 def remote(script,body):
@@ -134,7 +136,8 @@ def build_package(ws,rows,destination,remote_destination,operation,metadata):
             if 'source_episode_index' in value:value['source_episode_index']=new
             atomic_json(destination/f'processing/episode_{new:06d}.json',value)
         entry={**ep.entry,'episode_index':new,'subtask_original_episode_index':ep.entry.get('subtask_original_episode_index',old)}
-        if row.get('unpaired'):entry['subtask_unpaired_retained']=True
+        if row.get('normal_absent_excluded'):entry['subtask_normal_missing']=True;entry.pop('subtask_unpaired_retained',None)
+        elif row.get('unpaired'):entry['subtask_unpaired_retained']=True
         entries.append(entry);statistics.append(per);offset+=ep.length
         mapping.append({'old_id':ep.id,'source_dataset':server_source,'source_episode_index':old,'episode_index':new,'source_recording_id':ep.entry['source_recording_id'],'source_sha256':identity['sha256']})
     info.update(total_episodes=len(rows),total_frames=offset,total_videos=len(rows)*len(seed.cameras),total_chunks=math.ceil(len(rows)/chunk),splits={'train':f'0:{len(rows)}'})

@@ -206,7 +206,7 @@ def test_compaction_preserves_unsaved_coarse_only_proposal(tmp_path,monkeypatch)
     finally:ws.store.lockfile.close()
 
 
-def test_complete_package_preserves_unpaired_speedup_and_all_physical_data(tmp_path,monkeypatch):
+def test_complete_package_archives_orphan_speedup_and_preserves_all_physical_data(tmp_path,monkeypatch):
     store,ws,ids,sources,physical=setup_pair(tmp_path,monkeypatch,extra_speedup=True)
     try:
         original=store.episode(ids['speedup',3]);physical_columns=[c for c in original.table.column_names if c not in ('index','episode_index')]
@@ -221,21 +221,45 @@ def test_complete_package_preserves_unpaired_speedup_and_all_physical_data(tmp_p
             if path==sources['speedup']:store.entries[extra['id']]=extra
             return {'directory':path,'imported':int(path==sources['speedup'])}
         monkeypatch.setattr(ws,'_import_directory',load)
+        from convest.subtasks import remote
+        monkeypatch.setattr(remote,'discover',lambda *a:{'packages':[{'path':sources['normal'],'episodes':[{'source_recording_id':f'recording-{i}'} for i in range(3)]}]})
         complete=org.prepare(ws,ids['normal',0])['plan']
         assert imports==[sources['normal'],sources['speedup']]
         assert complete['ready'] and not complete['missing_packages']
         speed=complete['packages'][1]
-        assert speed['unpaired_preserved']==[3]
-        assert [(r['source_episode_index'],r['new_episode_index']) for r in speed['included']]==[(0,0),(2,1),(3,2)]
-        assert [r['source_episode_index'] for r in speed['rejected']]==[1]
+        assert speed['unpaired_preserved']==[] and speed['unpaired_rejected']==[3]
+        assert [(r['source_episode_index'],r['new_episode_index']) for r in speed['included']]==[(0,0),(2,1)]
+        assert [r['source_episode_index'] for r in speed['rejected']]==[1,3]
         org.execute(ws,ids['normal',0],complete['plan_hash'])
         retained=physical(sources['speedup']);info=json.loads((retained/'meta/info.json').read_text())
-        assert info['total_episodes']==3
-        ep=Episode(retained,2)
+        assert info['total_episodes']==2
+        ep=Episode(physical(speed['c_target']),1)
         assert ep.table.select(physical_columns).equals(values)
         assert {k:sha(p) for k,p in ep.cameras.items()}==video_hashes
-        assert ep.entry['subtask_unpaired_retained'] is True
+        assert ep.entry['subtask_normal_missing'] is True
         assert not (retained/'annotations/subtasks/coarse/episode_000002.json').exists()
-        row=next(e for e in ws.catalog()['episodes'] if e['variant']=='speedup' and not e['excluded'] and e['episode_index']==2)
+        row=next(e for e in ws.catalog()['episodes'] if e['variant']=='speedup' and e['excluded'] and e['archived'] and e['episode_index']==1)
         assert row['pair_state']=='missing' and not row['coarse_saved']
+    finally:store.lockfile.close()
+
+
+def test_orphan_exclusion_requires_server_normal_absence_not_missing_local_cache(tmp_path,monkeypatch):
+    from convest.subtasks.quarantine import exclude_missing_normal,read
+    from convest.subtasks import remote
+    store,ws,ids,sources,_=setup_pair(tmp_path,monkeypatch,extra_speedup=True)
+    extra=ids['speedup',3]
+    try:
+        # Normal exists in a different server batch, but has not been imported locally.
+        package={'path':sources['normal'],'episodes':[{'source_recording_id':'recording-3'}]}
+        monkeypatch.setattr(remote,'discover',lambda *a:{'packages':[package]})
+        result=exclude_missing_normal(ws,[extra])
+        assert not result['excluded'] and result['skipped']
+        assert extra not in read(ws)['entries']
+        package['episodes']=[]
+        result=exclude_missing_normal(ws,[extra])
+        assert result['excluded']==[extra]
+        entry=read(ws)['entries'][extra]
+        assert entry['reason_code']=='normal_absent' and entry['evidence']['normal_packages']==1
+        assert not exclude_missing_normal(ws,[extra])['excluded']
+        with pytest.raises(ValueError,match='仅支持'):exclude_missing_normal(ws,[ids['normal',0]])
     finally:store.lockfile.close()

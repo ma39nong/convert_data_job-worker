@@ -73,6 +73,48 @@ def assert_included(ws,id_):
     if read(ws)['entries'].get(id_,{}).get('excluded'):raise ValueError('这条及同源版本已剔除到C，不参与自动处理、映射或训练导出')
 
 
+def exclude_missing_normal(ws,ids):
+    """Exclude only recordings absent from authoritative server normal A/B metadata."""
+    from .organization import registry,remote_path
+    from .remote import discover
+    import hashlib
+    with ws.lock,ws.store.lock:
+        entries=[dict(ws.store.entries[i]) for i in ids]
+    inventories={};verified=[];skipped=[]
+    for e in entries:
+        if e['variant']!='speedup':raise ValueError('仅支持核对speedup')
+        target(e)  # enforce the established 28 / A,B dataset boundary
+        if not e.get('source_recording_id') or any(e.get(k) is None for k in ('source_start_ns','source_end_ns')):
+            skipped.append({'id':e['id'],'reason':'来源信息不完整，未自动剔除'});continue
+        parts=list(Path(remote_path(e)).parts);parts[parts.index('speedup')]='normal'
+        scope=str(Path(*parts).parent.parent)
+        if scope not in inventories:
+            data=discover(scope)
+            packages=[p for p in data['packages'] if Path(p['path']).parent.name in {'A','B'}]
+            inventories[scope]={'recordings':{r.get('source_recording_id') for p in packages for r in p['episodes']},
+                'evidence':{'normal_scope':scope,'normal_packages':len(packages),
+                    'normal_metadata_digest':hashlib.sha256(json.dumps(packages,sort_keys=True).encode()).hexdigest()}}
+        inventory=inventories[scope]
+        if e['source_recording_id'] in inventory['recordings']:
+            skipped.append({'id':e['id'],'reason':'服务器normal仍有同源录制，未自动剔除'});continue
+        verified.append((e,inventory['evidence']))
+    with ws.lock,ws.store.lock:
+        ledger=read(ws);reg=registry(ws);changed=[]
+        for e,evidence in verified:
+            if e['id'] in reg['retired'] or e['id'] in ws.organizing_ids or ws.queue.get(e['id'],{}).get('state')=='running':raise ValueError('来源正在变化或处理中，请重新核对')
+            if ws.store.entries.get(e['id'])!=e:raise ValueError('来源已变化，请重新核对')
+            if reg['entries'].get(e['id'],{}).get('archived'):continue
+            if ledger['entries'].get(e['id'],{}).get('excluded'):continue
+            event={'revision':ledger['revision']+1,'time':time.time(),'excluded':True,
+                'reason':'服务器normal A/B中无对应原始录制，按normal为准剔除speedup',
+                'reason_code':'normal_absent','ids':[e['id']],'evidence':evidence}
+            ledger['entries'][e['id']]={**event,'target':target(e),'source_recording_id':e['source_recording_id'],
+                'source_start_ns':str(e['source_start_ns']),'source_end_ns':str(e['source_end_ns'])}
+            ledger['revision']+=1;ledger['history'].append(event);changed.append(e['id'])
+        if changed:atomic_json(ws.root/'quarantine.json',ledger)
+        return {'excluded':changed,'skipped':skipped,'revision':ledger['revision']}
+
+
 def plan(ws,id_):
     """Plan the complete SERVER packages, even when episodes occupy separate caches."""
     from .organization import remote_path,registry
@@ -98,18 +140,18 @@ def plan(ws,id_):
             key=tuple(str(e.get(k)) for k in ('source_recording_id','source_start_ns','source_end_ns'))
             order[key]=(excluded,counts[excluded]);counts[excluded]+=1
         for seed,rows in zip(seeds,groups):
-            included=[];rejected=[];unpaired=[]
+            included=[];rejected=[];unpaired=[];orphan_rejected=[]
             for e in rows:
                 key=tuple(str(e.get(k)) for k in ('source_recording_id','source_start_ns','source_end_ns'))
                 excluded=bool(ledger['entries'].get(e['id'],{}).get('excluded'))
                 standalone=False
                 if key not in order:
-                    # A speedup package can contain additional recordings absent
-                    # from normal. Preserve them after paired recordings; never
-                    # silently drop them or guess an exclusion.
+                    # Account for every extra recording. Only a verified server
+                    # normal absence permits an orphan to be archived to C;
+                    # unresolved extras block publication rather than disappear.
                     try:paired(ws,e['id'])
                     except ValueError as exc:
-                        if (seed['variant']=='speedup' and not excluded and all(e.get(k) not in (None,'') for k in ('source_recording_id','source_start_ns','source_end_ns'))
+                        if (seed['variant']=='speedup' and (not excluded or ledger['entries'].get(e['id'],{}).get('reason_code')=='normal_absent') and all(e.get(k) not in (None,'') for k in ('source_recording_id','source_start_ns','source_end_ns'))
                                 and '缺失或不唯一' in str(exc)):
                             opposite=[other for other in ws.store.entries.values() if other['id'] not in retired and other['variant']=='normal' and
                                       tuple(str(other.get(k)) for k in ('source_recording_id','source_start_ns','source_end_ns'))==key]
@@ -117,22 +159,23 @@ def plan(ws,id_):
                             standalone=not opposite and len(same)==1
                     if not standalone:blockers.append('normal/speedup配对或剔除状态不一致');continue
                 elif excluded!=order[key][0]:blockers.append('normal/speedup配对或剔除状态不一致');continue
-                new=counts[False]+len(unpaired) if standalone else order[key][1]
-                if standalone:unpaired.append(e['episode_index'])
+                new=counts[excluded]+len(orphan_rejected if excluded else unpaired) if standalone else order[key][1]
+                if standalone:(orphan_rejected if excluded else unpaired).append(e['episode_index'])
                 doc=ws.stages(ws.store.episode(e['id']));coarse=doc['coarse']
                 reviewed=bool(coarse['saved_at'] and all(s['reviewed'] and s['label']!='unknown' for s in coarse['segments']))
-                row={'id':e['id'],'source_episode_index':e['episode_index'],'new_episode_index':new,'reviewed':reviewed,'coarse_revision':coarse['revision'],'fine_revision':doc['fine']['revision'],'annotation_revision':ws.store.load(ws.store.episode(e['id']))['revision'],'unpaired':standalone}
+                row={'id':e['id'],'source_episode_index':e['episode_index'],'new_episode_index':new,'reviewed':reviewed,'coarse_revision':coarse['revision'],'fine_revision':doc['fine']['revision'],'annotation_revision':ws.store.load(ws.store.episode(e['id']))['revision'],'unpaired':standalone,'normal_absent_excluded':standalone and excluded}
                 (rejected if excluded else included).append(row)
                 if not excluded and not reviewed:warnings.append(f"{e['variant']} episode {e['episode_index']}: 标注尚未全部确认，整理后仍需审核，不代表可训练")
                 if ws.queue.get(e['id'],{}).get('state')=='running':blockers.append(f"{e['variant']} episode {e['episode_index']}: 正在处理")
                 if standalone:
-                    warnings.append(f"speedup episode {e['episode_index']}: 无normal对应，默认保留并排在已配对录制之后，仍待人工审核")
+                    if not excluded:
+                        blockers.append(f"speedup episode {e['episode_index']}: 缺少normal，需先完成服务器来源核对并剔除，不能作为保留数据整理")
                     continue
                 try:
                     other=paired(ws,e['id'])
                     if any(o['id'] not in {entry['id'] for group in groups for entry in group} for o in other):raise ValueError('配对落在其他数据包')
                 except ValueError as exc:blockers.append(str(exc))
-            packages.append({'variant':seed['variant'],'source':seed['dataset'],'remote_source':remote_path(seed),'c_target':target(seed),'included':sorted(included,key=lambda r:r['new_episode_index']),'rejected':sorted(rejected,key=lambda r:r['new_episode_index']),'unpaired_preserved':unpaired})
-        result={'quarantine_revision':ledger['revision'],'packages':packages,'missing_packages':missing_packages,'blockers':list(dict.fromkeys(blockers)),'review_warnings':warnings,'ready':not blockers,'operation':'compact_pair','source_files_changed':False}
+            packages.append({'variant':seed['variant'],'source':seed['dataset'],'remote_source':remote_path(seed),'c_target':target(seed),'included':sorted(included,key=lambda r:r['new_episode_index']),'rejected':sorted(rejected,key=lambda r:r['new_episode_index']),'unpaired_preserved':unpaired,'unpaired_rejected':orphan_rejected})
+        result={'quarantine_revision':ledger['revision'],'packages':packages,'missing_packages':missing_packages,'orphan_candidates':[r['id'] for p in packages for r in p['included'] if r.get('unpaired')],'blockers':list(dict.fromkeys(blockers)),'review_warnings':warnings,'ready':not blockers,'operation':'compact_pair','source_files_changed':False}
         result['plan_hash']=hashlib.sha256(json.dumps(result,sort_keys=True).encode()).hexdigest()
         return result

@@ -6,6 +6,8 @@ from convest.sources.robot_rosbag2 import modalities
 
 
 def validate_config(config):
+    if type(config.get('tactile_freshness_check', True)) is not bool:
+        raise ValueError('tactile_freshness_check must be a boolean')
     if config.get('image_time_basis', 'capture') not in ('receive', 'capture'):
         raise ValueError('image_time_basis must be receive or capture')
     if config['robot'] not in ('wuji', 'sharpa') or config['segments'] != 'full-all':
@@ -38,6 +40,8 @@ def prepare(source, bag, item, config, contract):
                     camera_short_gap_max_frames=config['camera_short_gap_max_frames'],
                     camera_short_gap_max_age_ns=int(config['camera_short_gap_max_age_ms']*1e6),
                     allow_empty_segments=True)
+    tactile_strict=config.get('tactile_freshness_check',True)
+    tactile_diagnostics={}
     extra_good={}
     extra_ages={}
     for key in modalities(config['robot']):
@@ -45,7 +49,14 @@ def prepare(source, bag, item, config, contract):
         index=series.indices(aligned.timeline)
         age=aligned.timeline-series.times[np.maximum(index,0)]
         good=(index>=0)&(age>=0)&(age<=int(config['max_staleness_ms']*1e6))
-        extra_good[key]=good;extra_ages[key]=age
+        gate=good
+        if config['robot']=='sharpa' and key.startswith('observation.tactile.'):
+            available=(index>=0)&(age>=0)
+            tactile_diagnostics[key]={'stale_frames':int((available & ~good).sum()),
+                                      'unavailable_frames':int((~available).sum()),
+                                      'max_sample_age_ms':float(age[available].max()/1e6) if available.any() else None}
+            if not tactile_strict:gate=available
+        extra_good[key]=gate;extra_ages[key]=age
         aligned.source_indices[key]=index
     # Depth is paired with head RGB. A receive-time cut can remove its next
     # exposure even though its header predates the splice. Never re-stamp it.
@@ -91,7 +102,10 @@ def prepare(source, bag, item, config, contract):
                                                    for k in sorted(source.STATUS_MESSAGE_TYPES)},
                           hand_status_policy=('measured_telemetry' if config['robot']=='wuji' else
                                               'not_recorded; fresh_absolute_commands_required'),
-                          extra_modality_policy='strict causal <=150ms; depth-only bounded holds at known cleaner seams, logged separately',
+                          tactile_freshness={'enabled':tactile_strict,'max_staleness_ms':config['max_staleness_ms'],
+                                             'policy':'strict freshness' if tactile_strict else 'causal last recorded sample; no freshness rejection',
+                                             'streams':tactile_diagnostics},
+                          extra_modality_policy='causal sampling; depth freshness and bounded seam holds unchanged; tactile gate recorded separately',
                           timestamp_semantics='source_timestamp_ns is compact header/policy time; audit.original_timestamp_ns inverts cleaner mapping')
     seams=[]
     if bag.compact_time_map:

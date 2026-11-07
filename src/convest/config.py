@@ -48,3 +48,15 @@ def atomic_json(path, data):
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
     temporary.replace(path)
+
+
+def queue_identity(value):
+    """Freshness is a prospective admission policy, not a new source/output queue.
+
+    Keep saved dataset/job manifests intact: their own config remains the proof
+    used by verify(). Only long-lived capture/ingest ownership omits this switch.
+    """
+    if isinstance(value, dict):
+        return {k: queue_identity(v) for k,v in value.items() if k != 'tactile_freshness_check'}
+    if isinstance(value, list):return [queue_identity(v) for v in value]
+    return value

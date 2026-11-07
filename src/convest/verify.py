@@ -122,6 +122,9 @@ def verify_episode(root, info, episode, episode_stats, record, config, contract,
                             limit = config['max_staleness_ms'] * 1000000.0
                             if key == 'observation.depths.cam0' and any((g['bounds'][0] <= begin + j < g['bounds'][1] for g in aligned.report['depth_splice_tolerance']['gaps'])):
                                 limit = config['camera_short_gap_max_age_ms'] * 1000000.0
+                            if (config['robot']=='sharpa' and key.startswith('observation.tactile.')
+                                    and config.get('tactile_freshness_check',True) is False):
+                                limit = float('inf')
                             require(i >= 0 and 0 <= int(timeline[j] - s.times[i]) <= limit, 'Verification check failed: i >= 0 and 0 <= int(timeline[j] - s.times[i]) <= limit')
                             if i != last:
                                 cached = s.values[i] if spec['kind'] == 'wrench' else bag.raw_image(s.values[i], spec['kind'])

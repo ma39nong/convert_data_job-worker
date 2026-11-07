@@ -30,9 +30,20 @@ def raw_streams(hand=20):
     return raw
 
 
-@pytest.mark.parametrize('robot,dim', [('wuji',54),('sharpa',58)])
-def test_actual_cdr_multimodal_write_reindex_and_full_source_verification(tmp_path,robot,dim):
+@pytest.mark.parametrize('robot,dim,sparse', [('wuji',54,False),('sharpa',58,False),('sharpa',58,True)])
+def test_actual_cdr_multimodal_write_reindex_and_full_source_verification(tmp_path,robot,dim,sparse):
     raw=make_conversion_bag(tmp_path/'source',robot)
+    if sparse:
+        import sqlite3
+        with sqlite3.connect(raw/'data.db3') as db:
+            db.execute("DELETE FROM messages WHERE topic_id IN (SELECT id FROM topics WHERE name LIKE '/sharpa/%/tactile/%') AND timestamp>1100000100 AND timestamp<1333333433")
+        meta=yaml.safe_load((raw/'metadata.yaml').read_text())
+        with sqlite3.connect(raw/'data.db3') as db:
+            info=meta['rosbag2_bagfile_information']
+            info['message_count']=db.execute('SELECT count(*) FROM messages').fetchone()[0]
+            for row in info['topics_with_message_count']:
+                row['message_count']=db.execute('SELECT count(*) FROM messages JOIN topics ON messages.topic_id=topics.id WHERE topics.name=?',(row['topic_metadata']['name'],)).fetchone()[0]
+        (raw/'metadata.yaml').write_text(yaml.safe_dump(meta))
     cfg=load_config(WORKSPACE/f'configs/{robot}.yaml');cfg['source_root']=str(raw)
     contract=yaml.safe_load(Path(cfg['contract']).read_text())
     readiness=check_ready(raw,contract,cfg['schema_dir']);assert readiness['messages']>0
@@ -40,6 +51,11 @@ def test_actual_cdr_multimodal_write_reindex_and_full_source_verification(tmp_pa
     with source.Bag(raw,cfg['schema_dir']) as bag:
         streams,aligned=prepare(source,bag,item,cfg,contract)
         assert aligned.action.shape[1]==dim
+        if sparse:
+            assert any(x['stale_frames'] for x in aligned.report['tactile_freshness']['streams'].values())
+            strict={**cfg,'tactile_freshness_check':True}
+            _,rejected=prepare(source,bag,item,strict,contract)
+            with pytest.raises(RecordingRejected):output_segments(item,rejected,strict)
         spec=output_segments(item,aligned,cfg)[0]
         ep=write_segment(out,bag,streams,aligned,spec['bounds'],0,0,cfg,contract,spec)
         reindex_segment(out,ep,0,0)
@@ -278,3 +294,63 @@ def test_depth_rgb_partial_overlap_at_cleaner_seam(seam,overlap,frames,allowed,m
         gap=aligned.report['depth_splice_tolerance']['gaps'][0]
         assert gap['bounds']==[11,13] and gap['head_rgb_overlap_frames']==1
         assert max(gap['actual_depth_age_ms'])<=250
+
+
+@pytest.mark.parametrize('kind',['deformation','wrench'])
+def test_sharpa_tactile_freshness_switch_retains_causality_and_diagnostics(kind):
+    raw=raw_streams(hand=22);cfg=load_config(WORKSPACE/'configs/sharpa.yaml')
+    original=raw['cam0'];ts=original.times
+    for key,spec in source.modalities('sharpa').items():
+        raw[key]=Series(ts,[np.zeros(6) if spec['kind']=='wrench' else 0 for _ in ts],ts)
+    key='observation.tactile.left.thumb.'+kind
+    keep=[i for i in range(31) if i<=6 or i>=16]
+    raw[key]=Series(ts[keep],[np.zeros(6) if kind=='wrench' else 0 for _ in keep],ts[keep])
+    fake=SimpleNamespace(read_streams=lambda bag,contract:raw,STATUS_MESSAGE_TYPES=[],timestamp_policy=None)
+    item={'source_start_ns':int(ts[0]),'source_end_ns':int(ts[-1]),'path':'source'}
+    _,relaxed=prepare(fake,SimpleNamespace(compact_time_map=None),item,cfg,{})
+    assert cfg['tactile_freshness_check'] is False
+    assert relaxed.valid_mask.all() and len(output_segments(item,relaxed,cfg))==1
+    assert relaxed.report['tactile_freshness']['streams'][key]['stale_frames']>0
+    assert relaxed.report['tactile_freshness']['streams'][key]['max_sample_age_ms']>150
+    np.testing.assert_array_equal(raw[key].times,ts[keep])
+    assert (raw[key].times[relaxed.source_indices[key]]<=relaxed.timeline).all()
+    cfg['tactile_freshness_check']=True
+    _,strict=prepare(fake,SimpleNamespace(compact_time_map=None),item,cfg,{})
+    with pytest.raises(RecordingRejected):output_segments(item,strict,cfg)
+    del cfg['tactile_freshness_check']  # Saved historical manifests remain strict.
+    _,legacy=prepare(fake,SimpleNamespace(compact_time_map=None),item,cfg,{})
+    np.testing.assert_array_equal(legacy.valid_mask,strict.valid_mask)
+    # Turning off tactile freshness must not permit depth gaps.
+    cfg['tactile_freshness_check']=False
+    raw['observation.depths.cam0']=raw[key]
+    _,depth_gap=prepare(fake,SimpleNamespace(compact_time_map=None),item,cfg,{})
+    with pytest.raises(RecordingRejected):output_segments(item,depth_gap,cfg)
+
+
+def test_sharpa_tactile_config_rejects_non_boolean(tmp_path):
+    cfg=yaml.safe_load((WORKSPACE/'configs/sharpa.yaml').read_text())
+    cfg['tactile_freshness_check']='false'
+    path=tmp_path/'bad.yaml';path.write_text(yaml.safe_dump(cfg))
+    with pytest.raises(ValueError,match='boolean'):load_config(path)
+
+
+def test_tactile_queue_policy_preserves_ownership_but_not_job_proofs():
+    from convest.config import queue_identity,digest
+    cfg={'routes':[{'conversion':{'robot':'sharpa','max_staleness_ms':150}}]}
+    relaxed={'routes':[{'conversion':{'robot':'sharpa','max_staleness_ms':150,'tactile_freshness_check':False}}]}
+    strict={'routes':[{'conversion':{'robot':'sharpa','max_staleness_ms':150,'tactile_freshness_check':True}}]}
+    assert digest(queue_identity(cfg))==digest(queue_identity(relaxed))==digest(queue_identity(strict))
+    assert digest(relaxed)!=digest(strict)
+
+
+def test_relaxed_tactile_never_backfills_from_first_future_sample():
+    raw=raw_streams(hand=22);cfg=load_config(WORKSPACE/'configs/sharpa.yaml');ts=raw['cam0'].times
+    for key in source.modalities('sharpa'):raw[key]=Series(ts,[0]*len(ts),ts)
+    key='observation.tactile.left.thumb.deformation'
+    raw[key]=Series(ts[6:],[0]*len(ts[6:]),ts[6:])
+    fake=SimpleNamespace(read_streams=lambda bag,contract:raw,STATUS_MESSAGE_TYPES=[],timestamp_policy=None)
+    item={'source_start_ns':int(ts[0]),'source_end_ns':int(ts[-1]),'path':'source'}
+    _,aligned=prepare(fake,SimpleNamespace(compact_time_map=None),item,cfg,{})
+    assert not aligned.valid_mask[:6].any() and aligned.valid_mask[6:].all()
+    assert output_segments(item,aligned,cfg)[0]['bounds']==(6,31)
+    assert aligned.report['tactile_freshness']['streams'][key]['unavailable_frames']==6

@@ -12,6 +12,9 @@ task: Pick up a tomato truss with the right hand, then pick a cherry tomato with
 segments: full-all
 fps: 30
 max_staleness_ms: 150
+# false: report tactile staleness but do not reject it; true restores <=150ms gating.
+# Missing channels, invalid payloads and samples before the first recording remain invalid.
+tactile_freshness_check: false
 # RGB short gaps; depth may share this bound only at known cleaner seams.
 camera_short_gap_max_frames: 2
 camera_short_gap_max_age_ms: 250

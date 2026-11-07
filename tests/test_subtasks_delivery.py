@@ -85,7 +85,7 @@ def test_mapping_saved_stages_uses_source_frames_and_preserves_history(tmp_path)
     try:
         reviewed(ws,normal);reviewed(ws,normal,'coarse')
         result=ws.map_saved(normal.id,speedup.id,['fine','coarse']);fine=result['stages']['fine']
-        assert all(not s['reviewed'] for s in fine['segments'])
+        assert all(s['reviewed'] for s in fine['segments'])
         assert fine['projection']['normal_stage_revision']==1
         assert fine['projection']['policy']=='nearest_observation_source_frame'
         assert fine['segments'][-1]['end_frame']==speedup.length
@@ -166,4 +166,15 @@ def test_reuse_checks_annotation_binding_even_when_receipt_is_consistent(tmp_pat
         receipt['files']['stage_annotations.json']=sha(path);receipt_path.write_text(json.dumps(receipt))
         with pytest.raises(ValueError,match='Annotation source hash mismatch'):
             publish(ws,ep,'fine',kind='training',target='local',root=str(tmp_path/'training'),revision=1)
+    finally:store.lockfile.close()
+
+
+def test_mapping_does_not_confirm_unreviewed_source(tmp_path):
+    normal=dataset(tmp_path/'normal');speedup=dataset(tmp_path/'speedup',speedup=True)
+    store=Store([normal.root,speedup.root],tmp_path/'review');ws=Workspace(store)
+    try:
+        doc=ws.stages(normal)['coarse'];doc['segments']=[dict(start_frame=0,end_frame=normal.length,label='pickup',reviewed=False)]
+        ws.save_stage(normal,'coarse',doc)
+        mapped=ws.map_saved(normal.id,speedup.id,['coarse'])['stages']['coarse']
+        assert all(not r['reviewed'] for r in mapped['segments'])
     finally:store.lockfile.close()

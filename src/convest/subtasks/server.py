@@ -271,7 +271,7 @@ class Handler(BaseHTTPRequestHandler):
             if route == '/api/workspace/save':
                 ep=self.server.episode(body['id']);stage=body.get('stage')
                 if stage not in {'coarse','fine'}:raise ValueError('未知标注阶段')
-                return self.send({'saved':self.server.workspace.save_stage(ep,stage,body['document'])})
+                return self.send({'saved':self.server.workspace.save_stage(ep,stage,body['document'],confirm_review=body.get('confirm_review') is True)})
             if route == '/api/train':
                 return self.send(self.server.submit(lambda: {'models': train(store)}))
             ep = self.server.episode(body['id'])

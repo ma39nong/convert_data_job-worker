@@ -90,7 +90,7 @@ class Workspace:
             out[stage]=value
         return out
 
-    def save_stage(self,ep,stage,body,*,projection=None):
+    def save_stage(self,ep,stage,body,*,projection=None,confirm_review=False):
         with self.lock,self.store.lock:
             from .organization import registry
             if ep.id in self.organizing_ids:raise ValueError('本包正在整理，请完成后再保存')
@@ -106,6 +106,9 @@ class Workspace:
                 rows=validate_segments(body.get('segments'),ep.length,ep.fps)
                 if any(s['label'] not in ACTION_LABELS for s in rows):raise ValueError('仅保存主要细动作')
             else:rows=validate_coarse(body.get('segments'),ep.length,ep.fps)
+            if confirm_review:
+                if any(r['label']=='unknown' for r in rows):raise ValueError('请先选择所有分段的标签，再审核通过并保存')
+                rows=[{**r,'reviewed':True} for r in rows]
             saved={**current,'revision':current['revision']+1,'segments':rows,'note':note,'saved_at':time.time(),'inherited':False}
             if projection is not None:saved['projection']=projection
             if stage=='fine':
@@ -262,11 +265,13 @@ class Workspace:
                 annotation={**self.store.load(normal),'segments':rows,'revision':source['revision'],'status':'reviewed' if all(r['reviewed'] for r in rows) else 'draft'}
                 mapped=project(normal,speedup,annotation)
                 rows=mapped['segments'] if stage=='fine' else coarse_segments(mapped['segments'])
+                if all(r.get('reviewed') is True for r in source['segments']):
+                    rows=[{**r,'reviewed':True} for r in rows]
                 projection={k:v for k,v in mapped.items() if k not in {'segments','source'}}
                 projection.update(normal_id=normal_id,normal_stage=stage,normal_stage_revision=source['revision'],normal_stage_inherited=source.get('inherited',False))
                 proposals.append((stage,{**target,'segments':rows},projection))
             saved={stage:self.save_stage(speedup,stage,doc,projection=projection) for stage,doc,projection in proposals}
-            return {'normal_id':normal_id,'speedup_id':speedup_id,'stages':saved,'warning':'按实际来源帧映射，speedup需看片确认；没有按时间比例缩放。'}
+            return {'normal_id':normal_id,'speedup_id':speedup_id,'stages':saved,'warning':'按实际来源帧同步，已审核阶段同时保留审核状态；请分别导出到服务器。'}
 
     def _proposal(self,ep,current,server,client):
         from .organization import registry

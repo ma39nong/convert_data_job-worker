@@ -104,9 +104,11 @@ def test_http_independent_stage_download_and_catalog(tmp_path):
     thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();base=f'http://127.0.0.1:{server.server_port}'
     try:
         d=json.load(urllib.request.urlopen(base+'/api/workspace/episode?id='+ep.id))
-        payload={'id':ep.id,'stage':'coarse','document':d['stages']['coarse']}
+        d['stages']['coarse']['segments']=[dict(start_frame=0,end_frame=ep.length,label='pickup',reviewed=False)]
+        payload={'id':ep.id,'stage':'coarse','document':d['stages']['coarse'],'confirm_review':True}
         req=urllib.request.Request(base+'/api/workspace/save',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json','X-Subtasks-Token':server.token})
         saved=json.load(urllib.request.urlopen(req))['saved'];assert saved['stage']=='coarse' and saved['revision']==1
+        assert all(r['reviewed'] for r in saved['segments'])
         with urllib.request.urlopen(base+'/api/workspace/download?id='+ep.id+'&stage=coarse') as r:
             assert 'coarse.json' in r.headers['Content-Disposition'] and json.load(r)==english_document(saved)
         c=json.load(urllib.request.urlopen(base+'/api/workspace'));assert c['episodes'][0]['coarse_saved'] and not c['episodes'][0]['fine_saved']
@@ -319,4 +321,28 @@ def test_suspicious_short_return_is_recorded_as_error_not_published(tmp_path,mon
         assert not (ws.root/'coarse-proposals'/(ep.id+'.json')).exists()
         assert list((ws.root/'processing-errors'/ep.id).glob('*.json'))
         assert store.load(ep)==original and not ws.stage_path(ep.id,'fine').exists()
+    finally:store.lockfile.close()
+
+
+@pytest.mark.parametrize('stage,label',[('coarse','pickup'),('fine','grasp_truss')])
+def test_explicit_review_save_confirms_only_selected_layer(tmp_path,stage,label):
+    ep=dataset(tmp_path/'source');store=Store([ep.root],tmp_path/'review');ws=Workspace(store)
+    try:
+        docs=ws.stages(ep);other='fine' if stage=='coarse' else 'coarse';before=copy.deepcopy(docs[other])
+        doc=docs[stage];doc['segments']=[dict(start_frame=0,end_frame=ep.length,label=label,reviewed=False)]
+        draft=ws.save_stage(ep,stage,doc)
+        assert not draft['segments'][0]['reviewed']
+        saved=ws.save_stage(ep,stage,draft,confirm_review=True)
+        assert all(r['reviewed'] for r in saved['segments'])
+        assert ws.stages(ep)[other]==before
+        assert saved['segments'][0]['start_frame']==0 and saved['segments'][0]['end_frame']==ep.length
+    finally:store.lockfile.close()
+
+
+def test_review_save_rejects_unknown_without_saving(tmp_path):
+    ep=dataset(tmp_path/'source');store=Store([ep.root],tmp_path/'review');ws=Workspace(store)
+    try:
+        doc=ws.stages(ep)['coarse']
+        with pytest.raises(ValueError,match='标签'):ws.save_stage(ep,'coarse',doc,confirm_review=True)
+        assert not ws.stage_path(ep.id,'coarse').exists()
     finally:store.lockfile.close()

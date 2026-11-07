@@ -1,11 +1,11 @@
 """English annotation vocabulary; Chinese remains in the review workspace only."""
 import copy
 
-CATALOG = {'profile': 'tomato-coarse-ab-en-v3',
+CATALOG = {'profile': 'tomato-coarse-four-prompts-en-v4',
  'goal': 'Harvest all tomatoes into the left basket and return stem to right plate',
  'coarse': {'pickup': 'Right hand grasps and lifts the truss to the center',
             'harvest': 'Right hand holds truss while left hand picks tomatoes into left basket',
-            'return': 'Right hand returns the truss to the right plate',
+            'return': 'Right hand returns the held object to the right plate',
             'adjust': 'Right fingers reposition the truss on the right plate'},
  'fine': {'grasp_truss': 'Grasp and secure the entire tomato truss with the right hand',
           'lift_truss': 'Lift the tomato truss with the right hand and move it to the center',
@@ -19,7 +19,6 @@ CATALOG = {'profile': 'tomato-coarse-ab-en-v3',
           'rotate_stem': 'Adjust the tomato truss with the right hand',
           'return_stem': 'After all tomatoes have been picked place the remaining stem back on the '
                          'right white plate with the right hand'},
- 'return_stem': 'Right hand returns the bare stem to the right plate',
  'numbers': {'unknown': 0, 'pickup': 1, 'harvest': 2, 'return': 3, 'adjust': 4}}
 DEFAULT_TASK_PROMPT=CATALOG['goal']
 PROMPT_PROFILE=CATALOG['profile']
@@ -28,8 +27,6 @@ SEQUENCE=('pickup','harvest','return','adjust','pickup','harvest','return')
 
 def stage_prompt(stage,rows,index):
     label=rows[index]['label']
-    if stage=='coarse' and index==6 and tuple(r['label'] for r in rows)==SEQUENCE:
-        return CATALOG['return_stem']
     return STAGE_PROMPTS[stage].get(label,'Unlabeled')
 
 def english_document(document):

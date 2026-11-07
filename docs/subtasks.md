@@ -161,3 +161,9 @@ normal页面点击“映射已保存粗/细阶段→speedup”时直接更新对
 豆包处理结果及内部草稿保存仍不自动确认为人工审核。HTTP 保存只有明确的 `confirm_review: true` 才批量确认；旧调用不传该选项时保留原确认状态。
 
 人工点击 normal→speedup 同步时，若 normal 所选层已经全部审核，对应 speedup 映射层同时保存为已审核；来源帧映射和来源校验不变。未审核完的 normal 保存层不会通过同步自动获得审核状态。同步后可直接导出 speedup JSON 到服务器，无需重复确认并保存；normal 和 speedup 的服务器导出仍各自执行。
+
+### 四类动作指令与七阶段进度（2026-11-07）
+
+粗标签保持 pickup、harvest、return、adjust 四类。每类唯一对应一种无标点英文指令，两个 return 都使用 `Right hand returns the held object to the right plate`。导出 profile 更新为 tomato-coarse-four-prompts-en-v4；不再按第七段位置替换裸杆指令。三段等非标准顺序也按动作类选英文，不猜测是否摘完。
+
+七阶段 Agent 仍保留 pickup_1、harvest_1、return_truss、adjust、pickup_2、harvest_2、return_stem 七个进度状态；中途放回与最终放回的后继不同，输出的动作类和 prompt 相同。阶段状态不能当成四类动作的编号，两次放回也不代表完成条件相同。细阶段标签与英文保持原定义。方案 A 总指令本轮未改。

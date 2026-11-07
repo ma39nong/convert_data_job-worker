@@ -283,7 +283,12 @@ def install(ws,state):
                     atomic_json(ws.root/'deliveries'/new/(stage+'.json'),record)
                 reg['retired'][old]=new
                 reg['entries'][new]={'directory_override':pack['review_directory'],'archived':pack['archived'],'original_episode_index':reg['entries'].get(old,{}).get('original_episode_index',row['source_episode_index']),'operation':state['operation']}
-                ws.queue[new]={'state':'ready' if all(r['label']!='unknown' for r in legacy['segments']) else 'pending'}
+                fine_ready=bool(snap['stages']['fine']['saved_at'] or all(r['label']!='unknown' for r in legacy['segments']))
+                proposal=ws.root/'coarse-proposals'/(new+'.json')
+                proposal_ready=proposal.exists() and json.loads(proposal.read_text()).get('provenance',{}).get('method') not in {'doubao_coarse_overview_v1','doubao_coarse_source_frames_v2'}
+                coarse_ready=bool(rough['saved_at'] or proposal_ready)
+                ws.queue[new]={'state':'ready' if fine_ready or coarse_ready else 'pending',
+                    'mode':'fine' if fine_ready else 'coarse' if coarse_ready else 'fine'}
         ledger=read(ws)
         for old,new in mapping.items():
             if old in ledger['entries']:ledger['entries'][new]=copy.deepcopy(ledger['entries'][old])

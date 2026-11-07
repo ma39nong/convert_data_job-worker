@@ -115,7 +115,7 @@ class Workspace:
             atomic_json(self.stage_path(ep.id,stage),saved)
             return saved
 
-    def normal_dependency(self,id_):
+    def normal_dependency(self,id_,stage='fine'):
         from .organization import registry
         retired=registry(self)['retired']
         entry=self.store.entries[id_]
@@ -124,10 +124,17 @@ class Workspace:
         matches=[e for e in self.store.entries.values() if e['id'] not in retired and e['variant']=='normal' and all(entry.get(k) is not None and entry[k]==e.get(k) for k in keys)]
         if len(matches)>1:raise ValueError('同源normal不唯一，请核对数据包')
         if not matches:return {'id':None,'ready':False,'reason':'等待导入同源normal'}
-        normal=matches[0];path=self.stage_path(normal['id'],'fine')
+        normal=matches[0];path=self.stage_path(normal['id'],stage)
         if not path.exists():path=self.store.path(normal['id'])
         doc=json.loads(path.read_text()) if path.exists() else None
         ready=bool(doc and doc['segments'] and all(s['label']!='unknown' for s in doc['segments']))
+        if stage=='coarse' and not ready:
+            proposal_path=self.root/'coarse-proposals'/(normal['id']+'.json')
+            if proposal_path.exists():
+                p=json.loads(proposal_path.read_text())
+                ready=bool(doc and p['source']==doc['source'] and p['base_annotation_revision']==doc['revision'] and
+                    p.get('provenance',{}).get('method') not in {'doubao_coarse_overview_v1','doubao_coarse_source_frames_v2'} and
+                    all(r['label']!='unknown' for r in p['segments']))
         return {'id':normal['id'],'ready':ready,'reason':'' if ready else '等待同源normal处理完成，再处理speedup'}
 
     def catalog(self):
@@ -155,24 +162,34 @@ class Workspace:
                 proposal_path=self.root/'coarse-proposals'/(entry['id']+'.json')
                 proposal=json.loads(proposal_path.read_text()) if proposal_path.exists() else None
                 rough_ready=bool(proposal and proposal.get('provenance',{}).get('method') not in {'doubao_coarse_overview_v1','doubao_coarse_source_frames_v2'} and ((doc and proposal['source']==doc['source'] and proposal['base_annotation_revision']==doc['revision']) or (not doc and proposal['base_annotation_revision']==0 and proposal['source']['dataset']==entry['dataset'] and proposal['source']['episode_index']==entry['episode_index'])))
-                q=self.queue.get(entry['id'],{});status=q.get('state','ready' if ready else 'pending')
-                if status not in {'running','failed','interrupted'} and ready:status='ready'
-                dependency=None
+                fine_ready=ready or bool(explicit_fine and all(s['label']!='unknown' for s in explicit_fine['segments']))
+                coarse_ready=ready or saved['coarse'] or rough_ready
+                q=self.queue.get(entry['id'],{})
+                mode=q.get('mode') or ('fine' if fine_ready else 'coarse' if coarse_ready else 'fine')
                 legacy_wait=q.get('error')=='请先处理同源normal，再处理speedup'
-                if entry['variant']=='speedup' and (status in {'pending','queued','interrupted','waiting_normal'} or legacy_wait):
-                    dependency=self.normal_dependency(entry['id'])
-                    if not dependency['ready']:status='waiting_normal'
-                    elif status=='waiting_normal' or legacy_wait:status='pending'
+                states={};dependencies={}
+                for stage,available in (('coarse',coarse_ready),('fine',fine_ready or saved['fine'])):
+                    status=q.get('state','pending') if mode==stage else 'pending'
+                    if available and status not in {'running','failed','interrupted'}:status='ready'
+                    elif not available and status=='ready':status='pending'
+                    dependencies[stage]=None
+                    if entry['variant']=='speedup' and not available and (status in {'pending','queued','interrupted','waiting_normal'} or (legacy_wait and mode==stage)):
+                        dependency=dependencies[stage]=self.normal_dependency(entry['id'],stage)
+                        if not dependency['ready']:status='waiting_normal'
+                        elif status=='waiting_normal' or legacy_wait:status='pending'
+                    states[stage]=status
+                status=states[mode];dependency=dependencies[mode]
                 item={**entry,'directory_id':group_id,'remote_directory':directory,'state':status,
                     'archived':override.get('archived',False),'original_episode_index':override.get('original_episode_index',entry['episode_index']),'coarse_saved':saved['coarse'],'fine_saved':saved['fine'],'error':q.get('error',''),
-                    'fine_ready':ready or bool(explicit_fine and all(s['label']!='unknown' for s in explicit_fine['segments'])),'coarse_ready':ready or saved['coarse'] or rough_ready,'processing_mode':q.get('mode','fine'),'human_reviewed':reviewed,'depends_on':dependency['id'] if dependency else None}
+                    'fine_ready':fine_ready,'coarse_ready':coarse_ready,'coarse_state':states['coarse'],'fine_state':states['fine'],
+                    'processing_mode':mode,'human_reviewed':reviewed,'depends_on':dependency['id'] if dependency else None}
                 if status=='waiting_normal':item['error']=dependency['reason']
                 elif legacy_wait:item['error']=''
                 for key in ('source_start_ns','source_end_ns'):
                     if item.get(key) is not None:item[key]=str(item[key])
                 exclusion=exclusions.get(entry['id'],{})
                 item['excluded']=bool(exclusion.get('excluded'));item['exclusion']=exclusion
-                if item['excluded']:status=item['state']='excluded'
+                if item['excluded']:status=item['state']=item['coarse_state']=item['fine_state']='excluded'
                 episodes.append(item)
                 group=groups.setdefault(group_id,{'id':group_id,'path':group_directory,'host':host,'total':0,'ready':0,'pending':0,'running':0,'failed':0,'coarse_saved':0,'fine_saved':0,'excluded':0})
                 group['total']+=1

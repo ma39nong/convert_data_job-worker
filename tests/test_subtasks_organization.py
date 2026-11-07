@@ -189,20 +189,34 @@ def test_second_compaction_appends_to_existing_c_and_flattens_old_links(tmp_path
     finally:store.lockfile.close()
 
 
-def test_compaction_preserves_unsaved_coarse_only_proposal(tmp_path,monkeypatch):
+@pytest.mark.parametrize('method,complete',[('doubao_coarse_source_frames_v2',False),('coarse_from_full_analysis_v3',True)])
+def test_compaction_preserves_unsaved_coarse_only_proposal(tmp_path,monkeypatch,method,complete):
     store,ws,ids,sources,physical=setup_pair(tmp_path,monkeypatch)
     try:
         old=ids['normal',2];ep=ws.store.episode(old);doc=ws.store.load(ep)
         ws.stage_path(old,'coarse').unlink()
         atomic_json(ws.root/'coarse-proposals'/(old+'.json'),{'source':doc['source'],
             'base_annotation_revision':doc['revision'],'segments':[{'start_frame':0,'end_frame':ep.length,'label':'harvest','reviewed':False}],
-            'warning':'coarse overview','provenance':{'method':'doubao_coarse_source_frames_v2','boundary_audit':{'scope':'every_coarse_boundary'}}})
+            'warning':'coarse overview','provenance':{'method':method,'boundary_audit':{'scope':'every_coarse_boundary'}}})
         result=org.execute(ws,old,plan(ws,old)['plan_hash'])
         new=result['selected_id'];layers=ws.stages(ws.store.episode(new))
         assert layers['coarse']['segments'][0]['label']=='harvest'
         assert layers['coarse']['saved_at'] is None and layers['coarse']['processing_mode']=='coarse'
         assert layers['coarse']['boundary_audit']['scope']=='every_coarse_boundary'
         assert layers['fine']['segments'][0]['label']=='unknown'
+        from convest.subtasks.processing_queue import remaining
+        entry=next(e for e in ws.catalog()['episodes'] if e['id']==new)
+        assert entry['coarse_ready'] is complete
+        assert entry['coarse_state']==('ready' if complete else 'pending')
+        assert entry['fine_state']=='pending'
+        assert (new in remaining(ws,'coarse')) is not complete
+        if complete:
+            assert entry['state']=='ready' and entry['processing_mode']=='coarse'
+            assert ws.queue[new]['state']=='ready' and ws.queue[new]['mode']=='coarse'
+            # Layer readiness remains authoritative for old installations whose
+            # queue was incorrectly reset to pending without a mode.
+            ws.queue[new]={'state':'pending'}
+            assert next(e for e in ws.catalog()['episodes'] if e['id']==new)['state']=='ready'
     finally:ws.store.lockfile.close()
 
 

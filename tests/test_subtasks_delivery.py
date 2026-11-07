@@ -28,7 +28,11 @@ def test_local_json_separate_paths_idempotent_and_no_source_mutation(tmp_path):
         assert Path(f['path']).name=='episode_000000.json'
         assert '/fine/' in f['path'] and '/coarse/' in c['path'] and f['path']!=c['path']
         assert json.loads(Path(f['path']).read_text())['stage']=='fine'
+        assert json.loads(Path(f['path']).read_text())['inherited'] is False
+        assert Path(f['path']).stat().st_mode & 0o777 == 0o640
+        Path(f['path']).chmod(0o600)
         assert publish(ws,ep,'fine',target='local',root=str(tmp_path/'chosen'),revision=fine['revision'])['path']==f['path']
+        assert Path(f['path']).stat().st_mode & 0o777 == 0o640
         assert ep.identity()==before
         with pytest.raises(ValueError,match='版本'):publish(ws,ep,'fine',target='local',root=str(tmp_path/'chosen'),revision=0)
         with pytest.raises(ValueError,match='输入'):publish(ws,ep,'fine',target='local',root=str(ep.root),revision=1)

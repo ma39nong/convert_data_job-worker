@@ -39,7 +39,7 @@ def english_document(document):
     Source identifiers/paths are provenance and must never be translated.
     """
     out={k:copy.deepcopy(v) for k,v in document.items() if k in
-         ('schema_version','stage','revision','source','saved_at','projection')}
+         ('schema_version','stage','revision','source','saved_at','projection','inherited')}
     if 'projection' in out:
         out['projection']={k:v for k,v in out['projection'].items() if k not in ('review_events','normal_review_events')}
     out['language']='en'

@@ -54,12 +54,15 @@ def publish_file(path,data):
  path.parent.mkdir(parents=True,exist_ok=True)
  if not path.parent.resolve().is_relative_to(base):raise ValueError('Unsafe output symlink')
  if path.exists():
-  if path.read_bytes()==data:return
+  if path.read_bytes()==data:
+   path.chmod(0o640)
+   return
   old=json.loads(path.read_bytes());new=json.loads(data)
   if old.get('stage')!=new.get('stage') or any(old.get('source',{}).get(k)!=new.get('source',{}).get(k) for k in ('episode_index','source_recording_id')):raise ValueError('Existing output belongs to another source')
  fd,name=tempfile.mkstemp(prefix='.subtask-',dir=path.parent)
  try:
-  with os.fdopen(fd,'wb') as f:f.write(data);f.flush();os.fsync(f.fileno())
+  with os.fdopen(fd,'wb') as f:
+   f.write(data);f.flush();os.fchown(f.fileno(),-1,path.parent.stat().st_gid);os.fchmod(f.fileno(),0o640);os.fsync(f.fileno())
   os.replace(name,path)
  finally:
   if os.path.exists(name):os.unlink(name)

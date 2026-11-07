@@ -45,3 +45,10 @@ def test_stage_training_copy_uses_occurrence_specific_english(tmp_path):
         for name in ('stage_annotations.json','meta/subtask_prompts.json'):
             assert not re.search('[\u4e00-\u9fff]',base64.b64decode(files[name]).decode())
     finally:store.lockfile.close()
+
+
+def test_export_preserves_explicit_inheritance_without_inventing_review():
+    for value in (False, True):
+        doc={'stage':'coarse','segments':[], 'inherited':value}
+        assert english_document(doc)['inherited'] is value
+    assert 'inherited' not in english_document({'stage':'coarse','segments':[]})

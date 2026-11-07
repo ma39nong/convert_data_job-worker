@@ -78,13 +78,15 @@ def plan(ws,id_):
     from .organization import remote_path,registry
     import hashlib
     with ws.lock,ws.store.lock:
-        seeds=paired(ws,id_);ledger=read(ws);reg=registry(ws);retired=reg['retired'];packages=[];blockers=[];warnings=[]
+        seeds=paired(ws,id_);ledger=read(ws);reg=registry(ws);retired=reg['retired'];packages=[];blockers=[];warnings=[];missing_packages=[]
         if any(reg['entries'].get(e['id'],{}).get('archived') for e in seeds):raise ValueError('C隔离包不作为整理入口，请选择A/B保留数据包')
         groups=[];archive_groups=[];base_groups=[]
         for seed in seeds:
             server_path=remote_path(seed)
             rows=sorted((e for e in ws.store.entries.values() if e['id'] not in retired and remote_path(e)==server_path),key=lambda e:e['episode_index'])
             expected=[json.loads(line)['episode_index'] for line in (Path(seed['dataset'])/'meta/episodes.jsonl').read_text().splitlines() if line.strip()]
+            missing=sorted(set(expected)-{e['episode_index'] for e in rows})
+            if missing:missing_packages.append({'path':server_path,'episodes':missing})
             if len(rows)!=len(expected) or {e['episode_index'] for e in rows}!=set(expected):blockers.append(f"{seed['variant']}: 本包未完整导入或存在重复缓存，不能整理")
             base_groups.append(rows)
             archived=[e for e in ws.store.entries.values() if e['id'] not in retired and reg['entries'].get(e['id'],{}).get('archived') and reg['entries'][e['id']].get('directory_override')==server_path]
@@ -96,22 +98,41 @@ def plan(ws,id_):
             key=tuple(str(e.get(k)) for k in ('source_recording_id','source_start_ns','source_end_ns'))
             order[key]=(excluded,counts[excluded]);counts[excluded]+=1
         for seed,rows in zip(seeds,groups):
-            included=[];rejected=[]
+            included=[];rejected=[];unpaired=[]
             for e in rows:
                 key=tuple(str(e.get(k)) for k in ('source_recording_id','source_start_ns','source_end_ns'))
                 excluded=bool(ledger['entries'].get(e['id'],{}).get('excluded'))
-                if key not in order or excluded!=order[key][0]:blockers.append('normal/speedup配对或剔除状态不一致');continue
-                new=order[key][1];doc=ws.stages(ws.store.episode(e['id']));coarse=doc['coarse']
+                standalone=False
+                if key not in order:
+                    # A speedup package can contain additional recordings absent
+                    # from normal. Preserve them after paired recordings; never
+                    # silently drop them or guess an exclusion.
+                    try:paired(ws,e['id'])
+                    except ValueError as exc:
+                        if (seed['variant']=='speedup' and not excluded and all(e.get(k) not in (None,'') for k in ('source_recording_id','source_start_ns','source_end_ns'))
+                                and '缺失或不唯一' in str(exc)):
+                            opposite=[other for other in ws.store.entries.values() if other['id'] not in retired and other['variant']=='normal' and
+                                      tuple(str(other.get(k)) for k in ('source_recording_id','source_start_ns','source_end_ns'))==key]
+                            same=[other for other in rows if tuple(str(other.get(k)) for k in ('source_recording_id','source_start_ns','source_end_ns'))==key]
+                            standalone=not opposite and len(same)==1
+                    if not standalone:blockers.append('normal/speedup配对或剔除状态不一致');continue
+                elif excluded!=order[key][0]:blockers.append('normal/speedup配对或剔除状态不一致');continue
+                new=counts[False]+len(unpaired) if standalone else order[key][1]
+                if standalone:unpaired.append(e['episode_index'])
+                doc=ws.stages(ws.store.episode(e['id']));coarse=doc['coarse']
                 reviewed=bool(coarse['saved_at'] and all(s['reviewed'] and s['label']!='unknown' for s in coarse['segments']))
-                row={'id':e['id'],'source_episode_index':e['episode_index'],'new_episode_index':new,'reviewed':reviewed,'coarse_revision':coarse['revision'],'fine_revision':doc['fine']['revision'],'annotation_revision':ws.store.load(ws.store.episode(e['id']))['revision']}
+                row={'id':e['id'],'source_episode_index':e['episode_index'],'new_episode_index':new,'reviewed':reviewed,'coarse_revision':coarse['revision'],'fine_revision':doc['fine']['revision'],'annotation_revision':ws.store.load(ws.store.episode(e['id']))['revision'],'unpaired':standalone}
                 (rejected if excluded else included).append(row)
                 if not excluded and not reviewed:warnings.append(f"{e['variant']} episode {e['episode_index']}: 标注尚未全部确认，整理后仍需审核，不代表可训练")
                 if ws.queue.get(e['id'],{}).get('state')=='running':blockers.append(f"{e['variant']} episode {e['episode_index']}: 正在处理")
+                if standalone:
+                    warnings.append(f"speedup episode {e['episode_index']}: 无normal对应，默认保留并排在已配对录制之后，仍待人工审核")
+                    continue
                 try:
                     other=paired(ws,e['id'])
                     if any(o['id'] not in {entry['id'] for group in groups for entry in group} for o in other):raise ValueError('配对落在其他数据包')
                 except ValueError as exc:blockers.append(str(exc))
-            packages.append({'variant':seed['variant'],'source':seed['dataset'],'remote_source':remote_path(seed),'c_target':target(seed),'included':sorted(included,key=lambda r:r['new_episode_index']),'rejected':sorted(rejected,key=lambda r:r['new_episode_index'])})
-        result={'quarantine_revision':ledger['revision'],'packages':packages,'blockers':list(dict.fromkeys(blockers)),'review_warnings':warnings,'ready':not blockers,'operation':'compact_pair','source_files_changed':False}
+            packages.append({'variant':seed['variant'],'source':seed['dataset'],'remote_source':remote_path(seed),'c_target':target(seed),'included':sorted(included,key=lambda r:r['new_episode_index']),'rejected':sorted(rejected,key=lambda r:r['new_episode_index']),'unpaired_preserved':unpaired})
+        result={'quarantine_revision':ledger['revision'],'packages':packages,'missing_packages':missing_packages,'blockers':list(dict.fromkeys(blockers)),'review_warnings':warnings,'ready':not blockers,'operation':'compact_pair','source_files_changed':False}
         result['plan_hash']=hashlib.sha256(json.dumps(result,sort_keys=True).encode()).hexdigest()
         return result

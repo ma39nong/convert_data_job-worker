@@ -30,6 +30,15 @@ def remote_path(entry):
     return json.loads(p.read_text())['manifest']['dataset'] if p.exists() else entry['dataset']
 
 
+def prepare(ws,id_):
+    """Complete local caches for preview only; never rewrite server packages."""
+    from .quarantine import paired,plan
+    with ws.lock,ws.store.lock:
+        paths=[remote_path(e) for e in paired(ws,id_)]
+    imports=[ws._import_directory(path) for path in paths]
+    return {'imports':imports,'plan':plan(ws,id_)}
+
+
 def remote(script,body):
     r=subprocess.run(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=10','28',shlex.join(['python3','-c',script])],input=json.dumps(body),text=True,capture_output=True,timeout=3600)
     if r.returncode:raise ValueError('整理未完成：'+r.stderr[-1200:])
@@ -124,7 +133,9 @@ def build_package(ws,rows,destination,remote_destination,operation,metadata):
             value=json.loads(processing.read_text());value['episode_index']=new
             if 'source_episode_index' in value:value['source_episode_index']=new
             atomic_json(destination/f'processing/episode_{new:06d}.json',value)
-        entries.append({**ep.entry,'episode_index':new,'subtask_original_episode_index':ep.entry.get('subtask_original_episode_index',old)});statistics.append(per);offset+=ep.length
+        entry={**ep.entry,'episode_index':new,'subtask_original_episode_index':ep.entry.get('subtask_original_episode_index',old)}
+        if row.get('unpaired'):entry['subtask_unpaired_retained']=True
+        entries.append(entry);statistics.append(per);offset+=ep.length
         mapping.append({'old_id':ep.id,'source_dataset':server_source,'source_episode_index':old,'episode_index':new,'source_recording_id':ep.entry['source_recording_id'],'source_sha256':identity['sha256']})
     info.update(total_episodes=len(rows),total_frames=offset,total_videos=len(rows)*len(seed.cameras),total_chunks=math.ceil(len(rows)/chunk),splits={'train':f'0:{len(rows)}'})
     info['subtask_partition']='quarantine' if Path(remote_destination).parent.name=='C' else 'retained'

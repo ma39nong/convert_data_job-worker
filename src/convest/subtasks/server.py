@@ -249,6 +249,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(self.server.submit(lambda:publish(self.server.workspace,ep,body.get('stage'),target=body.get('target','dataset'),root=body.get('root'),kind=body.get('kind','json'),revision=body.get('revision'),prompt_mode=body.get('prompt_mode','goal'),task_prompt=body.get('task_prompt',DEFAULT_TASK_PROMPT)),lock_store=False))
             if route == '/api/workspace/map':
                 return self.send({'result':self.server.workspace.map_saved(body['normal_id'],body['speedup_id'],body.get('stages'),replace=body.get('replace') is True)})
+            if route == '/api/workspace/organize-prepare':
+                from .organization import prepare
+                return self.send(self.server.submit(lambda:prepare(self.server.workspace,body['id']),lock_store=False))
             if route == '/api/workspace/import-many':
                 items=body.get('items')
                 return self.send(self.server.submit(lambda:self.server.workspace.import_many(items),lock_store=False))

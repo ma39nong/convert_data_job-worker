@@ -16,9 +16,9 @@ from convest.subtasks.quarantine import change,plan
 from convest.subtasks import organization as org
 
 
-def full_dataset(root,speedup=False):
+def full_dataset(root,speedup=False,count=3):
     first=dataset(root,speedup=speedup,recording='recording-0');n=first.length;info=copy.deepcopy(first.info);rows=[]
-    for i in range(3):
+    for i in range(count):
         if i:
             table=first.table
             table=table.set_column(table.schema.get_field_index('episode_index'),'episode_index',pa.array([i]*n,type=pa.int64()))
@@ -28,18 +28,18 @@ def full_dataset(root,speedup=False):
             if speedup:
                 doc=json.loads((root/'processing/episode_000000.json').read_text());doc['episode_index']=i;atomic_json(root/f'processing/episode_{i:06d}.json',doc)
         rows.append({**first.entry,'episode_index':i,'source_recording_id':f'recording-{i}'})
-    info.update(total_episodes=3,total_frames=3*n,total_videos=9,total_tasks=1,total_chunks=1,splits={'train':'0:3'})
+    info.update(total_episodes=count,total_frames=count*n,total_videos=3*count,total_tasks=1,total_chunks=1,splits={'train':f'0:{count}'})
     atomic_json(root/'meta/info.json',info);(root/'meta/episodes.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in rows))
 
 
-def setup_pair(tmp_path,monkeypatch):
+def setup_pair(tmp_path,monkeypatch,extra_speedup=False):
     virtual='/mnt/data/train_platform/datasets/tomato_sharpa';server=tmp_path/'server';cache=tmp_path/'cache';native_run=subprocess.run
     def physical(path):return server/str(path).removeprefix('/mnt/data/train_platform/datasets/')
     sources={}
     for variant in ('normal','speedup'):
-        path=f'{virtual}/{variant}/no-block-more/A/1102_{variant}_lerobot';source=physical(path);sources[variant]=path;full_dataset(source,speedup=variant=='speedup')
+        path=f'{virtual}/{variant}/no-block-more/A/1102_{variant}_lerobot';source=physical(path);sources[variant]=path;full_dataset(source,speedup=variant=='speedup',count=4 if extra_speedup and variant=='speedup' else 3)
         # Three partial caches deliberately share the SAME remote package.
-        for i in range(3):
+        for i in range(4 if extra_speedup and variant=='speedup' else 3):
             dest=cache/f'{variant}-{i}';shutil.copytree(source/'meta',dest/'meta')
             for folder in ['data/chunk-000']+[f'videos/chunk-000/observation.images.cam{c}' for c in range(3)]:
                 p=dest/folder;p.mkdir(parents=True,exist_ok=True);ext='parquet' if folder.startswith('data') else 'mp4';shutil.copyfile(source/folder/f'episode_{i:06d}.{ext}',p/f'episode_{i:06d}.{ext}')
@@ -47,6 +47,7 @@ def setup_pair(tmp_path,monkeypatch):
             ep=Episode(dest,i);identity=ep.identity();atomic_json(dest/'cache-source.json',{'host':'28','manifest':{'dataset':path,'files':{rel:{'sha256':value} for rel,value in identity['sha256'].items()}},'all_selected_sha256_verified':True})
     store=Store([cache],tmp_path/'review');ws=Workspace(store);ids={(e['variant'],e['episode_index']):e['id'] for e in store.entries.values()}
     for (variant,i),id_ in ids.items():
+        if extra_speedup and variant=='speedup' and i==3:continue
         ep=store.episode(id_);doc=ws.stages(ep)['coarse'];doc['segments']=[{'start_frame':0,'end_frame':ep.length,'label':'pickup','reviewed':not(variant=='speedup' and i==2)}];ws.save_stage(ep,'coarse',doc)
     change(ws,ids['normal',1],True,'empty hand placement',0)
     def remote(script,body):
@@ -203,3 +204,38 @@ def test_compaction_preserves_unsaved_coarse_only_proposal(tmp_path,monkeypatch)
         assert layers['coarse']['boundary_audit']['scope']=='every_coarse_boundary'
         assert layers['fine']['segments'][0]['label']=='unknown'
     finally:ws.store.lockfile.close()
+
+
+def test_complete_package_preserves_unpaired_speedup_and_all_physical_data(tmp_path,monkeypatch):
+    store,ws,ids,sources,physical=setup_pair(tmp_path,monkeypatch,extra_speedup=True)
+    try:
+        original=store.episode(ids['speedup',3]);physical_columns=[c for c in original.table.column_names if c not in ('index','episode_index')]
+        values=original.table.select(physical_columns);video_hashes={k:sha(p) for k,p in original.cameras.items()}
+        # Simulate the old counterpart-only import: preview blocks until full cache exists.
+        extra=store.entries.pop(ids['speedup',3])
+        incomplete=plan(ws,ids['normal',0]);assert not incomplete['ready']
+        assert incomplete['missing_packages']==[{'path':sources['speedup'],'episodes':[3]}]
+        imports=[]
+        def load(path):
+            imports.append(path)
+            if path==sources['speedup']:store.entries[extra['id']]=extra
+            return {'directory':path,'imported':int(path==sources['speedup'])}
+        monkeypatch.setattr(ws,'_import_directory',load)
+        complete=org.prepare(ws,ids['normal',0])['plan']
+        assert imports==[sources['normal'],sources['speedup']]
+        assert complete['ready'] and not complete['missing_packages']
+        speed=complete['packages'][1]
+        assert speed['unpaired_preserved']==[3]
+        assert [(r['source_episode_index'],r['new_episode_index']) for r in speed['included']]==[(0,0),(2,1),(3,2)]
+        assert [r['source_episode_index'] for r in speed['rejected']]==[1]
+        org.execute(ws,ids['normal',0],complete['plan_hash'])
+        retained=physical(sources['speedup']);info=json.loads((retained/'meta/info.json').read_text())
+        assert info['total_episodes']==3
+        ep=Episode(retained,2)
+        assert ep.table.select(physical_columns).equals(values)
+        assert {k:sha(p) for k,p in ep.cameras.items()}==video_hashes
+        assert ep.entry['subtask_unpaired_retained'] is True
+        assert not (retained/'annotations/subtasks/coarse/episode_000002.json').exists()
+        row=next(e for e in ws.catalog()['episodes'] if e['variant']=='speedup' and not e['excluded'] and e['episode_index']==2)
+        assert row['pair_state']=='missing' and not row['coarse_saved']
+    finally:store.lockfile.close()

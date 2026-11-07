@@ -149,8 +149,8 @@ function renderPair(){
     box.append(p,makeButton('查看对应 '+other.variant,()=>showEpisode(other.id)));
     if(entry.variant==='normal'){
       for(const stage of ['coarse','fine']){const m=state.pair.mapping[stage];const status=document.createElement('p');status.textContent='speedup '+(stage==='coarse'?'粗':'细')+'阶段：'+(m?(m.stale?'normal 已更新，需要重新映射':`已映射 normal 第${m.source_revision}版，等待speedup复核`):'还未从已保存结果映射');box.append(status);}
-      const label=document.createElement('label');label.className='check';const check=document.createElement('input');check.type='checkbox';check.id='replaceMapping';label.append(check,document.createTextNode('更新 speedup 已保存结果（保留历史）'));box.append(label);
-      for(const stage of ['coarse','fine'])box.append(makeButton('映射已保存'+(stage==='coarse'?'粗':'细')+'阶段 → speedup',async()=>{if(dirty())throw Error('请先保存当前修改再映射');const r=await api('/api/workspace/map',{normal_id:entry.id,speedup_id:other.id,stages:[stage],replace:check.checked});await refreshCatalog();await load(entry.id,true);message(r.result.warning+' 已生成对应'+(stage==='coarse'?'粗':'细')+'阶段的映射草稿；切换speedup检查、确认后再保存审核结果。');}));
+      const hint=document.createElement('p');hint.className='muted';hint.textContent='点击映射会直接替换 speedup 对应阶段，旧结果保留历史。';box.append(hint);
+      for(const stage of ['coarse','fine'])box.append(makeButton('映射已保存'+(stage==='coarse'?'粗':'细')+'阶段 → speedup',async()=>{if(dirty())throw Error('请先保存当前修改再映射');const r=await api('/api/workspace/map',{normal_id:entry.id,speedup_id:other.id,stages:[stage],replace:true});await refreshCatalog();await load(entry.id,true);message(r.result.warning+' 已生成对应'+(stage==='coarse'?'粗':'细')+'阶段的映射草稿；切换speedup检查、确认后再保存审核结果。');}));
     }else{
       for(const stage of ['coarse','fine']){const m=state.pair.mapping[stage];const status=document.createElement('p');status.textContent=(stage==='coarse'?'粗':'细')+'阶段：'+(m?(m.stale?'normal 已更新，当前映射需要更新':`按来源帧映射自 normal 第${m.source_revision}版，需看片确认`):'尚无已保存的工作区映射；可到normal保存后映射。');box.append(status);}
     }

@@ -122,3 +122,37 @@ def test_parallel_workers_finish_first_pass_before_retry_and_resume_all_inflight
         queue.run(ws,SimpleNamespace(processing_workers=3),batch['id'])
         assert sorted(resumed)==sorted(ids[1:])
     finally:ws.store.lockfile.close()
+
+
+def test_selected_workers_are_persisted_and_override_server_default(tmp_path,monkeypatch):
+    import threading
+    ws,ids=workspace(tmp_path);lock=threading.Lock();barrier=threading.Barrier(2,timeout=5)
+    started=[];counts={'active':0,'max':0}
+    def process(selected,server,**kw):
+        with lock:
+            started.append(selected[0]);position=len(started)
+            counts['active']+=1;counts['max']=max(counts['max'],counts['active'])
+        if position<=2:barrier.wait()
+        with lock:counts['active']-=1
+        return {'episodes':[{'id':selected[0],'state':'ready'}]}
+    monkeypatch.setattr(ws,'process',process)
+    try:
+        batch=queue.create(ws,ids,'coarse',workers=2)
+        assert queue.active(ws)['workers']==2
+        queue.run(ws,SimpleNamespace(processing_workers=1),batch['id'])
+        assert counts['max']==2 and len(started)==len(ids)
+        assert queue.active(ws)['workers']==2
+        batch=queue.active(ws);batch.update(state='running',initial_done=[],retry_order=None,retry_done=[])
+        queue.checkpoint(ws,batch);started.clear();counts.update(active=0,max=0)
+        queue.run(ws,SimpleNamespace(processing_workers=8),batch['id'])
+        assert counts['max']==2 and queue.active(ws)['workers']==2
+    finally:ws.store.lockfile.close()
+
+
+@pytest.mark.parametrize('workers',[0,9,True,'2',2.5])
+def test_invalid_worker_selection_does_not_create_batch(tmp_path,workers):
+    ws,ids=workspace(tmp_path)
+    try:
+        with pytest.raises(ValueError,match='同时处理数量'):queue.create(ws,ids,'coarse',workers=workers)
+        assert queue.active(ws) is None
+    finally:ws.store.lockfile.close()

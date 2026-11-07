@@ -31,7 +31,8 @@ def remaining(ws,mode='coarse',variant='normal'):
     return [e['id'] for e in sorted(rows,key=key)]
 
 
-def create(ws,ids,mode):
+def create(ws,ids,mode,workers=None):
+    if workers is not None and (type(workers) is not int or not 1<=workers<=8):raise ValueError('同时处理数量须为1–8的整数')
     if mode not in {'coarse','fine'}:raise ValueError('无效处理模式')
     if not ids or len(ids)!=len(set(ids)) or any(i not in ws.store.entries for i in ids):raise ValueError('没有可排队的片段')
     previous=active(ws)
@@ -40,6 +41,7 @@ def create(ws,ids,mode):
     ids=sorted(ids,key=lambda i:ws.store.entries[i]['variant']=='speedup')
     batch={'id':uuid.uuid4().hex,'mode':mode,'state':'queued','order':ids,'phase':'initial',
            'initial_done':[],'retry_order':None,'retry_done':[],'results':{},'current_id':None,'created_at':time.time()}
+    if workers is not None:batch['workers']=workers
     checkpoint(ws,batch)
     with ws.lock:
         for id_ in ids:ws.queue[id_]={'state':'queued','mode':mode,'batch_id':batch['id']}
@@ -50,7 +52,7 @@ def create(ws,ids,mode):
 def run(ws,server,batch_id):
     batch=active(ws)
     if not batch or batch['id']!=batch_id:raise ValueError('处理队列来源不一致')
-    workers=max(1,min(8,getattr(server,'processing_workers',1)))
+    workers=max(1,min(8,batch.get('workers',getattr(server,'processing_workers',1))))
     batch.update(state='running',workers=workers,current_ids=[]);checkpoint(ws,batch)
     for phase in ('initial','retry'):
         if phase=='retry' and batch['retry_order'] is None:

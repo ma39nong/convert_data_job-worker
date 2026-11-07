@@ -12,3 +12,5 @@
 .episode-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.danger{color:#a34331;border-color:#dcb8af;background:#fff8f4}.quarantine-banner{padding:14px;border:1px solid #ddbcad;border-radius:8px;background:#fff4e9;margin-bottom:14px}#quarantineDialog,#organizeDialog{max-width:780px}#quarantineReason{width:100%;margin:8px 0}#quarantineError{color:#9c4935}.filters{flex-wrap:wrap}
 
 .library-bottom{flex-wrap:wrap}.queue-actions{flex-wrap:wrap;justify-content:flex-end}.queue-actions label{display:flex;align-items:center;gap:6px;white-space:nowrap}#processHint{font-size:12px;margin:0 0 10px}
+
+.parallel-settings{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0 6px}.parallel-settings label{font-size:13px}.parallel-settings select{padding:6px 10px}

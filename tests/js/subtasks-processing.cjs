@@ -15,3 +15,15 @@ console.log('processing modes: coarse-to-fine continuation, version scope, prese
 const group={id:'d'},rows=[{...e,directory_id:'d',state:'pending',coarse_state:'ready',fine_state:'pending',coarse_ready:true}];
 c.state.processMode='coarse';assert.equal(c.directoryStats(group,rows).pending,0);assert(!c.canProcess(rows[0]));
 c.state.processMode='fine';assert.equal(c.directoryStats(group,rows).pending,1);assert(c.canProcess(rows[0]));
+
+(async()=>{
+  const requests=[];
+  const api={state:{processMode:'coarse',processWorkers:2,processingModes:['coarse','fine']},dirty:()=>false,startJob:async(path,body,kind)=>requests.push({path,body,kind})};
+  vm.createContext(api);
+  for(const name of ['startRemaining','startProcessing'])vm.runInContext(source.split('\n').find(l=>l.startsWith('async function '+name+'(')),api);
+  await api.startRemaining();await api.startProcessing(['new-video']);
+  assert.equal(requests[0].body.workers,2);assert.equal(requests[0].body.all_remaining,true);
+  assert.equal(requests[1].body.workers,2);assert.deepEqual(Array.from(requests[1].body.ids),['new-video']);
+  api.state.processWorkers=8;await api.startRemaining();assert.equal(requests[2].body.workers,8);
+  console.log('both processing entry points forward selected parallel worker count passed');
+})().catch(e=>{console.error(e);process.exitCode=1;});

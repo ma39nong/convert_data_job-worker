@@ -346,3 +346,18 @@ def test_review_save_rejects_unknown_without_saving(tmp_path):
         with pytest.raises(ValueError,match='标签'):ws.save_stage(ep,'coarse',doc,confirm_review=True)
         assert not ws.stage_path(ep.id,'coarse').exists()
     finally:store.lockfile.close()
+
+
+def test_http_all_remaining_uses_selected_batch_workers(tmp_path,monkeypatch):
+    from convest.subtasks import processing_queue
+    ep=dataset(tmp_path/'normal');server=Server(('127.0.0.1',0),[ep.root],tmp_path/'review',doubao_key='test')
+    monkeypatch.setattr(processing_queue,'run',lambda *a,**kw:{'episodes':[]})
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();base=f'http://127.0.0.1:{server.server_port}'
+    try:
+        payload={'mode':'coarse','all_remaining':True,'workers':2}
+        req=urllib.request.Request(base+'/api/workspace/process',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json','X-Subtasks-Token':server.token})
+        result=json.load(urllib.request.urlopen(req))
+        batch=processing_queue.active(server.workspace)
+        assert result['batch_id']==batch['id'] and batch['workers']==2 and batch['order']==[ep.id]
+        assert json.load(urllib.request.urlopen(base+'/api/bootstrap'))['processing_workers']==server.processing_workers
+    finally:server.shutdown();server.server_close();thread.join()

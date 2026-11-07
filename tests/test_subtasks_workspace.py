@@ -62,9 +62,9 @@ def test_import_reuses_registered_remote_episode_without_download(tmp_path,monke
     monkeypatch.setattr(remote,'web_inventory',lambda *a:{'dataset':path,'episodes':[{'episode_index':0}]})
     monkeypatch.setattr(remote,'fetch',lambda *a:pytest.fail('重复导入不应再下载'))
     try:
-        result=ws.import_directory('sftp://28'+path,[0]);assert result=={'directory':path,'imported':0,'reused':1,'episodes':1}
+        result=ws._import_directory('sftp://28'+path,[0]);assert result=={'directory':path,'imported':0,'reused':1,'episodes':1}
         assert len(ws.catalog()['episodes'])==1
-        with pytest.raises(ValueError,match='实际存在'):ws.import_directory(path,[99])
+        with pytest.raises(ValueError,match='实际存在'):ws._import_directory(path,[99])
     finally:store.lockfile.close()
 
 
@@ -126,7 +126,7 @@ def test_import_new_cache_is_separate_and_registered_after_restart(tmp_path,monk
         atomic_json(destination/'cache-source.json',{'host':'28','manifest':{'dataset':remote_path}})
     monkeypatch.setattr(remote,'fetch',fetch)
     try:
-        r=ws.import_directory(remote_path,[0]);assert r['imported']==1 and len(ws.catalog()['episodes'])==2
+        r=ws._import_directory(remote_path,[0]);assert r['imported']==1 and len(ws.catalog()['episodes'])==2
         assert not ws.cache_root.is_relative_to(ep.root)
         assert source_before=={str(p):sha(p) for p in ep.root.rglob('*') if p.is_file()}
     finally:store.lockfile.close()

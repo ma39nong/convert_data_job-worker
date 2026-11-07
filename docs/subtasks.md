@@ -145,3 +145,5 @@ JSON本身不会让训练代码自动读取subtask。因此导出内容还可选
 队列保存在workspace/active-processing-batch.json和processing-batches/<id>.json，每条结束均原子记录；服务重启自动继续未完成条目，已完成条目不重复排。页面显示首轮/重试及当前条数。自动完成的是待审核草稿，不自动确认、导出或训练。speedup继续使用normal的来源帧映射，独立查看与审核。
 
 批次支持按 episode 有界并行；`SUBTASKS_PROCESSING_WORKERS` 默认1，允许1至8。当前工作机按审核截止需求设置6路。每条仍运行相同模型、人工参考及完整原帧复核，不降低采样/推理标准。协调线程独占批次检查点写入；Workspace/Store原锁保护独立episode发布。首轮所有在途条目结束才开启重试，重启时按未完成集合续排所有在途条目。并发只提高整批吞吐量，不保证固定完成时刻或提高标注准确率。
+
+导入normal包后默认自动查找同层级speedup目录，按source_recording_id及source_start_ns/source_end_ns查找唯一对应录制并载入，只选择当前已导入normal的对应条目。normal/speedup编号或包后缀不同也可匹配；无来源信息、未找到、多重匹配或下载失败会报告，不强行配对且normal导入仍保留。重复导入会复用缓存并补查缺失配对。自动载入不运行模型、不自动确认或覆盖speedup标签，保存的normal粗/细层仍通过映射按钮转移。

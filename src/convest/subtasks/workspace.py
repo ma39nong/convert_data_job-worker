@@ -189,6 +189,16 @@ class Workspace:
             return {'redirects':organized['retired'],'directories':list(groups.values()),'episodes':episodes,'batch':json.loads(batch_path.read_text()) if batch_path.exists() else None}
 
     def import_directory(self,value,selection=None):
+        result=self._import_directory(value,selection)
+        if 'normal' in Path(result['directory']).parts:
+            from .pairing import attach_speedup
+            try:pairing=attach_speedup(self,result['directory'])
+            except Exception as exc:pairing={'matched':0,'imported':0,'issues':[{'reason':str(exc)}]}
+            result['pairing']=pairing
+            atomic_json(self.root/'pairing-status'/(hashlib.sha256(result['directory'].encode()).hexdigest()+'.json'),pairing)
+        return result
+
+    def _import_directory(self,value,selection=None):
         from .remote import dataset_path,web_inventory,fetch
         path=dataset_path(value);inventory=web_inventory(path);canonical=dataset_path(inventory['dataset'])
         available=[e['episode_index'] for e in inventory['episodes']]

@@ -53,6 +53,8 @@ def setup_pair(tmp_path,monkeypatch,extra_speedup=False):
     def remote(script,body):
         if script==org.READ_META:return {p:{} for p in body['sources']}
         body=copy.deepcopy(body);body['allowed_root']=str(server);body['journal']=str(physical(body['journal']));body['sources']={str(physical(p)):files for p,files in body['sources'].items()}
+        for p in body.get('retire_sources',[]):
+            for key in ('source','backup'):p[key]=str(physical(p[key]))
         for p in body['packages']:
             for key in ('destination','staging','backup'):
                 if p.get(key):p[key]=str(physical(p[key]))
@@ -277,3 +279,48 @@ def test_orphan_exclusion_requires_server_normal_absence_not_missing_local_cache
         assert not exclude_missing_normal(ws,[extra])['excluded']
         with pytest.raises(ValueError,match='仅支持'):exclude_missing_normal(ws,[ids['normal',0]])
     finally:store.lockfile.close()
+
+
+def test_all_rejected_pair_moves_entire_source_to_backup_and_c(tmp_path,monkeypatch):
+    store,ws,ids,sources,physical=setup_pair(tmp_path,monkeypatch)
+    try:
+        change(ws,ids['normal',0],True,'failed grasp',1)
+        change(ws,ids['normal',2],True,'failed grasp',2)
+        preview=plan(ws,ids['normal',0]);assert preview['ready']
+        assert all(not p['included'] and len(p['rejected'])==3 for p in preview['packages'])
+        result=org.execute(ws,ids['normal',0],preview['plan_hash'])
+        for pack in result['packages']:
+            assert pack['kept']==0 and not physical(pack['source']).exists()
+            backup=physical(pack['backup']);assert backup.is_dir()
+            c=physical(pack['c_target']);info=json.loads((c/'meta/info.json').read_text())
+            assert info['total_episodes']==3 and info['subtask_partition']=='quarantine'
+            entries=[json.loads(l) for l in (c/'meta/episodes.jsonl').read_text().splitlines()]
+            assert [e['episode_index'] for e in entries]==[0,1,2]
+            for i in range(3):
+                table=pq.read_table(c/f'data/chunk-000/episode_{i:06d}.parquet')
+                old=pq.read_table(backup/f'data/chunk-000/episode_{i:06d}.parquet')
+                keys=[k for k in old.column_names if k not in ('episode_index','index')]
+                assert table.select(keys).equals(old.select(keys))
+        assert all(e['excluded'] and e['archived'] for e in ws.catalog()['episodes'])
+        assert len(ws.catalog()['episodes'])==6
+    finally:store.lockfile.close()
+
+
+def test_retired_source_is_restored_when_archive_commit_rolls_back(tmp_path):
+    source=tmp_path/'source';source.mkdir();(source/'old').write_text('original')
+    second=tmp_path/'second';second.mkdir();(second/'old').write_text('second')
+    stage=tmp_path/'stage';stage.mkdir();(stage/'new').write_text('archive')
+    occupied=tmp_path/'occupied';occupied.mkdir()
+    body={'operation':'retire-rollback','allowed_root':str(tmp_path),'journal':str(tmp_path/'journal/state.json'),
+          'sources':{},'action':'commit','packages':[{'staging':str(stage),'destination':str(tmp_path/'C/data'),'replace':False,'backup':None,'files':{'new':sha(stage/'new')}}],
+          'retire_sources':[{'source':str(source),'backup':str(tmp_path/'backup')},{'source':str(second),'backup':str(occupied)}]}
+    r=subprocess.run([sys.executable,'-c',org.TRANSACTION],input=json.dumps(body),text=True,capture_output=True)
+    assert r.returncode and (source/'old').read_text()=='original' and not (tmp_path/'C/data').exists()
+    assert not (tmp_path/'backup').exists() and (stage/'new').exists()
+    # Simulate a lost process after publishing and retiring the first source.
+    (tmp_path/'C/data').parent.mkdir(exist_ok=True);stage.rename(tmp_path/'C/data');source.rename(tmp_path/'backup')
+    (tmp_path/'journal/state.json').write_text(json.dumps({'state':'committing'}))
+    body['retire_sources']=body['retire_sources'][:1];body['action']='recover'
+    r=subprocess.run([sys.executable,'-c',org.TRANSACTION],input=json.dumps(body),text=True,capture_output=True)
+    assert r.returncode==0,r.stderr
+    assert (source/'old').read_text()=='original' and (stage/'new').exists() and not (tmp_path/'C/data').exists()

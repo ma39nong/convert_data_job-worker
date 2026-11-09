@@ -167,3 +167,7 @@ normal页面点击“映射已保存粗/细阶段→speedup”时直接更新对
 粗标签保持 pickup、harvest、return、adjust 四类。每类唯一对应一种无标点英文指令，两个 return 都使用 `Right hand returns the held object to the right plate`。导出 profile 更新为 tomato-coarse-four-prompts-en-v4；不再按第七段位置替换裸杆指令。三段等非标准顺序也按动作类选英文，不猜测是否摘完。
 
 七阶段 Agent 仍保留 pickup_1、harvest_1、return_truss、adjust、pickup_2、harvest_2、return_stem 七个进度状态；中途放回与最终放回的后继不同，输出的动作类和 prompt 相同。阶段状态不能当成四类动作的编号，两次放回也不代表完成条件相同。细阶段标签与英文保持原定义。方案 A 总指令本轮未改。
+
+### 整包全部剔除
+
+当一对 A/B 数据包已没有保留录制时，“整理本包”仍可执行：将本包已剔除数据与既有 C 归档合并、连续编号，原 A/B 包整体移入该次操作的 `.subtask_backups`，不发布空的 LeRobot 训练包。两版本归档与原包退役属于同一个事务，失败回滚和重启恢复会恢复原 A/B 路径。所有旧录制保持 excluded/archived，不因重编号变成可训练数据。

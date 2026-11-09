@@ -190,6 +190,10 @@ if journal.exists() and json.loads(journal.read_text()).get('state')=='committed
  print(journal.read_text());raise SystemExit()
 if body['action']=='recover':
  if journal.exists() and json.loads(journal.read_text()).get('state')=='committing':
+  for p in reversed(body.get('retire_sources',[])):
+   source=safe(p['source']);backup=safe(p['backup'])
+   if backup.exists():
+    assert not source.exists();backup.rename(source)
   for p in reversed(body['packages']):
    stage=safe(p['staging']);dest=safe(p['destination']);backup=safe(p['backup']) if p.get('backup') else None
    if backup is not None and backup.exists():
@@ -202,6 +206,8 @@ if body['action']=='recover':
  print(journal.read_text() if journal.exists() else '{}');raise SystemExit()
 if body['action']=='prepare':
  source_check()
+ for p in body.get('retire_sources',[]):
+  assert safe(p['source']).is_dir() and not safe(p['backup']).exists()
  for p in body['packages']:
   stage=safe(p['staging']);dest=safe(p['destination'])
   assert not stage.exists(), 'Staging exists; retry needs recovery'
@@ -228,6 +234,9 @@ try:
   else:assert not dest.exists()
   stage.rename(dest);published.append((stage,dest))
   if body.get('test_fail_after')==i+1:raise RuntimeError('Injected rollback test')
+ for p in body.get('retire_sources',[]):
+  source=safe(p['source']);backup=safe(p['backup']);assert not backup.exists()
+  backup.parent.mkdir(parents=True,exist_ok=True);source.rename(backup);swaps.append((source,backup))
  save('committed',packages=[{'destination':p['destination'],'backup':p.get('backup')} for p in body['packages']]);print(journal.read_text())
 except BaseException:
  for stage,dest in reversed(published):
@@ -329,7 +338,7 @@ def execute(ws,id_,plan_hash):
         preview=plan(ws,id_)
         if preview['plan_hash']!=plan_hash:raise ValueError('整理范围或标注已变化，请重新预览')
         if not preview['ready']:raise ValueError('尚不能整理：'+'；'.join(preview['blockers']))
-        if any(not pack['included'] for pack in preview['packages']):raise ValueError('本包没有保留数据，不能生成训练候选包')
+        if any(not pack['included'] and not pack['rejected'] for pack in preview['packages']):raise ValueError('本包没有可整理数据')
         ids=[r['id'] for p in preview['packages'] for r in p['included']+p['rejected']]
         if getattr(ws,'organizing_ids',set()) & set(ids):raise ValueError('本包正在整理')
         ws.organizing_ids.update(ids)
@@ -378,7 +387,8 @@ def execute(ws,id_,plan_hash):
             files={str(p.relative_to(local)):sha(p) for p in local.rglob('*') if p.is_file() and p.name!='cache-source.json'}
             remote_pack['files']=files
         journal=str(Path(preview['packages'][0]['remote_source']).parent.parent/'.subtask_organize'/operation/'transaction.json')
-        body={'operation':operation,'journal':journal,'sources':source_hashes,'packages':body_packages}
+        retire_sources=[{'source':p['remote_source'],'backup':str(Path(p['remote_source']).parent.parent/'.subtask_backups'/operation/Path(p['remote_source']).name)} for p in preview['packages'] if not p['included']]
+        body={'operation':operation,'journal':journal,'sources':source_hashes,'packages':body_packages,'retire_sources':retire_sources}
         state.update(packages=packages,body=body)
         atomic_json(state_path,state)
         remote(TRANSACTION,{**body,'action':'prepare'})

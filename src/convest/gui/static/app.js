@@ -15,6 +15,7 @@ let token = "",
   selected = null,
   dirty = false,
   polling = false,
+  flushing = new Set(),
   browser = null,
   toastTimer;
 // Display-only masks: polling and task switches must not restore cleared rows.
@@ -61,7 +62,7 @@ const names = {
   sealed: "已封存",
   uploading: "上传中",
   waiting_batch: "等待新批次",
-  waiting_seal: "等待 A+B 满 100 条封包",
+  waiting_seal: "等待 A+B 达到设定条数封包",
   blocked: "受阻",
   transferring: "传输中",
   oss_prepare: "准备 OSS 中转",
@@ -467,7 +468,7 @@ function renderProgress() {
     uploads.every((u) => u.state === "completed")
   ) {
     if (batches.some((b) => b.state === "active"))
-      phase = "原包已完成备份，等待 A+B 合计满 100 条封包；继续监听新录制。";
+      phase = "原包已完成备份，等待 A+B 达到设定条数封包，也可立即上传；继续监听新录制。";
     else if (training.length && training.every((j) => j.state === "uploaded"))
       phase = "已发现的录制与两版成品均已校验上传，继续监听新录制。";
   }
@@ -540,7 +541,7 @@ function renderProgress() {
     .filter(visibleRecord("batch"))
     .map(
       (b) =>
-        (b.group_id ? "<tr><td>100条一轮 · " : "<tr><td>历史批次 · ") +
+        (b.group_id ? "<tr><td>合计 " + esc(b.group_total ?? b.group_size) + " 条 · " : "<tr><td>历史批次 · ") +
         esc(b.name || b.batch_id) +
         "</td><td>" +
         esc(b.route) +
@@ -593,14 +594,15 @@ function renderProgress() {
     (n, b) => n + JSON.parse(b.sources || "[]").length,
     0,
   );
+  const limit = s.batch_policy?.size ?? t?.batch_group_size ?? 100;
   const sealing = batches.some((b) => b.group_id && b.group_ready === false);
   $("batch-clock").textContent = sealing
-    ? "本轮 A+B 已满 100 条，正在校验封包；通过后衔接两版处理"
+    ? "本轮 A+B 正在校验封包；通过后衔接两版处理"
     : "本轮 A+B 已累计 " +
       count +
-      "/100 条有效录制" +
-      (count < 100 ? " · 还差 " + (100 - count) + " 条" : " · 等待封包校验") +
-      "；不足 100 条继续累计";
+      "/" + limit + " 条有效录制" +
+      (count < limit ? " · 还差 " + (limit - count) + " 条" : " · 等待封包校验") +
+      "；达到设定条数自动上传，也可立即上传";
   $("runtime-path").textContent = s.root
     ? "运行记录：" +
       s.root +
@@ -612,6 +614,7 @@ function renderProgress() {
     ? "最近更新 " +
       new Date(snapshot.updated_ns / 1e6).toLocaleTimeString("zh-CN")
     : "";
+  $("upload-now").disabled = !t || s.state !== "running" || !count || sealing || flushing.has(selected);
   $("retry-one").disabled =
     !t || ["running", "starting", "stopping"].includes(s.state);
   $("start-one").disabled =
@@ -666,6 +669,22 @@ async function action(path, id) {
     );
   } catch (e) {
     toast(e.message, true);
+  }
+}
+async function uploadNow() {
+  const id = selected;
+  if (!id || flushing.has(id) || $("upload-now").disabled) return;
+  if (!window.confirm("确定立即上传当前任务已累计的有效录制吗？\n当前已完成清洗、转换的录制将封包并进入校验上传流程；处理中和后续录制从新一轮按设定条数继续累计。")) return;
+  flushing.add(id);
+  renderProgress();
+  try {
+    snapshot = await api("/api/upload-now", { task: id });
+    toast("已封包，将按现有流程校验上传；后续录制继续累计。");
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    flushing.delete(id);
+    renderProgress();
   }
 }
 const checkVersions = new Map();
@@ -859,7 +878,7 @@ async function init() {
         (el.oninput = () => {
           if (!current()) return;
           current()[el.dataset.task] =
-            el.type === "checkbox" ? el.checked : el.value;
+            el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value;
           if (
             current().auto_upload_paths &&
             ["project", "robot", "scene", "auto_upload_paths"].includes(
@@ -915,6 +934,7 @@ async function init() {
         toast(e.message, true);
       }
     };
+    $("upload-now").onclick = uploadNow;
     $("start").onclick = () => action("start");
     $("stop").onclick = () => action("stop");
     $("start-one").onclick = () => action("start", selected);

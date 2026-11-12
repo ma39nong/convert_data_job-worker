@@ -109,3 +109,37 @@ test('batch footer counts A+B valid sources and no longer shows a 24-hour countd
   assert.match(elements.get('batch-clock').textContent,/还差 1 条/);
   assert.doesNotMatch(elements.get('transfer-grid').innerHTML,/24h/);
 });
+
+test('manual upload requires confirmation, sends the selected task and blocks double clicks', async () => {
+  const elements=new Map();
+  let confirmed=false, requests=0, release;
+  const context=vm.createContext({
+    document:{getElementById(id) {
+      if(!elements.has(id))elements.set(id,{classList:{toggle(){}},getAttribute:()=> 'true'});
+      return elements.get(id);
+    }},
+    window:{confirm:()=>confirmed},
+    fetch:async (url,options)=>{
+      requests++;
+      assert.equal(url,'/api/upload-now');
+      assert.deepEqual(JSON.parse(options.body),{task:'a'});
+      await new Promise(resolve=>{release=resolve;});
+      return {ok:true,json:async()=>({tasks:[{id:'a',state:'running',batch_policy:{size:25},batches:[]}],updated_ns:0})};
+    },
+  });
+  const source=fs.readFileSync(path.join(__dirname,'../src/convest/gui/static/app.js'),'utf8');
+  vm.runInContext(source.replace(/init\(\);\s*$/, ''),context);
+  vm.runInContext(`toast=()=>{};draft={tasks:[{id:'a',enabled:true,batch_group_size:50}]};selected='a';
+    snapshot={updated_ns:0,tasks:[{id:'a',state:'running',batch_policy:{size:25},batches:[{route:'A',state:'active',sources:'["episode1"]'}]}]};renderProgress();`,context);
+  assert.match(elements.get('batch-clock').textContent,/1\/25/); // active policy, not unsaved input
+  await vm.runInContext('uploadNow()',context);
+  assert.equal(requests,0);
+  confirmed=true;
+  const pending=vm.runInContext('uploadNow()',context);
+  assert.equal(elements.get('upload-now').disabled,true);
+  await vm.runInContext('uploadNow()',context);
+  assert.equal(requests,1);
+  release();
+  await pending;
+  assert.equal(elements.get('upload-now').disabled,true); // no pending recordings
+});

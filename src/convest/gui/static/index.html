@@ -156,8 +156,12 @@
                 </div></label
               >
               <p class="hint">
-                本机清洗、转换并校验，A+B 合计满 100 条有效录制后封包上传。
+                本机清洗、转换并校验，A+B 合计达到设置条数后封包上传，也可点击“立即上传”。
               </p>
+              <label>累计上传条数（A+B 合计）
+                <input id="batch_group_size" data-task="batch_group_size" type="number" min="1" max="1000000" step="1" />
+              </label>
+              <p class="hint">默认 100 条。修改后保存设置，再开始任务。</p>
               <details class="destination-preview" open>
                 <summary aria-label="完整 LeRobot目录预览">
                   完整目录<span class="preview-arrow" aria-hidden="true"
@@ -309,6 +313,7 @@
                 <span class="control-symbol" aria-hidden="true">■</span>
                 停止当前任务
               </button>
+              <button id="upload-now">立即上传</button>
               <button id="start-one" class="primary">
                 <span class="control-symbol" aria-hidden="true">▶</span>
                 开始当前任务
@@ -393,7 +398,7 @@
         <p class="hint" id="last-updated"></p>
       </section>
       <footer>
-        本机处理 · A+B 合计 100 条一批 · 全文件 SHA256 校验 · 断点续传
+        本机处理 · A+B 按设定条数封包 · 全文件 SHA256 校验 · 断点续传
         <span>所有测试和运行记录保存在工程 outputs/gui 下</span>
       </footer>
     </main>

@@ -50,7 +50,7 @@ def new_task(index=1):
             'lerobot_root': '/data/data-demo/real/tomato/data/lerobot/sharpa/full-block-more',
             'normal_root': '/mnt/data/train_platform/datasets/tomato_sharpa/normal/full-block-more',
             'speedup_root': '/mnt/data/train_platform/datasets/tomato_sharpa/speedup/full-block-more',
-            'include_existing': True, 'delete_raw': True, 'auto_upload_paths': True, 'delete_lerobot': False}
+            'batch_group_size': 100, 'include_existing': True, 'delete_raw': True, 'auto_upload_paths': True, 'delete_lerobot': False}
 
 
 def defaults():
@@ -85,6 +85,9 @@ def validate(settings):
         # Older custom destinations remain manual; never silently redirect old data.
         t.setdefault('auto_upload_paths', all(t.get(k) == v for k, v in generated.items()))
         t.setdefault('delete_lerobot', False)
+        t.setdefault('batch_group_size', 100)
+        if type(t['batch_group_size']) is not int or not 1 <= t['batch_group_size'] <= 1000000:
+            raise ValueError('累计上传条数必须是 1 到 1000000 之间的整数')
         for key in ('enabled', 'include_existing', 'delete_raw', 'auto_upload_paths', 'delete_lerobot'):
             if type(t.get(key)) is not bool: raise ValueError('任务开关无效')
         if t['auto_upload_paths']: t.update(generated)
@@ -124,7 +127,7 @@ def runtime(settings, task):
         for variant in ('normal', 'speedup'):
             if not Path(task[variant + '_root']).is_relative_to(delivery['final_root']):
                 raise ValueError('OSS 中转模式下训练目录须位于 ' + delivery['final_root'])
-    semantic = {k: v for k, v in task.items() if k not in ('name', 'enabled', 'auto_upload_paths', 'delete_lerobot')}
+    semantic = {k: v for k, v in task.items() if k not in ('name', 'enabled', 'auto_upload_paths', 'delete_lerobot', 'batch_group_size')}
     version = digest({'task': semantic, 'data_server': settings['data_server'], 'training_server': settings['training_server'],
                       'protocol': 'gui-workflow-v1'})[:20]
     root = ROOT / 'runs' / task['id'] / version
@@ -150,9 +153,9 @@ def runtime(settings, task):
     # Naming is prospective metadata, not a new input/transfer queue. Existing
     # catalogued batches keep their own format; only newly opened batches opt in.
     # Prospective boundary upgrade: retain queue/store identities and existing sealed batches.
-    capture['batch_group_size']=100
+    capture['batch_group_size']=task.get('batch_group_size',100)
     for route in capture['routes']:
-        route.update(batch_name_format='seal-mmdd-v1',batch_group_size=100)
+        route.update(batch_name_format='seal-mmdd-v1',batch_group_size=capture['batch_group_size'])
     training = {'capture': capture, 'state_root': str(root/'training/state'), 'output_root': str(root/'training/datasets'),
                 'poll_seconds': 5, 'retry_seconds': 30, 'workers': 2, 'cmax': 3.0, 'min_free_gib': 8,
                 'training_target': settings['training_server'], 'destination_name_format': 'variant-short-v1'}

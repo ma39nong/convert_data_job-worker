@@ -149,7 +149,7 @@ def test_excluded_recording_does_not_consume_combined_quota(daily_cfg,monkeypatc
         ready(cfg,q)
         assert q.get(cfg['routes'][1]['id'],'episode99')['state']=='excluded'
         assert active_count(cfg)==1
-        assert not (Path(cfg['state_root'])/'group_batches.json').exists()
+        assert not json.loads((Path(cfg['state_root'])/'group_batches.json').read_text())['seals']
         bag(cfg,1,2);ready(cfg,q)
         assert all(b['state']=='sealed' for r in cfg['routes'] for b in daily.publisher(cfg,r).status())
 
@@ -162,3 +162,65 @@ def test_single_nonempty_group_can_close_100_round_without_empty_peer(daily_cfg)
         assert daily.publisher(cfg,cfg['routes'][1]).status()==[]
         b=daily.publisher(cfg,cfg['routes'][0]).status()[0]
         assert b['group_ready'] and b['sources']==['episode1','episode3']
+
+
+def test_manual_partial_batch_then_resume_automatic_count(daily_cfg):
+    cfg=counted(daily_cfg,3)
+    with context(cfg):
+        assert group_batches.flush(cfg) is False  # no empty packages
+    bag(cfg,0,1);bag(cfg,1,1)
+    with context(cfg) as q:
+        drain(cfg,q)
+        assert active_count(cfg)==2
+        assert group_batches.flush(cfg) is True
+        assert group_batches.flush(cfg) is False  # repeated click is idempotent
+        assert not daily.maintain(cfg,q)
+        sealed=[daily.publisher(cfg,r).status()[0] for r in cfg['routes']]
+        assert all(b['group_ready'] and b['group_total']==2 for b in sealed)
+        assert q.db.execute("select count(*) from uploads where episode like 'batch-%'").fetchone()[0]==2
+        bag(cfg,0,2);drain(cfg,q)
+        assert active_count(cfg)==1
+        bag(cfg,0,3);bag(cfg,1,2);drain(cfg,q)
+        new=[b for r in cfg['routes'] for b in daily.publisher(cfg,r).status() if b.get('group_total')==3]
+        assert len(new)==2 and all(b['group_ready'] for b in new)
+        assert active_count(cfg)==0
+
+
+def test_manual_seal_recovers_after_interruption_and_limit_change(daily_cfg,monkeypatch):
+    cfg=counted(daily_cfg,5)
+    bag(cfg,0,1);bag(cfg,1,1)
+    real=BatchPublisher._verify_seal
+    with context(cfg) as q:
+        drain(cfg,q)
+        def fail_b(self,batch):
+            if self.route['group']=='B':raise OSError('manual seal interrupted')
+            return real(self,batch)
+        monkeypatch.setattr(BatchPublisher,'_verify_seal',fail_b)
+        with pytest.raises(OSError):group_batches.flush(cfg)
+    counted(cfg,3)
+    monkeypatch.setattr(BatchPublisher,'_verify_seal',real)
+    with context(cfg) as q:
+        assert not daily.maintain(cfg,q)
+        assert all(daily.publisher(cfg,r).status()[0]['group_ready'] for r in cfg['routes'])
+        journal=json.loads((Path(cfg['state_root'])/'group_batches.json').read_text())
+        assert journal['limit']==3 and journal['seals'][0]['limit']==5
+        bag(cfg,0,2);drain(cfg,q)
+        assert active_count(cfg)==1
+
+
+@pytest.mark.parametrize('legacy_without_journal',[False,True])
+def test_lowering_limit_seals_existing_recordings_without_splitting(daily_cfg,legacy_without_journal):
+    cfg=counted(daily_cfg,5)
+    bag(cfg,0,1);bag(cfg,1,1);bag(cfg,0,2)
+    with context(cfg) as q:
+        drain(cfg,q)
+        # Ensure old policy exists, as it does during regular maintenance.
+        group_batches.maintain(cfg)
+    if legacy_without_journal:(Path(cfg['state_root'])/'group_batches.json').unlink()
+    counted(cfg,2)
+    with context(cfg) as q:
+        assert not daily.maintain(cfg,q)
+        assert active_count(cfg)==0
+        assert all(daily.publisher(cfg,r).status()[0]['group_total']==3 for r in cfg['routes'])
+        bag(cfg,0,3);drain(cfg,q)
+        assert active_count(cfg)==1

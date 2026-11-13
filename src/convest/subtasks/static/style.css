@@ -14,3 +14,9 @@
 .library-bottom{flex-wrap:wrap}.queue-actions{flex-wrap:wrap;justify-content:flex-end}.queue-actions label{display:flex;align-items:center;gap:6px;white-space:nowrap}#processHint{font-size:12px;margin:0 0 10px}
 
 .parallel-settings{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0 6px}.parallel-settings label{font-size:13px}.parallel-settings select{padding:6px 10px}
+
+/* Four synchronized views: main and wrists plus the main-view interaction ROI. */
+.videos.four-streams{grid-template-columns:repeat(2,minmax(0,1fr))}
+.videos.four-streams .video-card:first-child{grid-column:auto}
+.videos.four-streams .video-card video{max-height:290px;aspect-ratio:4/3}
+.workflow-tabs{margin-bottom:10px}

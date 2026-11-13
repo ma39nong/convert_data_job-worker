@@ -132,7 +132,7 @@ def training_files(ep,doc,*,prompt_mode='goal',task_prompt=DEFAULT_TASK_PROMPT):
     if any(r['label']=='unknown' or not r.get('reviewed') for r in rows):raise ValueError('生成训练副本前，请完成人工确认：这一层全部分段且不含待标注')
     ends=np.asarray([r['end_frame'] for r in rows]);ids=np.searchsorted(ends,np.arange(ep.length),side='right')
     if prompt_mode not in {'goal','stage'} or not isinstance(task_prompt,str) or not task_prompt.strip() or len(task_prompt)>1000:raise ValueError('请选择有效任务prompt，最长1000字')
-    stage_prompts=[stage_prompt(doc['stage'],rows,i) for i in range(len(rows))]
+    stage_prompts=[stage_prompt(doc['stage'],rows,i,doc.get('source')) for i in range(len(rows))]
     prompts=[task_prompt.strip()]*len(rows) if prompt_mode=='goal' else stage_prompts
     texts=list(dict.fromkeys(prompts));lookup={text:i for i,text in enumerate(texts)}
     table=ep.table
@@ -156,7 +156,7 @@ def training_files(ep,doc,*,prompt_mode='goal',task_prompt=DEFAULT_TASK_PROMPT):
         stats[key]={name:value.tolist() for name,value in [('min',a.min(0)),('max',a.max(0)),('mean',a.mean(0)),('std',a.std(0))]};stats[key]['count']=[len(a)]
     raw={'data/chunk-000/episode_000000.parquet':sink.getvalue().to_pybytes()}
     documents={'meta/info.json':info,'meta/episodes.jsonl':entry,'meta/stats.json':stats,'stage_annotations.json':english_document(doc),
-        'meta/subtask_prompts.json':{'profile':PROMPT_PROFILE,'prompt_mode':prompt_mode,'task_prompt':task_prompt.strip(),'original_task_prompts':original_tasks(ep),'training_task_field':'task_index -> meta/tasks.jsonl','stage':doc['stage'],'stages':[{'label':r['label'],'task_en':prompt} for r,prompt in zip(rows,stage_prompts)]}}
+        'meta/subtask_prompts.json':{'profile':english_document(doc)['prompt_profile'],'prompt_mode':prompt_mode,'task_prompt':task_prompt.strip(),'original_task_prompts':original_tasks(ep),'training_task_field':'task_index -> meta/tasks.jsonl','stage':doc['stage'],'stages':[{'label':r['label'],'task_en':prompt} for r,prompt in zip(rows,stage_prompts)]}}
     for name,obj in documents.items():raw[name]=(json.dumps(obj,ensure_ascii=False,allow_nan=False)+'\n').encode()
     raw['meta/tasks.jsonl']=''.join(json.dumps({'task_index':i,'task':text},ensure_ascii=False)+'\n' for i,text in enumerate(texts)).encode()
     videos={str(p.relative_to(ep.root)):f'videos/chunk-000/{camera}/episode_000000.mp4' for camera,p in ep.cameras.items()}

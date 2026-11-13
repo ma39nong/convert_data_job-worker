@@ -25,8 +25,10 @@ PROMPT_PROFILE=CATALOG['profile']
 STAGE_PROMPTS={k:CATALOG[k] for k in ('coarse','fine')}
 SEQUENCE=('pickup','harvest','return','adjust','pickup','harvest','return')
 
-def stage_prompt(stage,rows,index):
+def stage_prompt(stage,rows,index,source=None):
+    from .workflow import in_hand_source,IN_HAND_ADJUST
     label=rows[index]['label']
+    if source and in_hand_source(source) and (stage,label) in {('coarse','adjust'),('fine','rotate_stem')}:return IN_HAND_ADJUST
     return STAGE_PROMPTS[stage].get(label,'Unlabeled')
 
 def english_document(document):
@@ -40,13 +42,14 @@ def english_document(document):
     if 'projection' in out:
         out['projection']={k:v for k,v in out['projection'].items() if k not in ('review_events','normal_review_events')}
     out['language']='en'
-    out['prompt_profile']=PROMPT_PROFILE
+    from .workflow import in_hand_source,IN_HAND_PROFILE
+    out['prompt_profile']=IN_HAND_PROFILE if in_hand_source(document.get('source',{})) else PROMPT_PROFILE
     out['task_prompt']=DEFAULT_TASK_PROMPT
     out['segments']=[]
     for i,row in enumerate(document['segments']):
         item={k:copy.deepcopy(v) for k,v in row.items() if k in
               ('start_frame','end_frame','start_seconds','end_seconds','label','reviewed')}
-        item['text']=stage_prompt(document['stage'],document['segments'],i)
+        item['text']=stage_prompt(document['stage'],document['segments'],i,document.get('source'))
         item['segment_index']=i+1
         out['segments'].append(item)
     return out

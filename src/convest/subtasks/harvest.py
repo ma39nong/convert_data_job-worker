@@ -101,7 +101,9 @@ def parse_harvest(response, length, fps):
 
 def propose_harvest(episode,stage,run,client,record,records,max_requests):
     from .doubao import make_montage
-    from .template import RULES
+    from .template import rules_for
+    from .workflow import in_hand_episode
+    rules=rules_for(in_hand_episode(episode))
     local=[];events=[]
     for a in range(stage['start'],stage['end'],round(30*episode.fps)):
         b=min(stage['end'],a+round(30*episode.fps))
@@ -115,7 +117,7 @@ def propose_harvest(episode,stage,run,client,record,records,max_requests):
         else:
             manifest=make_montage(episode,clip,lo,hi,sample_fps=5,panel_size=640)
             atomic_json(manifest_path,manifest)
-        prompt=RULES+f'''\nLOCAL FINE PASS: this entire clip is WITHIN one harvest coarse phase.
+        prompt=rules+f'''\nLOCAL FINE PASS: this entire clip is WITHIN one harvest coarse phase.
 Only classify the physical state of the currently targeted LEFT-hand fruit.
 Watch the stem-fruit CONNECTION and fruit RETENTION over time, using both wrist
 views AND the front/tray view. Approach and securing the grip belong to grasp_fruit. Once the secured hand
@@ -223,7 +225,7 @@ def verify_drop_claims(episode, segments, run, client, known_attached=(),max_req
         for asset in assets:(folder/f"{asset['frame']}.jpg").write_bytes(base64.b64decode(asset['data_url'].split(',',1)[1]))
         task={'id':0,'frames':frames,'candidate_drop_start':start,'candidate_drop_end':end}
         prompt='''Audit ONE suspected accidental tomato drop during harvesting.
-The synchronized images are cam0 top-left, cam1 top-right, cam2 bottom-left.
+The synchronized images are cam0 top-left cam1 top-right cam2 bottom-left with an optional main view magnified interaction ROI bottom-right. The ROI is the same source frame and not an independent camera.
 Track the SAME individual fruit: losing sight of it behind fingers is not a drop.
 Normal opening above the left collection tray and a short fall INTO the intended
 tray is controlled_release, not a failed drop. Another fruit shaken off the truss

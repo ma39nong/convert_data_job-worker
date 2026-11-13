@@ -118,9 +118,9 @@ def parse_observations(response,tasks):
     return result
 
 
-def boundary_prompt():
-    from .template import RULES
-    return RULES+'''\nAudit these SEPARATE action transitions using every supplied source-frame image.
+def boundary_prompt(in_hand=False):
+    from .template import rules_for
+    return rules_for(in_hand)+'''\nAudit these SEPARATE action transitions using every supplied source-frame image.
 For EACH image output {frame, side: before|after|occluded}. BEFORE means the named
 before action is still occurring; AFTER means the named next action has begun.
 Do not repeat a suggested timestamp. Choose FIRST AFTER, with previous image BEFORE.
@@ -151,7 +151,7 @@ Return only {"boundaries":[{"id":0,"first_after_frame":123|null,"confidence":0.8
 '''
 
 
-def refine_all(episode,segments,run,client,record,records,max_requests=128,progress=None,*,coarse_labels=None):
+def refine_all(episode,segments,run,client,record,records,max_requests=128,progress=None,*,coarse_labels=None,workflow_in_hand=None):
     """Audit every boundary. No confidence-only acceptance, no subframe interpolation.
 
     Broad sampled context locates a candidate; acceptance requires consecutive
@@ -162,7 +162,10 @@ def refine_all(episode,segments,run,client,record,records,max_requests=128,progr
     result=validate_segments(segments,episode.length,episode.fps)
     ends=[s['end_frame'] for s in result[:-1]];evidence={};motion={}
     run=Path(run);run.mkdir(parents=True,exist_ok=True)
-    prompt=boundary_prompt()
+    if workflow_in_hand is None:
+        from .workflow import in_hand_episode
+        workflow_in_hand=in_hand_episode(episode)
+    prompt=boundary_prompt(workflow_in_hand)
     if coarse_labels is not None:
         if list(coarse_labels)!=['pickup','harvest','return','adjust','pickup','harvest','return'] or len(result)!=7:
             raise ValueError('粗阶段复核必须是七阶段六个边界')

@@ -64,12 +64,12 @@ def reference_style(store):
 def make_montage(episode, path, start, end, sample_fps=5, panel_size=480):
     """One shared source-frame index per composite, no independently timed cameras.
 
-    Grid: cam0 top-left, cam1 top-right, cam2 bottom-left; black fourth panel.
+    Grid: cam0 top-left, cam1 top-right, cam2 bottom-left; optional interaction ROI bottom-right.
     No spatial flipping or temporal speed changes. Video time zero = start/fps.
     """
     pw=panel_size;ph=panel_size*3//4
     cameras = sorted(episode.cameras)
-    if len(cameras) != 3: raise ValueError('豆包适配需要三路同步相机')
+    if len(cameras) not in (3,4): raise ValueError('豆包适配需要三路或四路同步视频')
     path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
     indices = list(range(start, end, max(1, round(episode.fps/sample_fps))))
     rate = Fraction(str(episode.fps))/max(1, round(episode.fps/sample_fps))
@@ -150,7 +150,7 @@ def prompt_for(episode, start, end, references):
     observed = sorted({label for ref in references for label in ref['labels'] if label in ACTION_LABELS})
     return f'''Annotate this robot tomato harvesting video, not human egocentric hands.
 The video is a synchronized 2x2 grid: camera0 top-left, camera1 top-right,
-camera2 bottom-left, bottom-right black. The three panels show the SAME moment.
+camera2 bottom-left and the optional interaction ROI bottom-right otherwise black. All panels show the SAME moment. The ROI is a magnified crop of camera0 and not an independent camera or episode.
 Never treat the panels as three different episodes. Anatomical robot left/right
 is NOT image left/right; infer the left hand placing fruit in the left tray and
 the right hand holding the truss. Never horizontally flip a wrist-camera view.

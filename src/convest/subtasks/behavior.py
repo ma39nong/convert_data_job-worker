@@ -22,7 +22,7 @@ RULES = '''Training behavior review for this dual-arm tomato picking recording.
 This review is INDEPENDENT of the normal action template. Do NOT force abnormal
 motions into a successful pick/place or the expected seven-stage workflow.
 Robot left/right refer to anatomical hands, not image sides. Composite cam0 is
-top-left, cam1 top-right, cam2 bottom-left. Use temporal evidence from all views.
+top-left, cam1 top-right, cam2 bottom-left and an optional main view magnified interaction ROI bottom-right. The ROI is not an independent camera. Use temporal evidence from all views.
 The right hand normally supports the whole tomato truss, the left picks ONE fruit.
 Look for these cases across the entire recording:
 1. drop_then_resume: left target fruit detaches/slips, then the EMPTY left hand

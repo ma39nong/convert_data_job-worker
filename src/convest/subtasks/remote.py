@@ -1,5 +1,6 @@
 """Explicit SSH read-only inventory and hash-verified selected-episode caching."""
 import json
+import os
 from pathlib import Path
 import re
 import shlex
@@ -52,6 +53,40 @@ def query(host, dataset, episodes='inventory'):
     return json.loads(process.stdout)
 
 
+def seed_verified_cache(manifest, parent, stage, output_name):
+    """Reuse immutable byte copies only after matching the new remote SHA.
+
+    Copies are separate files, never writable hard links to existing datasets.
+    The caller still verifies every final file and rehashes the remote manifest.
+    """
+    index={}
+    for receipt in parent.glob('*/cache-source.json'):
+        if receipt.parent==stage:continue
+        try:
+            doc=json.loads(receipt.read_text())
+            if doc.get('all_selected_sha256_verified') is not True:continue
+            for name,item in doc.get('manifest',{}).get('files',{}).items():
+                path=receipt.parent/name
+                if path.is_file() and path.resolve().is_relative_to(receipt.parent.resolve()):
+                    index.setdefault(item['sha256'],[]).append(path)
+        except (OSError,ValueError,KeyError,TypeError):continue
+    prior=[p for p in parent.glob('.'+output_name+'.partial-*') if p!=stage]
+    reused=[]
+    for name,item in manifest['files'].items():
+        target=stage/name
+        candidates=[*index.get(item['sha256'],[]),*(p/name for p in prior)]
+        for candidate in candidates:
+            try:
+                if not candidate.is_file() or candidate.is_symlink() or candidate.stat().st_size!=item['size']:continue
+                if sha(candidate)!=item['sha256']:continue
+                target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(candidate,target)
+                if sha(target)!=item['sha256']:target.unlink();continue
+                if item.get('mtime_ns') is not None:os.utime(target,ns=(item['mtime_ns'],item['mtime_ns']))
+                reused.append(name);break
+            except OSError:continue
+    return reused
+
+
 def fetch(host, dataset, episodes, output):
     output = Path(output).expanduser().resolve()
     before = query(host, dataset, episodes)
@@ -65,6 +100,7 @@ def fetch(host, dataset, episodes, output):
     output.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix='.'+output.name+'.partial-', dir=output.parent))
     try:
+        reused=seed_verified_cache(before,output.parent,stage,output.name)
         listing = stage/'.selected-files'
         listing.write_text('\n'.join(before['files'])+'\n')
         subprocess.run(['rsync', '-rt', '--protect-args', '--timeout=120', '--files-from='+str(listing),
@@ -82,7 +118,8 @@ def fetch(host, dataset, episodes, output):
         if output.exists(): raise FileExistsError(output)
         stage.rename(output)
         return {'status': 'verified', 'output': str(output), 'files': len(before['files']),
-                'bytes': sum(v['size'] for v in before['files'].values())}
+                'bytes': sum(v['size'] for v in before['files'].values()), 'reused_files':len(reused),
+                'reused_bytes':sum(before['files'][n]['size'] for n in reused)}
     finally:
         if stage.exists(): shutil.rmtree(stage)
 

@@ -264,7 +264,9 @@ class Handler(BaseHTTPRequestHandler):
                 from .processing_queue import remaining
                 mode=body.get('mode','fine')
                 if mode not in {'coarse','fine'}:raise ValueError('无效处理模式')
-                ids=remaining(self.server.workspace,mode) if body.get('all_remaining') is True else body.get('ids')
+                workflow=body.get('workflow')
+                if workflow not in (None,'with_return','without_return'):raise ValueError('无效任务分栏')
+                ids=remaining(self.server.workspace,mode,workflow=workflow) if body.get('all_remaining') is True else body.get('ids')
                 if not isinstance(ids,list):raise ValueError('请选择有效片段')
                 if not self.server.doubao_key:raise ValueError('豆包连接不可用，请检查启动凭据')
                 return self.send(self.server.start_processing(ids,mode,workers=body.get('workers')))

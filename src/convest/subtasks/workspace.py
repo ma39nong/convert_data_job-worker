@@ -124,7 +124,8 @@ class Workspace:
         entry=self.store.entries[id_]
         if entry['variant']!='speedup':return None
         keys=('source_recording_id','source_start_ns','source_end_ns')
-        matches=[e for e in self.store.entries.values() if e['id'] not in retired and e['variant']=='normal' and all(entry.get(k) is not None and entry[k]==e.get(k) for k in keys)]
+        from .workflow import same_media
+        matches=[e for e in self.store.entries.values() if e['id'] not in retired and e['variant']=='normal' and all(entry.get(k) is not None and entry[k]==e.get(k) for k in keys) and same_media(entry,e)]
         if len(matches)>1:raise ValueError('同源normal不唯一，请核对数据包')
         if not matches:return {'id':None,'ready':False,'reason':'等待导入同源normal'}
         normal=matches[0];path=self.stage_path(normal['id'],stage)
@@ -199,10 +200,21 @@ class Workspace:
                 if status in {'ready','running','failed','excluded'}:group[status]+=1
                 else:group['pending']+=1
                 for s in saved:group[s+'_saved']+=int(saved[s])
+            from .workflow import media_profile,workflow_group,recording_key
+            roi={(e['variant'],recording_key(e)):e['id'] for e in episodes if media_profile(e['remote_directory'])=='roi_four' and recording_key(e) is not None}
+            for item in episodes:
+                item['workflow']=workflow_group(item['remote_directory'])
+                item['media_profile']=media_profile(item['remote_directory'])
+                item['superseded_by']=roi.get((item['variant'],recording_key(item))) if item['media_profile']=='original_three' else None
+                item['superseded']=bool(item['superseded_by'])
+            for group in groups.values():
+                rows=[e for e in episodes if e['directory_id']==group['id']]
+                group['workflow']=workflow_group(group['path'])
+                group['superseded']=all(e['superseded'] for e in rows)
             for item in episodes:
                 opposite='speedup' if item['variant']=='normal' else 'normal'
                 keys=('source_recording_id','source_start_ns','source_end_ns')
-                matches=[other for other in episodes if other['variant']==opposite and all(item.get(k) is not None and item.get(k)==other.get(k) for k in keys)]
+                matches=[other for other in episodes if other['variant']==opposite and other['media_profile']==item['media_profile'] and all(item.get(k) is not None and item.get(k)==other.get(k) for k in keys)]
                 item['pair_ids']=[other['id'] for other in matches]
                 item['pair_state']='matched' if len(matches)==1 else 'ambiguous' if matches else 'missing'
             batch_path=self.root/'batch.json'
@@ -280,7 +292,8 @@ class Workspace:
         from .core import project
         from .template import POLICY
         from .boundaries import refine_all
-        matches=[e for e in self.store.entries.values() if e['id'] not in retired and e['variant']=='normal' and e['source_recording_id'] and e['source_recording_id']==ep.entry.get('source_recording_id')]
+        from .workflow import same_media
+        matches=[e for e in self.store.entries.values() if e['id'] not in retired and e['variant']=='normal' and e['source_recording_id'] and e['source_recording_id']==ep.entry.get('source_recording_id') and same_media(self.store.entries[ep.id],e)]
         if self.store.entries[ep.id]['variant']!='speedup' or not matches:
             return annotate(ep,self.store.output,api_key=server.doubao_key,model=server.doubao_model,client=client,max_requests=128,progress=server.progress)
         if len(matches)!=1:raise ValueError('存在多个同源normal，请先核对导入目录')
@@ -307,13 +320,24 @@ class Workspace:
         from .quarantine import read
         from .organization import registry
         excluded=read(self)['entries']
-        docs={key:self.store.load(self.store.episode(key)) for key in self.store.entries if not excluded.get(key,{}).get('excluded') and key not in registry(self)['retired']}
-        for key in docs:
-            saved=self.stage_path(key,'fine')
+        from .workflow import in_hand_source,in_hand_episode,entry_source_path
+        docs={};target_in_hand=in_hand_episode(ep)
+        for key,entry in self.store.entries.items():
+            if key==ep.id or excluded.get(key,{}).get('excluded') or key in registry(self)['retired']:continue
+            if in_hand_source({'dataset':entry_source_path(entry)})!=target_in_hand:continue
+            if ep.entry.get('source_recording_id') and entry.get('source_recording_id')==ep.entry['source_recording_id']:continue
+            saved=self.stage_path(key,'fine');path=saved if saved.exists() else self.store.path(key)
+            if not path.exists():continue
+            proposal=json.loads(path.read_text());rows=proposal.get('segments',[])
+            if not rows or not all(s.get('reviewed') for s in rows):continue
+            if not saved.exists() and proposal.get('status')!='reviewed':continue
+            # Validate source fingerprints/media only for actual reviewed references.
+            # Unreviewed target videos are never examples and need no global decode.
+            doc=self.store.load(self.store.episode(key))
             if saved.exists():
-                fine=json.loads(saved.read_text())
-                if fine['source']!=docs[key]['source']:raise ValueError('人工样例来源变化')
-                docs[key]={**docs[key],'segments':fine['segments'],'status':'reviewed' if all(s['reviewed'] for s in fine['segments']) else 'draft'}
+                if proposal['source']!=doc['source']:raise ValueError('人工样例来源变化')
+                doc={**doc,'segments':rows,'status':'reviewed'}
+            docs[key]=doc
         client=Client(self.store.output/'doubao',server.doubao_key,server.doubao_model,style_examples=transition_examples(docs,ep))
         if retry_namespace:client.retry_namespace=retry_namespace
         return client

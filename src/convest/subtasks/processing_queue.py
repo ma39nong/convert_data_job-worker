@@ -21,9 +21,10 @@ def checkpoint(ws,batch):
     atomic_json(ws.root/'active-processing-batch.json',batch)
 
 
-def remaining(ws,mode='coarse',variant='normal'):
+def remaining(ws,mode='coarse',variant='normal',workflow=None):
     rows=ws.catalog()['episodes']
     rows=[e for e in rows if e['variant']==variant and not e['excluded'] and not e.get('archived')
+          and not e.get('superseded') and (workflow is None or e.get('workflow')==workflow)
           and not e[mode+'_saved'] and not e.get(mode+'_ready') and not e['human_reviewed']]
     def key(e):
         path=Path(e['remote_directory']);grade=next((s for s in path.parts if s in {'A','B','C'}),'C')
@@ -35,6 +36,7 @@ def create(ws,ids,mode,workers=None):
     if workers is not None and (type(workers) is not int or not 1<=workers<=8):raise ValueError('同时处理数量须为1–8的整数')
     if mode not in {'coarse','fine'}:raise ValueError('无效处理模式')
     if not ids or len(ids)!=len(set(ids)) or any(i not in ws.store.entries for i in ids):raise ValueError('没有可排队的片段')
+    if any(e.get('superseded') for e in ws.catalog()['episodes'] if e['id'] in ids):raise ValueError('所选旧三路版本已由四路ROI版本替代，请选择当前数据')
     previous=active(ws)
     if previous and previous['state'] in {'queued','running'}:raise ValueError('已有持久处理队列')
     # Keep normal sources ahead of speedup dependencies, preserving UI A/B order.

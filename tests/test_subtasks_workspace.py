@@ -22,7 +22,7 @@ def test_independent_stage_saves_history_conflicts_and_readonly_sources(tmp_path
         before=store.path(ep.id).read_bytes();sources={str(p):sha(p) for p in ep.root.rglob('*') if p.is_file()};ws=Workspace(store)
         docs=ws.stages(ep);coarse=copy.deepcopy(docs['coarse']);coarse['segments'][0]['label']='adjust'
         saved=ws.save_stage(ep,'coarse',coarse)
-        assert saved['revision']==1 and saved['segments'][0]['text']=='调整番茄'
+        assert saved['revision']==1 and saved['segments'][0]['text']=='右手调整番茄'
         assert ws.stages(ep)['fine']==docs['fine']
         with pytest.raises(ValueError,match='其他窗口'):ws.save_stage(ep,'coarse',coarse)
         fine=copy.deepcopy(docs['fine']);fine['segments'][0]['end_frame']=15;fine['segments'][1]['start_frame']=15

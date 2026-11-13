@@ -26,7 +26,7 @@ def test_new_export_uses_air_prompt_without_changing_legacy_or_review():
     assert result['segments'][2]['text']==IN_HAND_ADJUST
     assert not any(r['reviewed'] for r in result['segments'])
     doc['stage']='fine';doc['segments'][2]['label']='rotate_stem'
-    assert english_document(doc)['segments'][2]['text']==IN_HAND_ADJUST
+    assert english_document(doc)['segments'][2]['text']==CATALOG['fine']['rotate_stem']
     doc['stage']='coarse';doc['segments'][2]['label']='adjust';doc['source']={'dataset':'/normal/no-block-more/A/old'}
     assert english_document(doc)['segments'][2]['text']==CATALOG['coarse']['adjust']
 

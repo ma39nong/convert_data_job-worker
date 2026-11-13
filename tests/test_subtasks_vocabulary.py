@@ -52,3 +52,16 @@ def test_export_preserves_explicit_inheritance_without_inventing_review():
         doc={'stage':'coarse','segments':[], 'inherited':value}
         assert english_document(doc)['inherited'] is value
     assert 'inherited' not in english_document({'stage':'coarse','segments':[]})
+
+
+def test_four_action_names_numbers_and_adjustment_are_location_neutral():
+    from convest.subtasks.workspace import COARSE_LABELS
+    expected=[('pickup','右手拿起番茄'),('harvest','左手采摘番茄'),('adjust','右手调整番茄'),('return','右手放回番茄')]
+    assert [(label,COARSE_LABELS[label]) for label,_ in expected]==expected
+    assert [CATALOG['numbers'][label] for label,_ in expected]==[1,2,3,4]
+    assert CATALOG['coarse']['adjust']=='Right hand adjusts the tomato truss'
+    for dataset in ('/normal/no-block-more/A/old','/normal/full-block-more/subtask-roi/A/new'):
+        doc={'stage':'coarse','source':{'remote_source':{'dataset':dataset}},'segments':[{'label':'adjust','start_frame':10,'end_frame':20,'reviewed':True}]}
+        out=english_document(doc)
+        assert out['segments'][0]['text']==CATALOG['coarse']['adjust']
+        assert (out['segments'][0]['start_frame'],out['segments'][0]['end_frame'],out['segments'][0]['reviewed'])==(10,20,True)

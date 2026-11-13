@@ -11,7 +11,7 @@ import time
 
 from .core import atomic_json, validate_segments
 
-COARSE_LABELS={'unknown':'待标注','pickup':'拿起番茄','harvest':'摘取番茄','return':'放回番茄','adjust':'调整番茄'}
+COARSE_LABELS={'unknown':'待标注','pickup':'右手拿起番茄','harvest':'左手采摘番茄','adjust':'右手调整番茄','return':'右手放回番茄'}
 COARSE_FROM_FINE={'grasp_truss':'pickup','lift_truss':'pickup','grasp_fruit':'harvest','pick_and_place':'harvest',
     'return_truss':'return','return_stem':'return','rotate_stem':'adjust'}
 

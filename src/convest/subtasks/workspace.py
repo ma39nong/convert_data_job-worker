@@ -326,18 +326,24 @@ class Workspace:
             if key==ep.id or excluded.get(key,{}).get('excluded') or key in registry(self)['retired']:continue
             if in_hand_source({'dataset':entry_source_path(entry)})!=target_in_hand:continue
             if ep.entry.get('source_recording_id') and entry.get('source_recording_id')==ep.entry['source_recording_id']:continue
-            saved=self.stage_path(key,'fine');path=saved if saved.exists() else self.store.path(key)
-            if not path.exists():continue
-            proposal=json.loads(path.read_text());rows=proposal.get('segments',[])
-            if not rows or not all(s.get('reviewed') for s in rows):continue
-            if not saved.exists() and proposal.get('status')!='reviewed':continue
-            # Validate source fingerprints/media only for actual reviewed references.
-            # Unreviewed target videos are never examples and need no global decode.
+            # Coarse human review teaches coarse transitions only, never invents
+            # fine grasp/extraction labels for a coarse-only reference.
+            candidates=[self.stage_path(key,'fine'),self.stage_path(key,'coarse'),self.store.path(key)]
+            chosen=None
+            for path in candidates:
+                if not path.exists():continue
+                if path==self.stage_path(key,'coarse') and entry['variant']!='normal':continue
+                proposal=json.loads(path.read_text());rows=proposal.get('segments',[])
+                if not rows or not all(s.get('reviewed') for s in rows):continue
+                if path==self.store.path(key) and proposal.get('status')!='reviewed':continue
+                chosen=(path,proposal,rows);break
+            if chosen is None:continue
+            path,proposal,rows=chosen
             doc=self.store.load(self.store.episode(key))
-            if saved.exists():
-                if proposal['source']!=doc['source']:raise ValueError('人工样例来源变化')
-                doc={**doc,'segments':rows,'status':'reviewed'}
-            docs[key]=doc
+            if proposal['source']!=doc['source']:raise ValueError('人工样例来源变化')
+            docs[key]={**doc,'segments':rows,'status':'reviewed',
+                       'stage':proposal.get('stage','fine'),'revision':proposal['revision']}
+
         client=Client(self.store.output/'doubao',server.doubao_key,server.doubao_model,style_examples=transition_examples(docs,ep))
         if retry_namespace:client.retry_namespace=retry_namespace
         return client

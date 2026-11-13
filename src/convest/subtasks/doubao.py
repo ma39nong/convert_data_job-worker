@@ -228,9 +228,10 @@ class Client:
         identity={'protocol':PROTOCOL,'model':self.model,'video_sha256':sha(video),
                   'prompt':prompt,'sample_fps':sample_fps,
                   'reference_examples':[{k:v for k,v in e.items() if k!='data_url'} for e in self.examples]}
-        from .style import content as style_content
-        if self.style_examples:identity['transition_style_examples']=[{k:v for k,v in e.items() if k!='data_url'} for e in self.style_examples]
-        content=style_content(self.style_examples)
+        from .style import content as style_content,for_video
+        selected_style=for_video(self.style_examples,prompt)
+        if selected_style:identity['transition_style_examples']=[{k:v for k,v in e.items() if k!='data_url'} for e in selected_style]
+        content=style_content(selected_style)
         for e in self.examples:
             content.extend([{'type':'input_text','text':'Separate human-reviewed reference image, fine label: '+e['label']},
                             {'type':'input_image','image_url':e['data_url']}])
@@ -248,7 +249,8 @@ class Client:
             {'task':g['task'],'images':[{k:v for k,v in e.items() if k!='data_url'} for e in g['assets']]} for g in groups]}
         from .style import content as style_content
         pairs={(g['task'].get('before'),g['task'].get('after')) for g in groups}
-        examples=[e for e in self.style_examples if tuple(e['transition']) in pairs]
+        from .style import for_boundaries
+        examples=for_boundaries(self.style_examples,pairs)
         if examples:identity['transition_style_examples']=[{k:v for k,v in e.items() if k!='data_url'} for e in examples]
         content=style_content(examples)+[{'type':'input_text','text':prompt}]
         for g in groups:

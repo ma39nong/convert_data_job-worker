@@ -2,10 +2,10 @@
 from pathlib import PurePosixPath
 import json
 
-IN_HAND_PROFILE = 'tomato-in-hand-five-phases-v2'
+IN_HAND_PROFILE = 'tomato-in-hand-five-phases-v3'
 LEGACY_PROFILE = 'tomato-plate-seven-phases-v1'
 IN_HAND_SEQUENCE = ['拿起番茄','摘取番茄','调整番茄','摘取番茄','放回番茄']
-IN_HAND_ADJUST = 'Right hand adjusts the tomato truss'
+IN_HAND_ADJUST = 'Right hand adjusts tomato truss position and orientation at the center'
 
 def in_hand_source(source):
     remote = source.get('remote_source') or {}

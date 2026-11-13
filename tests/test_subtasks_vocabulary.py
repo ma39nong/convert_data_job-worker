@@ -63,5 +63,7 @@ def test_four_action_names_numbers_and_adjustment_are_location_neutral():
     for dataset in ('/normal/no-block-more/A/old','/normal/full-block-more/subtask-roi/A/new'):
         doc={'stage':'coarse','source':{'remote_source':{'dataset':dataset}},'segments':[{'label':'adjust','start_frame':10,'end_frame':20,'reviewed':True}]}
         out=english_document(doc)
-        assert out['segments'][0]['text']==CATALOG['coarse']['adjust']
+        from convest.subtasks.workflow import IN_HAND_ADJUST
+        expected=IN_HAND_ADJUST if '/full-block-more/' in dataset else CATALOG['coarse']['adjust']
+        assert out['segments'][0]['text']==expected
         assert (out['segments'][0]['start_frame'],out['segments'][0]['end_frame'],out['segments'][0]['reviewed'])==(10,20,True)

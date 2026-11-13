@@ -26,7 +26,9 @@ STAGE_PROMPTS={k:CATALOG[k] for k in ('coarse','fine')}
 SEQUENCE=('pickup','harvest','return','adjust','pickup','harvest','return')
 
 def stage_prompt(stage,rows,index,source=None):
+    from .workflow import in_hand_source,IN_HAND_ADJUST
     label=rows[index]['label']
+    if stage=='coarse' and label=='adjust' and source and in_hand_source(source):return IN_HAND_ADJUST
     return STAGE_PROMPTS[stage].get(label,'Unlabeled')
 
 def english_document(document):

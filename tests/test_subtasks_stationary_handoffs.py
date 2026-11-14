@@ -65,11 +65,15 @@ def test_second_harvest_starts_leaving_tray_while_right_is_still():
     assert check(task,rows)['stationary_handoff_proven']
 
 
-def test_final_return_requires_bare_stem_not_only_phase_position():
+def test_final_return_does_not_require_bare_stem_but_keeps_handoff_gate():
     task,rows=observations('in_hand_harvest_to_return')
-    for held in ['fruit_truss','occluded']:
+    for held in ['fruit_truss','occluded',None]:
         bad=copy.deepcopy(rows);bad[0]['held_object']=held
-        assert check(task,bad)['needs_review']
+        assert check(task,bad)['stationary_handoff_proven']
+    for row in rows:row.pop('held_object')
+    assert check(task,rows)['stationary_handoff_proven']
+    rows[0]['left_delivery']='in_progress'
+    assert check(task,rows)['needs_review']
 
 
 def test_new_rules_are_scoped_and_all_three_searches_use_whole_neighbor_context(tmp_path,monkeypatch):
@@ -77,6 +81,8 @@ def test_new_rules_are_scoped_and_all_three_searches_use_whole_neighbor_context(
     assert 'STATIONARY HANDOFF' not in rules_for(False)
     assert 'STATIONARY HANDOFF' in rules_for(True)
     assert 'left_delivery: complete' in boundary_prompt(True)
+    assert 'held_object:' not in boundary_prompt(True)
+    assert 'carrying the held object' in rules_for(True)
     monkeypatch.setattr(template,'images_at',lambda ep,frames,**kw:[{
         'frame':f,'sha256':str(f),'data_url':'data:image/jpeg;base64,'+base64.b64encode(b'x').decode()} for f in frames])
     seen=[]

@@ -43,8 +43,6 @@ def stationary_handoff_proven(task, observed, index):
            and all(s['left_motion']=='still' and s['left_location']=='above_left_tray'
                    and s['left_delivery']=='complete' for s in (before,after))
            and not any(observed[f]['right_motion'] in moving for f in frames[:index]))
-    if event=='in_hand_harvest_to_return':
-        valid=valid and all(s.get('held_object')=='bare_stem' for s in (before,after))
     return valid
 
 
@@ -176,20 +174,20 @@ right_motion: still|adjust_onset|adjusting|return_onset|returning|other|occluded
 left_location: above_left_tray|elsewhere|occluded
 left_delivery: complete|in_progress|not_observed|occluded
 right_retention: held|released|occluded
-held_object: bare_stem|fruit_truss|occluded
 complete means the SAME last fruit was visibly placed/released into the left
 rectangular tray in supplied context, not merely that the left hand is empty.
 2 -> 3: previous frame right still, left still above tray after complete delivery;
 FIRST AFTER right adjust_onset while left remains still after complete delivery.
 3 -> 2: previous frame both hands still, left above tray; FIRST AFTER left
 return_onset from above that tray while right remains still holding at center.
-2 -> 4: previous frame right still holding bare_stem, left still above tray after
+2 -> 4: previous frame right still holding the object, left still above tray after
 complete delivery; FIRST AFTER right return_onset toward RIGHT plate, left still.
 Adjusting/returning already underway is NOT onset. Earlier sampled matching
 motion cannot be relabeled BEFORE to pick a later convenient boundary.
 Context images establish delivery/order, NOT candidate onset timestamps. If no
-visible stationary witness, successful final delivery or retained bare stem is
-supported as required, return null. Do not invent observations to fit five phases.
+visible stationary witness, successful final delivery or right-hand retention is
+supported as required, return null. Do not require the held object to be a bare
+stem or reject the return because fruits remain. Do not invent observations to fit five phases.
 ''' if in_hand else ''
     return rules_for(in_hand)+handoff+'''\nAudit these SEPARATE action transitions using every supplied source-frame image.
 For EACH image output {frame, side: before|after|occluded}. BEFORE means the named

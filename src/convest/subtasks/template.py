@@ -12,7 +12,7 @@ from .core import LABELS, atomic_json, sha, validate_segments
 
 COARSE = ['拿起番茄','摘取番茄','放回番茄','调整番茄','拿起番茄','摘取番茄','放回番茄']
 POLICY = 'tomato_lift_motion_first_extraction_v8'
-IN_HAND_POLICY = POLICY+'_in_hand_stationary_handoffs_v2'
+IN_HAND_POLICY = POLICY+'_in_hand_stationary_handoffs_v3'
 RULES = '''The user requires the SAME global coarse workflow as reviewed episode 000000:
 pick up truss -> harvest individual fruits -> put truss back -> rotate stem ONCE
 -> pick up again -> harvest remaining fruits -> put bare stem back. Exactly these
@@ -103,10 +103,12 @@ left return remains phase 3, even though right adjustment motion has ended.
 2 -> 4 final harvest to final return: the LEFT hand has placed and released the
 LAST fruit of the second harvesting block into the left rectangular tray AND
 become stationary there. Only the FIRST subsequent RIGHT hand return motion
-carrying the empty bare tomato stem toward the RIGHT plate starts phase 4.
+carrying the held object toward the RIGHT plate starts phase 4.
 Do not cut at left release, at an earlier compensating right movement, or at
-arrival over the right plate. Require evidence of the bare stem rather than
-assuming it from phase position. Waiting before right return stays phase 2.
+arrival over the right plate. The held object need not be a bare stem; remaining
+fruit does not invalidate this return boundary. return_stem is the existing final
+return label, not a requirement that all fruit is visibly gone. Waiting before
+right return stays phase 2.
 For all three handoffs, track the final controlled fruit delivery in context,
 then locate the stationary BEFORE state and the FIRST moving AFTER state on
 consecutive original frames. Do not substitute a dropped fruit or an empty hand
@@ -251,7 +253,9 @@ def annotate_template(episode,output,*,api_key=None,model=None,references=(),max
         atomic_json(manifest_path,manifest)
     from .actions import ACTION_LABELS
     descriptions={k:v for k,v in DESCRIPTIONS.items() if k in ACTION_LABELS}
-    if in_hand:descriptions['rotate_stem']='Right hand reorients the held tomato truss in the air without placing it down or releasing it'
+    if in_hand:
+        descriptions['rotate_stem']='Right hand reorients the held tomato truss in the air without placing it down or releasing it'
+        descriptions['return_stem']='Right hand returns the held object to the right plate and releases it; a bare stem is not required'
     prompt=rules_for(in_hand)+'\nFine descriptions: '+json.dumps(descriptions,ensure_ascii=False)+f'''
 Analyze the ENTIRE continuous target video, not independently restarted clips.
 Return only {{"segments":[{{"end_seconds":2.4,"label":"grasp_truss","confidence":0.9}},...]}}.

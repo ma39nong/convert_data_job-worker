@@ -125,3 +125,53 @@ def test_dense_handoff_proof_recovers_early_onset_from_late_overview(tmp_path,mo
     result,evidence,_=refine_all(SimpleNamespace(length=400,fps=30),rows,tmp_path,Client(),lambda *a:records.append(a),records,30,workflow_in_hand=True)
     assert [r['end_frame'] for r in result]==[100,200,300,400]
     assert all(e['source_frame']['stationary_handoff_proven'] and e['source_frame']['consecutive_source_frames'] for e in evidence.values())
+
+
+def test_first_harvest_needs_right_stationary_then_left_approach_not_contact():
+    task={'id':0,'event':'in_hand_pickup_to_harvest','frames':[100,101,102]}
+    rows=[dict(frame=f,side='before' if f==100 else 'after',left_motion='still' if f==100 else 'approach_onset' if f==101 else 'approaching',
+               right_motion='still',right_location='center',right_retention='held',
+               left_location='elsewhere',left_delivery='not_observed') for f in task['frames']]
+    assert check(task,rows)['stationary_handoff_proven']
+    for field,value,index in [('right_motion','lifting',0),('right_motion','lifting',1),
+                              ('right_location','elsewhere',0),('right_location','occluded',1),
+                              ('left_motion','approaching',1),('left_motion','other',1),
+                              ('left_motion','approaching',0),('right_retention','occluded',0)]:
+        bad=copy.deepcopy(rows);bad[index][field]=value
+        assert check(task,bad)['needs_review']
+    bad=copy.deepcopy(rows);del bad[0]['right_location']
+    assert check(task,bad)['frame'] is None
+    # A late candidate cannot hide earlier approach evidence.
+    early=copy.deepcopy(rows[0]);early.update(frame=99,left_motion='approaching')
+    assert check({**task,'frames':[99,100,101,102]},[early]+rows)['needs_review']
+
+
+def test_first_harvest_routes_to_stationary_gate_without_old_motion_cue(tmp_path,monkeypatch):
+    from convest.subtasks import template
+    from convest.subtasks.boundaries import handoff_event
+    assert handoff_event('lift_truss','grasp_fruit')=='in_hand_pickup_to_harvest'
+    rules=rules_for(True)
+    assert '1 -> 2 pickup to first harvest' in rules
+    assert 'even before contact. Not the first touch or grip.' not in rules
+    assert 'FIRST frame the LEFT hand/arm starts preparing' in rules_for(False)
+    monkeypatch.setattr(template,'images_at',lambda ep,frames,**kw:[{
+        'frame':f,'sha256':str(f),'data_url':'data:image/jpeg;base64,'+base64.b64encode(b'x').decode()} for f in frames])
+    def old_cue(*args,**kwargs):raise AssertionError('Old left-only cue cannot set first harvest boundary')
+    monkeypatch.setattr(template,'left_motion_candidate',old_cue)
+    seen=[]
+    class Client:
+        def call_images(self,groups,prompt):
+            result=[]
+            for g in groups:
+                t=g['task'];seen.append(t);assert t['event']=='in_hand_pickup_to_harvest'
+                chosen=next((f for f in t['frames'] if f>=100),None)
+                states=[dict(frame=f,side='before' if f<100 else 'after',left_motion='still' if f<100 else 'approach_onset' if f==100 else 'approaching',
+                             right_motion='still',right_location='center',right_retention='held',left_location='elsewhere',left_delivery='not_observed') for f in t['frames']]
+                result.append(dict(id=t['id'],first_after_frame=chosen,confidence=.9,states=states))
+            return {'output_text':json.dumps({'boundaries':result})},'key',False
+    records=[]
+    rows=[segment(0,120,'lift_truss'),segment(120,250,'grasp_fruit')]
+    result,evidence,motion=refine_all(SimpleNamespace(length=250,fps=30),rows,tmp_path,Client(),lambda *a:records.append(a),records,20,workflow_in_hand=True)
+    assert result[0]['end_frame']==100
+    assert evidence['0']['source_frame']['stationary_handoff_proven']
+    assert not motion and all('handoff_context_frames' in t for t in seen)

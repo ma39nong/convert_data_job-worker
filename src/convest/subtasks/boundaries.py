@@ -4,12 +4,14 @@ import json
 from pathlib import Path
 from .core import atomic_json, validate_segments
 
-HANDOFF_EVENTS = {'in_hand_harvest_to_adjust', 'in_hand_adjust_to_harvest',
+HANDOFF_EVENTS = {'in_hand_pickup_to_harvest', 'in_hand_harvest_to_adjust', 'in_hand_adjust_to_harvest',
                   'in_hand_harvest_to_return'}
 
 
 def handoff_event(before, after):
     from .template import HARVEST_LABELS
+    if before=='lift_truss' and after=='grasp_fruit':
+        return 'in_hand_pickup_to_harvest'
     if before in HARVEST_LABELS and after == 'rotate_stem':
         return 'in_hand_harvest_to_adjust'
     if before == 'rotate_stem' and after in HARVEST_LABELS:
@@ -24,14 +26,19 @@ def stationary_handoff_proven(task, observed, index):
     frames=task['frames'];before=observed[frames[index-1]];after=observed[frames[index]]
     event=task['event']
     # Every sampled state must explicitly describe both motions and delivery.
-    allowed_left={'still','return_onset','returning','delivering','other','occluded'}
-    allowed_right={'still','adjust_onset','adjusting','return_onset','returning','other','occluded'}
+    allowed_left={'still','approach_onset','approaching','return_onset','returning','delivering','other','occluded'}
+    allowed_right={'still','lifting','adjust_onset','adjusting','return_onset','returning','other','occluded'}
     if any(s.get('left_motion') not in allowed_left or s.get('right_motion') not in allowed_right
            or s.get('left_delivery') not in {'complete','in_progress','not_observed','occluded'}
            or s.get('left_location') not in {'above_left_tray','elsewhere','occluded'}
            or s.get('right_retention') not in {'held','released','occluded'} for s in observed.values()):
         return False
     if any(s.get('right_retention')!='held' for s in (before,after)):return False
+    if event=='in_hand_pickup_to_harvest':
+        return (before['right_motion']==after['right_motion']=='still'
+                and before.get('right_location')==after.get('right_location')=='center'
+                and before['left_motion']=='still' and after['left_motion']=='approach_onset'
+                and not any(observed[f]['left_motion'] in {'approach_onset','approaching'} for f in frames[:index]))
     if event=='in_hand_adjust_to_harvest':
         return (before['right_motion']==after['right_motion']=='still'
                 and before['left_motion']=='still' and before['left_location']=='above_left_tray'
@@ -166,26 +173,33 @@ def parse_observations(response,tasks):
 def boundary_prompt(in_hand=False):
     from .template import rules_for
     handoff='''
-For events in_hand_harvest_to_adjust (2 -> 3), in_hand_adjust_to_harvest
+For events in_hand_pickup_to_harvest (1 -> 2), in_hand_harvest_to_adjust (2 -> 3), in_hand_adjust_to_harvest
 (3 -> second 2), and in_hand_harvest_to_return (last 2 -> 4), classify EVERY
 candidate image with these additional fields:
-left_motion: still|return_onset|returning|delivering|other|occluded
-right_motion: still|adjust_onset|adjusting|return_onset|returning|other|occluded
+left_motion: still|approach_onset|approaching|return_onset|returning|delivering|other|occluded
+right_motion: still|lifting|adjust_onset|adjusting|return_onset|returning|other|occluded
+right_location: center|elsewhere|occluded (required for 1 -> 2)
 left_location: above_left_tray|elsewhere|occluded
 left_delivery: complete|in_progress|not_observed|occluded
 right_retention: held|released|occluded
 complete means the SAME last fruit was visibly placed/released into the left
 rectangular tray in supplied context, not merely that the left hand is empty.
+1 -> 2: previous frame both hands still, RIGHT holding truss at center; FIRST
+AFTER left approach_onset toward that truss while right remains still at center.
+No prior fruit delivery or above-left-tray starting location is required for this
+FIRST approach. Use left_delivery not_observed when no delivery applies.
+Do not choose a contact/grasp frame after the approach has already begun, or
+left motion overlapping ongoing RIGHT lifting/transfer. Unrelated movement is other.
 2 -> 3: previous frame right still, left still above tray after complete delivery;
 FIRST AFTER right adjust_onset while left remains still after complete delivery.
 3 -> 2: previous frame both hands still, left above tray; FIRST AFTER left
 return_onset from above that tray while right remains still holding at center.
 2 -> 4: previous frame right still holding the object, left still above tray after
 complete delivery; FIRST AFTER right return_onset toward RIGHT plate, left still.
-Adjusting/returning already underway is NOT onset. Earlier sampled matching
+Approaching/adjusting/returning already underway is NOT onset. Earlier sampled matching
 motion cannot be relabeled BEFORE to pick a later convenient boundary.
 Context images establish delivery/order, NOT candidate onset timestamps. If no
-visible stationary witness, successful final delivery or right-hand retention is
+visible stationary witness, successful final delivery (harvest-ending handoffs only) or right-hand retention is
 supported as required, return null. Do not require the held object to be a bare
 stem or reject the return because fruits remain. Do not invent observations to fit five phases.
 ''' if in_hand else ''

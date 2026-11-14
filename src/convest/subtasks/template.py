@@ -12,7 +12,7 @@ from .core import LABELS, atomic_json, sha, validate_segments
 
 COARSE = ['拿起番茄','摘取番茄','放回番茄','调整番茄','拿起番茄','摘取番茄','放回番茄']
 POLICY = 'tomato_lift_motion_first_extraction_v8'
-IN_HAND_POLICY = POLICY+'_in_hand_stationary_handoffs_v3'
+IN_HAND_POLICY = POLICY+'_in_hand_stationary_handoffs_v4'
 RULES = '''The user requires the SAME global coarse workflow as reviewed episode 000000:
 pick up truss -> harvest individual fruits -> put truss back -> rotate stem ONCE
 -> pick up again -> harvest remaining fruits -> put bare stem back. Exactly these
@@ -70,6 +70,9 @@ def rules_for(in_hand=False):
     if not in_hand:return RULES
     common=RULES[RULES.index('Boundary definitions override'):]
     common=common[:common.index('- rotate_stem -> grasp_truss:')]+common[common.index('Right/left mean ROBOT'):]
+    common=common[:common.index('- lift_truss -> grasp_fruit:')]+'''- lift_truss -> grasp_fruit: apply the stationary 1 -> 2 handoff defined above;
+right-hand transfer must have ended before the left-hand approach begins.
+'''+common[common.index('- grasp_fruit -> pick_and_place:'):]
     return """This dataset has FIVE coarse phases in this exact physical order:
 pickup -> harvest -> in air adjustment -> harvest -> final return.
 The RIGHT hand holds the truss continuously from initial pickup until final return.
@@ -85,6 +88,17 @@ Do not split incidental wrist movement into extra phases or force an old seven
 phase plate adjustment template onto this video. If the video cannot support the
 specified five phases return an error rather than inventing actions.
 USER APPROVED STATIONARY HANDOFF RULES override older reference timings:
+1 -> 2 pickup to first harvest: the RIGHT hand has brought the held truss to
+the center and become stationary. The LEFT hand then starts moving toward the
+truss held by the right hand. Enter phase 2 at the FIRST frame of this left-hand
+approach, while the right hand remains stationary holding the truss at the center.
+The preceding stationary wait remains phase 1. Do not wait for left-hand arrival,
+contact, finger closing or a successful grip. Do not count a left approach begun
+while the right hand is still lifting or transferring as this handoff; if the
+required stationary-to-motion order is absent or obscured, flag for human review.
+This first approach need not start above the left tray and requires no prior
+fruit delivery. Inspect a stationary LEFT-hand BEFORE frame and its first motion
+toward the right-held truss in the AFTER frame; unrelated left motion is not onset.
 2 -> 3 harvest to adjustment: the LEFT hand has placed and released the LAST
 fruit of the first harvesting block into the left rectangular tray AND has become
 stationary there. Only the FIRST subsequent purposeful RIGHT hand motion adjusting
@@ -109,8 +123,8 @@ arrival over the right plate. The held object need not be a bare stem; remaining
 fruit does not invalidate this return boundary. return_stem is the existing final
 return label, not a requirement that all fruit is visibly gone. Waiting before
 right return stays phase 2.
-For all three handoffs, track the final controlled fruit delivery in context,
-then locate the stationary BEFORE state and the FIRST moving AFTER state on
+For the two harvest-ending handoffs, track the final controlled fruit delivery
+in context. For every handoff locate the stationary BEFORE state and the FIRST moving AFTER state on
 consecutive original frames. Do not substitute a dropped fruit or an empty hand
 tray visit for delivery. No fixed pause length or timestamps from examples.
 All new stationary handoff rules take precedence over human examples that use

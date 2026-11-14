@@ -113,7 +113,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if route.path == '/api/bootstrap':
                 from .processing_queue import summary
+                from .template import IN_HAND_POLICY
                 return self.send({'app': 'subtasks-review', 'token': self.server.token,
+                                  'in_hand_boundary_policy':IN_HAND_POLICY,
                                   'labels': {k: {'coarse': v[0], 'text': v[1]} for k, v in LABELS.items()},
                                   'action_labels':list(ACTION_LABELS),'behavior_kinds':KINDS,'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
                                   'active_process_job':({'id':self.server.process_job,'kind':'process'} if self.server.process_job and self.server.jobs.get(self.server.process_job,{}).get('state') in ('queued','running') else None),'quarantine_available':True,'processing_batch':summary(self.server.workspace),'coarse_boundary_policy':'full_analysis_v3','processing_modes':['coarse','fine'],'processing_workers':self.server.processing_workers,'training_binding_profile':'derived-dataset-source-v1','export_profile':PROMPT_PROFILE,'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status()})

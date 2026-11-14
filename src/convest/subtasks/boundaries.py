@@ -4,6 +4,49 @@ import json
 from pathlib import Path
 from .core import atomic_json, validate_segments
 
+HANDOFF_EVENTS = {'in_hand_harvest_to_adjust', 'in_hand_adjust_to_harvest',
+                  'in_hand_harvest_to_return'}
+
+
+def handoff_event(before, after):
+    from .template import HARVEST_LABELS
+    if before in HARVEST_LABELS and after == 'rotate_stem':
+        return 'in_hand_harvest_to_adjust'
+    if before == 'rotate_stem' and after in HARVEST_LABELS:
+        return 'in_hand_adjust_to_harvest'
+    if before in HARVEST_LABELS and after == 'return_stem':
+        return 'in_hand_harvest_to_return'
+    return None
+
+
+def stationary_handoff_proven(task, observed, index):
+    """Require both hands' visible gate conditions, never just model BEFORE/AFTER."""
+    frames=task['frames'];before=observed[frames[index-1]];after=observed[frames[index]]
+    event=task['event']
+    # Every sampled state must explicitly describe both motions and delivery.
+    allowed_left={'still','return_onset','returning','delivering','other','occluded'}
+    allowed_right={'still','adjust_onset','adjusting','return_onset','returning','other','occluded'}
+    if any(s.get('left_motion') not in allowed_left or s.get('right_motion') not in allowed_right
+           or s.get('left_delivery') not in {'complete','in_progress','not_observed','occluded'}
+           or s.get('left_location') not in {'above_left_tray','elsewhere','occluded'}
+           or s.get('right_retention') not in {'held','released','occluded'} for s in observed.values()):
+        return False
+    if any(s.get('right_retention')!='held' for s in (before,after)):return False
+    if event=='in_hand_adjust_to_harvest':
+        return (before['right_motion']==after['right_motion']=='still'
+                and before['left_motion']=='still' and before['left_location']=='above_left_tray'
+                and after['left_motion']=='return_onset'
+                and not any(observed[f]['left_motion'] in {'return_onset','returning'} for f in frames[:index]))
+    onset='adjust_onset' if event=='in_hand_harvest_to_adjust' else 'return_onset'
+    moving={'adjust_onset','adjusting'} if event=='in_hand_harvest_to_adjust' else {'return_onset','returning'}
+    valid=(before['right_motion']=='still' and after['right_motion']==onset
+           and all(s['left_motion']=='still' and s['left_location']=='above_left_tray'
+                   and s['left_delivery']=='complete' for s in (before,after))
+           and not any(observed[f]['right_motion'] in moving for f in frames[:index]))
+    if event=='in_hand_harvest_to_return':
+        valid=valid and all(s.get('held_object')=='bare_stem' for s in (before,after))
+    return valid
+
 
 def hand_settling_cue(episode,start,lift_frame):
     """Read-only posture cue, not grip/force ground truth or a cleaning rule.
@@ -91,6 +134,10 @@ def parse_observations(response,tasks):
             valid=secured and onset and not earlier and not reversal
             item['right_lift_onset_proven']=valid
             if not valid:item['reason']='未证实握稳后开始提起的第一帧；静止握持或已经持续提起均不能代替起点'
+        if task['event'] in HANDOFF_EVENTS:
+            valid=valid and stationary_handoff_proven(task,observed,j)
+            item['stationary_handoff_proven']=valid
+            if not valid:item['reason']='未证实双手静止交接条件及下一只手运动第一帧；须人工复核，不能用投放中、持续运动或旧参考时间代替'
         if task.get('outcome_frames'):
             outcomes=rows[task['id']].get('outcome_observations',[])
             seen=set();supported=False;outcome_valid=True
@@ -120,7 +167,31 @@ def parse_observations(response,tasks):
 
 def boundary_prompt(in_hand=False):
     from .template import rules_for
-    return rules_for(in_hand)+'''\nAudit these SEPARATE action transitions using every supplied source-frame image.
+    handoff='''
+For events in_hand_harvest_to_adjust (2 -> 3), in_hand_adjust_to_harvest
+(3 -> second 2), and in_hand_harvest_to_return (last 2 -> 4), classify EVERY
+candidate image with these additional fields:
+left_motion: still|return_onset|returning|delivering|other|occluded
+right_motion: still|adjust_onset|adjusting|return_onset|returning|other|occluded
+left_location: above_left_tray|elsewhere|occluded
+left_delivery: complete|in_progress|not_observed|occluded
+right_retention: held|released|occluded
+held_object: bare_stem|fruit_truss|occluded
+complete means the SAME last fruit was visibly placed/released into the left
+rectangular tray in supplied context, not merely that the left hand is empty.
+2 -> 3: previous frame right still, left still above tray after complete delivery;
+FIRST AFTER right adjust_onset while left remains still after complete delivery.
+3 -> 2: previous frame both hands still, left above tray; FIRST AFTER left
+return_onset from above that tray while right remains still holding at center.
+2 -> 4: previous frame right still holding bare_stem, left still above tray after
+complete delivery; FIRST AFTER right return_onset toward RIGHT plate, left still.
+Adjusting/returning already underway is NOT onset. Earlier sampled matching
+motion cannot be relabeled BEFORE to pick a later convenient boundary.
+Context images establish delivery/order, NOT candidate onset timestamps. If no
+visible stationary witness, successful final delivery or retained bare stem is
+supported as required, return null. Do not invent observations to fit five phases.
+''' if in_hand else ''
+    return rules_for(in_hand)+handoff+'''\nAudit these SEPARATE action transitions using every supplied source-frame image.
 For EACH image output {frame, side: before|after|occluded}. BEFORE means the named
 before action is still occurring; AFTER means the named next action has begun.
 Do not repeat a suggested timestamp. Choose FIRST AFTER, with previous image BEFORE.
@@ -171,7 +242,11 @@ def refine_all(episode,segments,run,client,record,records,max_requests=128,progr
             raise ValueError('粗阶段复核必须是七阶段六个边界')
         prompt+='\nCOARSE PHASE AUDIT: before/after denote entire large phases, NOT individual fine actions.\nfirst_left_approach (pickup -> harvest): the first sustained LEFT arm preparation/approach toward fruit after the right hand brings the held truss to the center. Do not wait for left contact or successful grip. Inspect cam0 and both wrist views.\ncoarse_harvest_to_return: the RIGHT hand starts deliberately returning the entire truss or bare stem toward the right plate after the harvesting block; left-hand basket trips, missed picks or empty-hand returns are still harvest, not this boundary.\ncoarse_return_to_adjust: right-hand return/release has finished and purposeful finger repositioning of the truss on the right plate BEGINS. Do not use the middle of the adjustment.\ncoarse_adjust_to_pickup: adjustment has ended and the RIGHT hand begins the new grasp/pickup attempt. This is the start of grasping, not the later lift onset, since grasp and lift are one coarse pickup phase.\nFor every event, choose the first physically supported AFTER frame with an immediately preceding BEFORE witness in the dense pass. A high confidence or a sampled overview is not dense evidence. If unclear, abstain.\n'
     def event_at(i):
-        if coarse_labels is None:return event_name(result[i]['label'],result[i+1]['label'])
+        if coarse_labels is None:
+            if workflow_in_hand:
+                handoff=handoff_event(result[i]['label'],result[i+1]['label'])
+                if handoff:return handoff
+            return event_name(result[i]['label'],result[i+1]['label'])
         return ['first_left_approach','coarse_harvest_to_return','coarse_return_to_adjust',
                 'coarse_adjust_to_pickup','first_left_approach','coarse_harvest_to_return'][i]
     def check(ids,stage,*,wide=False,dense=False):
@@ -186,7 +261,7 @@ def refine_all(episode,segments,run,client,record,records,max_requests=128,progr
                 lo=max(lower,center-radius);hi=min(upper,center+radius)
                 stride=1 if dense else max(1,round(episode.fps/5))
                 event=event_at(i)
-                if not dense and (coarse_labels is not None or event in {'first_extraction_motion','grasp_truss -> lift_truss'}):
+                if not dense and (coarse_labels is not None or event in HANDOFF_EVENTS or event in {'first_extraction_motion','grasp_truss -> lift_truss'}):
                     # Start localization from the complete neighboring actions,
                     # not from a narrow window around a potentially late guess.
                     lo,hi=lower,upper
@@ -203,6 +278,12 @@ def refine_all(episode,segments,run,client,record,records,max_requests=128,progr
                     task['right_hand_settling_cue']=hand_cues[i]
                     task['hand_cue_meaning']='Independent finger posture settling after sustained closing, not grip/force truth. An earlier apparent contact while fingers still substantially close cannot alone prove a stable grip. This cue is not lift onset. Do not set the boundary to its timestamp; use actual truss lifting motion.'
                 context=[]
+                if event in HANDOFF_EVENTS:
+                    # Broad neighboring-phase context also accompanies the dense
+                    # pass: empty fingers alone cannot prove a final delivery.
+                    context=sorted(set(range(lower,upper+1,max(1,(upper-lower+15)//16)))|{lower,upper})
+                    context=[f for f in context if f not in frames]
+                    task['handoff_context_frames']=context
                 if task['event']=='first_extraction_motion':
                     stop=ends[i+1] if i+1<len(ends) else episode.length
                     width=stop-center

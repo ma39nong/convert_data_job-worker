@@ -290,7 +290,8 @@ def refine_all(episode,segments,run,client,record,records,max_requests=128,progr
                     context=sorted({min(stop-1,center+max(1,width//3)),min(stop-1,center+max(1,2*width//3)),stop-1})
                     task['outcome_frames']=context
                 assets=images_at(episode,sorted(set(frames)|set(context)),panel_size=720)
-                for asset in assets:asset['role']='candidate' if asset['frame'] in frames else 'outcome'
+                for asset in assets:
+                    asset['role']='candidate' if asset['frame'] in frames else ('handoff_context' if event in HANDOFF_EVENTS else 'outcome')
                 folder=run/stage/str(i);folder.mkdir(parents=True,exist_ok=True)
                 for asset in assets:(folder/f"{asset['frame']}.jpg").write_bytes(base64.b64decode(asset['data_url'].split(',',1)[1]))
                 groups.append({'task':task,'assets':assets})

@@ -32,11 +32,32 @@ def original_tasks(ep):
 
 # Same standalone writer is exercised locally in tests and remotely on alias 28.
 WRITER=inspect.getsource(binding)+r'''
-import base64,hashlib,json,os,pathlib,shutil,subprocess,sys,tempfile
+import base64,grp,hashlib,json,os,pathlib,shutil,stat,subprocess,sys,tempfile
 body=json.load(sys.stdin);base=pathlib.Path(sys.argv[1]).resolve(strict=True)
 source=pathlib.Path(body['source']).resolve(strict=True);dest=pathlib.Path(body['destination']).resolve()
 if not source.is_relative_to(base) or not dest.is_relative_to(base):raise ValueError('Destination outside allowed root')
 if dest==source or dest in source.parents:raise ValueError('Invalid destination')
+# This umask belongs only to the standalone data writer, never the HTTP server
+# or credential handling. mkstemp/mkdtemp still need explicit group permissions.
+os.umask(0o002)
+ancestor=dest.parent
+while not ancestor.exists():ancestor=ancestor.parent
+shared_gid=grp.getgrnam(body['shared_group']).gr_gid if body.get('shared_group') else ancestor.stat().st_gid
+def share(path,directory=False):
+ if path.is_symlink():raise ValueError('Shared output must not contain symlinks')
+ info=path.stat();mode=stat.S_IMODE(info.st_mode)
+ wanted=mode | (0o2070 if directory else 0o060)
+ if info.st_gid!=shared_gid:os.chown(path,-1,shared_gid)
+ if mode!=wanted or info.st_gid!=shared_gid:path.chmod(wanted)
+def shared_directory(path):
+ missing=[];ancestor=path
+ while not ancestor.exists():missing.append(ancestor);ancestor=ancestor.parent
+ if not ancestor.is_dir() or not ancestor.resolve().is_relative_to(base):raise ValueError('Unsafe output directory')
+ for created in reversed(missing):created.mkdir();share(created,True)
+ if not missing:share(path,True)
+def share_tree(root):
+ share(root,True)
+ for path in root.rglob('*'):share(path,path.is_dir())
 for rel,digest in body['source_sha256'].items():
  p=(source/rel).resolve(strict=True)
  if pathlib.PurePosixPath(rel).is_absolute() or '..' in pathlib.PurePosixPath(rel).parts or not p.is_relative_to(source):raise ValueError('Invalid source path')
@@ -51,18 +72,18 @@ def digest_file(p):
  return h.hexdigest()
 def canonical(obj):return json.dumps(obj,ensure_ascii=False,sort_keys=True,allow_nan=False).encode()
 def publish_file(path,data):
- path.parent.mkdir(parents=True,exist_ok=True)
+ shared_directory(path.parent)
  if not path.parent.resolve().is_relative_to(base):raise ValueError('Unsafe output symlink')
  if path.exists():
   if path.read_bytes()==data:
-   path.chmod(0o640)
+   share(path)
    return
   old=json.loads(path.read_bytes());new=json.loads(data)
   if old.get('stage')!=new.get('stage') or any(old.get('source',{}).get(k)!=new.get('source',{}).get(k) for k in ('episode_index','source_recording_id')):raise ValueError('Existing output belongs to another source')
  fd,name=tempfile.mkstemp(prefix='.subtask-',dir=path.parent)
  try:
   with os.fdopen(fd,'wb') as f:
-   f.write(data);f.flush();os.fchown(f.fileno(),-1,path.parent.stat().st_gid);os.fchmod(f.fileno(),0o640);os.fsync(f.fileno())
+   f.write(data);f.flush();os.fchown(f.fileno(),-1,shared_gid);os.fchmod(f.fileno(),0o660);os.fsync(f.fileno())
   os.replace(name,path)
  finally:
   if os.path.exists(name):os.unlink(name)
@@ -77,9 +98,10 @@ else:
   for rel,digest in receipt['files'].items():
    if digest_file(dest/rel)!=digest:raise ValueError('Training copy changed')
   verify_annotation(dest,json.loads((dest/'stage_annotations.json').read_text()))
+  share_tree(dest)
   result={'path':str(dest),'kind':'training','sha256':body['export_digest']}
  else:
-  dest.parent.mkdir(parents=True,exist_ok=True)
+  shared_directory(dest.parent)
   stage=pathlib.Path(tempfile.mkdtemp(prefix='.subtask-training-',dir=dest.parent))
   try:
    for rel,value in body['files'].items():
@@ -106,6 +128,7 @@ else:
    verify_annotation(stage,annotation)
    hashes={str(p.relative_to(stage)):digest_file(p) for p in stage.rglob('*') if p.is_file()}
    (stage/'subtask_export.json').write_bytes(canonical({'export_digest':body['export_digest'],'binding_profile':BINDING_PROFILE,'source':str(source),'source_episode_index':body['source_episode'],'stage':body['stage'],'files':hashes}))
+   share_tree(stage)
    if dest.exists():raise ValueError('Destination appeared during export')
    stage.rename(dest)
   finally:
@@ -194,6 +217,7 @@ def publish(ws,ep,stage,*,target='dataset',root=None,kind='json',revision=None,p
     dest=str(Path(selected)/stage/(name+'.json' if kind=='json' else name))
     source=loc['source_dataset'] if remote else str(ep.root)
     body={'kind':kind,'source':source,'destination':dest,'source_sha256':doc['source']['sha256'],'document':doc}
+    if remote:body['shared_group']='ai_researchers'
     if kind=='training':
         files,videos=training_files(ep,doc,prompt_mode=prompt_mode,task_prompt=task_prompt)
         body.update(files=files,videos=videos,export_digest=export_digest,source_episode=ep.index,stage=stage,cameras=list(ep.cameras))

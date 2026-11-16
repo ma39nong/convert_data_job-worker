@@ -29,10 +29,10 @@ def test_local_json_separate_paths_idempotent_and_no_source_mutation(tmp_path):
         assert '/fine/' in f['path'] and '/coarse/' in c['path'] and f['path']!=c['path']
         assert json.loads(Path(f['path']).read_text())['stage']=='fine'
         assert json.loads(Path(f['path']).read_text())['inherited'] is False
-        assert Path(f['path']).stat().st_mode & 0o777 == 0o640
+        assert Path(f['path']).stat().st_mode & 0o777 == 0o660
         Path(f['path']).chmod(0o600)
         assert publish(ws,ep,'fine',target='local',root=str(tmp_path/'chosen'),revision=fine['revision'])['path']==f['path']
-        assert Path(f['path']).stat().st_mode & 0o777 == 0o640
+        assert Path(f['path']).stat().st_mode & 0o777 == 0o660
         assert ep.identity()==before
         with pytest.raises(ValueError,match='版本'):publish(ws,ep,'fine',target='local',root=str(tmp_path/'chosen'),revision=0)
         with pytest.raises(ValueError,match='输入'):publish(ws,ep,'fine',target='local',root=str(ep.root),revision=1)
@@ -177,4 +177,51 @@ def test_mapping_does_not_confirm_unreviewed_source(tmp_path):
         ws.save_stage(normal,'coarse',doc)
         mapped=ws.map_saved(normal.id,speedup.id,['coarse'])['stages']['coarse']
         assert all(not r['reviewed'] for r in mapped['segments'])
+    finally:store.lockfile.close()
+
+
+def test_export_shared_permissions_survive_private_umask_and_atomic_replacement(tmp_path):
+    import os,stat
+    ep=dataset(tmp_path/'source');store=Store([ep.root],tmp_path/'review');ws=Workspace(store)
+    try:
+        doc=reviewed(ws,ep);before=ep.identity();parent_mode=stat.S_IMODE(tmp_path.stat().st_mode)
+        old_mask=os.umask(0o077)
+        try:
+            result=publish(ws,ep,'fine',target='local',root=str(tmp_path/'new'/'nested'),revision=doc['revision'])
+            path=Path(result['path']);assert path.stat().st_mode & 0o060==0o060
+            for directory in [path.parent,*list(path.parent.parents)[:3]]:
+                assert directory.stat().st_mode & 0o2070==0o2070
+            # Existing ancestors outside the output tree must never get chmodded.
+            assert stat.S_IMODE(tmp_path.stat().st_mode)==parent_mode
+            before_bytes=path.read_bytes();path.chmod(0o600)
+            publish(ws,ep,'fine',target='local',root=str(tmp_path/'new'/'nested'),revision=doc['revision'])
+            assert path.stat().st_mode & 0o060==0o060 and path.read_bytes()==before_bytes
+            # A changed document exercises mkstemp + atomic rename, not just reuse.
+            edited=ws.stages(ep)['fine'];edited['segments'][0]['end_frame']=19;edited['segments'][1]['start_frame']=19
+            updated=ws.save_stage(ep,'fine',edited)
+            publish(ws,ep,'fine',target='local',root=str(tmp_path/'new'/'nested'),revision=updated['revision'])
+            assert path.read_bytes()!=before_bytes and path.stat().st_mode & 0o060==0o060
+            assert path.stat().st_gid==path.parent.stat().st_gid
+        finally:os.umask(old_mask)
+        assert ep.identity()==before
+    finally:store.lockfile.close()
+
+
+def test_training_copy_shared_permissions_and_idempotent_repair(tmp_path):
+    import os
+    ep=dataset(tmp_path/'source');store=Store([ep.root],tmp_path/'review');ws=Workspace(store)
+    try:
+        doc=reviewed(ws,ep);before=ep.identity();old_mask=os.umask(0o077)
+        try:result=publish(ws,ep,'fine',kind='training',target='local',root=str(tmp_path/'training'),revision=doc['revision'])
+        finally:os.umask(old_mask)
+        root=Path(result['path']);files={p:p.read_bytes() for p in root.rglob('*') if p.is_file()}
+        def verify():
+            for p in [root,*root.rglob('*')]:
+                assert p.stat().st_mode & (0o2070 if p.is_dir() else 0o060)==(0o2070 if p.is_dir() else 0o060)
+                assert p.stat().st_gid==root.parent.stat().st_gid
+        verify()
+        root.chmod(0o700)
+        for p in root.rglob('*'):p.chmod(0o700 if p.is_dir() else 0o600)
+        publish(ws,ep,'fine',kind='training',target='local',root=str(tmp_path/'training'),revision=doc['revision'])
+        verify();assert all(p.read_bytes()==raw for p,raw in files.items());assert ep.identity()==before
     finally:store.lockfile.close()

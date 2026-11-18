@@ -110,6 +110,8 @@ SSH 设置是目录浏览、连接测试和 rsync 上传使用的地址、登录
 
 界面中的 normal/speedup 父目录仍为最终 `/mnt/data/train_platform/datasets/...`。程序将其相对路径对应到 `/mnt/public_data/local-realrobot-train-data/...`，先上传中转、立即服务器侧搬运，再校验发布和自动清理该批中转对象。只有最终两版及配对材料均交付完成才显示已发布。无需手动搬运、导入或清理。
 
+手动指定的训练目标支持多层场景目录，例如 `datasets/tomato_sharpa/normal/grape-tomato/only-grape/A/批次`；OSS 中转保留相同层级。项目之后仍须为 `normal` 或 `speedup`，场景之后为 A/B 和批次；配对材料使用 `A或B/.workflow-pairs/报告名`。
+
 工作机使用已有 SSH；服务器需具备 OSS `fuse.ossfs2` 和 CPFS NFS 挂载，以及两侧对应项目目录的写权限。挂载丢失、未知文件、同名冲突或 SHA/凭据失败均保留数据并报错重试。已验证的中转文件可复用，半文件从头重传；最终已发布但中转未删完时只恢复校验和清理。公共中转根与旁边项目不受影响。中转自动清理独立于本机原包/完整批次的释放开关。
 
 交付策略保存在 `settings.json` 的 `training_delivery`，默认 `mode=oss`、`transit_root=/mnt/public_data/local-realrobot-train-data`、`final_root=/mnt/data/train_platform/datasets`。旧配置自动采用此默认，升级不新建队列或重做已上传批次；已停止任务重新开始时应用。旧自定义目标不在 datasets 下时应先调整最终目标，或明确设置 `mode=direct` 使用兼容直传；OSS 故障不会自动回退。完整路径示例、恢复记录和边界见 README 的“训练上传：OSS 自动中转与清理”。

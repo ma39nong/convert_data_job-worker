@@ -72,10 +72,13 @@ def run(q, progress=lambda **kw: None):
     final_root = safe(q['final_root'])
     transit_root = safe(q['transit_root'])
     relative = destination.relative_to(final_root)
-    # At least project / variant / scene / group / batch (also supports pair reports).
-    if (len(relative.parts) < 5 or relative.parts[1] not in ('normal', 'speedup')
-            or relative.parts[3] not in ('A', 'B')):
-        raise ValueError('训练目标必须在 datasets 的 项目/版本/场景/A或B/批次 下')
+    # Scenes may span multiple directories. Anchor the group to the artifact
+    # suffix, including the separate A|B/.workflow-pairs/report layout.
+    parts = relative.parts
+    group_index = len(parts) - (3 if len(parts) >= 2 and parts[-2] == '.workflow-pairs' else 2)
+    if (group_index < 3 or parts[1] not in ('normal', 'speedup')
+            or parts[group_index] not in ('A', 'B')):
+        raise ValueError('训练目标必须在 datasets 的 项目/版本/场景（可多层）/A或B/批次 下')
     if final_root.is_relative_to(transit_root) or transit_root.is_relative_to(final_root):
         raise ValueError('OSS 中转和最终目录不能重叠')
     transit = safe(transit_root / relative)

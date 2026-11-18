@@ -52,6 +52,39 @@ def test_delivers_final_receipt_and_cleans_only_owned_batch(setup):
     assert invoke(q, 'prepare') == result
 
 
+@pytest.mark.parametrize('variant,group', [('normal', 'A'), ('speedup', 'B')])
+@pytest.mark.parametrize('scene', ['scene', 'grape-tomato/only-grape', 'farm/row/scene'])
+@pytest.mark.parametrize('artifact', ['batch', '.workflow-pairs/report'])
+def test_nested_scene_dataset_and_pair_report_publication(setup, variant, group, scene, artifact):
+    source, q = setup
+    destination = Path(q['final_root']) / 'tomato_sharpa' / variant / scene / group / artifact
+    q = {**q, 'destination': str(destination)}
+    transit = uploaded(source, q)
+    assert transit == Path(q['transit_root']) / destination.relative_to(q['final_root'])
+    result = invoke(q, 'commit')
+    assert result['transit_cleaned'] and not transit.exists()
+    assert manifest(destination) == q['files']
+    assert invoke(q, 'prepare') == result
+
+
+@pytest.mark.parametrize('relative', [
+    'tomato_sharpa/normal/A/batch',
+    'tomato_sharpa/normal/A/.workflow-pairs/report',
+    'tomato_sharpa/other/scene/A/batch',
+    'tomato_sharpa/normal/scene/C/batch',
+    'tomato_sharpa/normal/scene/A/extra/batch',
+    'tomato_sharpa/normal/scene/C/.workflow-pairs/report',
+    'tomato_sharpa/normal/scene/A/.workflow-pairs/extra/report',
+])
+def test_invalid_destination_layout_rejected_before_writes(setup, relative):
+    _, q = setup
+    q = {**q, 'destination': str(Path(q['final_root']) / relative)}
+    with pytest.raises(ValueError, match='训练目标必须'):
+        invoke(q, 'prepare')
+    assert not Path(q['final_root']).exists()
+    assert not Path(q['transit_root']).exists()
+
+
 def test_incomplete_or_corrupted_oss_never_publishes_or_deletes(setup):
     source, q = setup
     transit = uploaded(source, q)

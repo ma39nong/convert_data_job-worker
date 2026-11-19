@@ -60,6 +60,7 @@ class Handler(BaseHTTPRequestHandler):
             if route=='/api/start':return self.send(m.start(body.get('task')))
             if route=='/api/stop':return self.send(m.stop(body.get('task')))
             if route=='/api/upload-now':return self.send(m.upload_now(body['task']))
+            if route=='/api/retry-uploads':return self.send(m.retry_uploads(body['task']))
             if route=='/api/retry':return self.send(m.retry(body['task']))
             if route=='/api/new-task':
                 task=new_task(body.get('index',1))

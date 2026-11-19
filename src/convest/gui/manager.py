@@ -112,6 +112,27 @@ class Manager:
                 raise ValueError('正在提交或封存批次，请稍后再点击立即上传') from None
         return self.snapshot()
 
+    def retry_uploads(self,tid):
+        """Make queued upload retries due without touching active transfers or processing."""
+        with self.lock:
+            self.task(tid)
+            state=self.state(tid)['state']
+            if state in ('starting','stopping'):
+                raise ValueError('任务正在启动或收尾，请稍后重试上传')
+            root=self.current(tid)
+            counts={'data':0,'training':0}
+            if root:
+                for key,file,sql in [
+                    ('data',root/'capture/state/queue.sqlite3',
+                     "UPDATE uploads SET next_ns=0 WHERE state='retry'"),
+                    ('training',root/'training/state/queue.sqlite3',
+                     "UPDATE tasks SET next_ns=0 WHERE state='upload_retry'")]:
+                    if file.exists():
+                        # Never create a missing queue; the worker owns initialization.
+                        with sqlite3.connect(file.as_uri()+'?mode=rw',uri=True,timeout=2) as db:
+                            counts[key]=db.execute(sql).rowcount
+            return {'task':tid,'state':state,'counts':counts}
+
     def retry(self,tid):
         with self.lock:
             self.task(tid)

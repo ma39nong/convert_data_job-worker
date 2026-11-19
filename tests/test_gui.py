@@ -376,3 +376,48 @@ def test_batch_size_saved_migrated_and_preserves_runtime(tmp_path,monkeypatch):
         with pytest.raises(ValueError,match='累计上传条数'):config.validate(settings)
     with pytest.raises(ValueError,match='请先开始'):manager.upload_now(task['id'])
     shutil.rmtree(root_test)
+
+
+@pytest.mark.parametrize('state',['running','stopped'])
+def test_retry_uploads_preserves_active_complete_and_processing_rows(tmp_path,monkeypatch,state):
+    import sqlite3
+    monkeypatch.setattr(config,'ROOT',tmp_path/'ui')
+    manager=Manager();tid=manager.settings['tasks'][0]['id'];root=tmp_path/'run'
+    monkeypatch.setattr(manager,'current',lambda _:root)
+    monkeypatch.setattr(manager,'state',lambda _:{'state':state})
+    before={}
+    for section,table,states in [
+        ('capture','uploads',['retry','uploading','completed','pending','conflict']),
+        ('training','tasks',['upload_retry','uploading','uploaded','retry','processing','conflict','waiting_space'])]:
+        file=root/section/'state/queue.sqlite3';file.parent.mkdir(parents=True)
+        with sqlite3.connect(file) as db:
+            db.execute(f'CREATE TABLE {table}(id TEXT,state TEXT,next_ns INTEGER,error TEXT,attempts INTEGER,payload TEXT)')
+            db.executemany(f'INSERT INTO {table} VALUES(?,?,?,?,?,?)',
+                           [(s,s,999999999999999999,'previous failure',9,'unchanged') for s in states])
+            before[section]=db.execute(f'SELECT * FROM {table} ORDER BY id').fetchall()
+    result=manager.retry_uploads(tid)
+    assert result=={'task':tid,'state':state,'counts':{'data':1,'training':1}}
+    for section,table,target in [('capture','uploads','retry'),('training','tasks','upload_retry')]:
+        with sqlite3.connect(root/section/'state/queue.sqlite3') as db:
+            after=db.execute(f'SELECT * FROM {table} ORDER BY id').fetchall()
+        assert after==[(*row[:2],0,*row[3:]) if row[0]==target else row for row in before[section]]
+    for transition in ['starting','stopping']:
+        monkeypatch.setattr(manager,'state',lambda _,value=transition:{'state':value})
+        with pytest.raises(ValueError,match='启动或收尾'):manager.retry_uploads(tid)
+    with pytest.raises(ValueError,match='任务不存在'):manager.retry_uploads('unknown-task')
+
+
+def test_retry_uploads_http_requires_token_and_handles_missing_queues(tmp_path,monkeypatch):
+    monkeypatch.setattr(config,'ROOT',tmp_path/'ui')
+    server=Server(('127.0.0.1',0));thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    tid=server.manager.settings['tasks'][0]['id']
+    request=urllib.request.Request(f'http://127.0.0.1:{server.server_port}/api/retry-uploads',
+        data=json.dumps({'task':tid}).encode(),headers={'Content-Type':'application/json'})
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:opener.open(request)
+        assert exc.value.code==403
+        request.add_header('X-Workflow-Token',server.token)
+        with opener.open(request) as response:
+            assert json.load(response)=={'task':tid,'state':'stopped','counts':{'data':0,'training':0}}
+    finally:server.shutdown();server.server_close();thread.join()

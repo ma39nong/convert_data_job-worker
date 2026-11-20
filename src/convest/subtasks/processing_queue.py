@@ -32,16 +32,18 @@ def remaining(ws,mode='coarse',variant='normal',workflow=None):
     return [e['id'] for e in sorted(rows,key=key)]
 
 
-def create(ws,ids,mode,workers=None):
+def create(ws,ids,mode,workers=None,provider='doubao'):
     if workers is not None and (type(workers) is not int or not 1<=workers<=8):raise ValueError('同时处理数量须为1–8的整数')
     if mode not in {'coarse','fine'}:raise ValueError('无效处理模式')
+    if provider not in {'doubao','qwen'}:raise ValueError('未知标注模型')
+    if provider=='qwen' and mode!='coarse':raise ValueError('Qwen 当前仅支持粗阶段')
     if not ids or len(ids)!=len(set(ids)) or any(i not in ws.store.entries for i in ids):raise ValueError('没有可排队的片段')
     if any(e.get('superseded') for e in ws.catalog()['episodes'] if e['id'] in ids):raise ValueError('所选旧三路版本已由四路ROI版本替代，请选择当前数据')
     previous=active(ws)
     if previous and previous['state'] in {'queued','running'}:raise ValueError('已有持久处理队列')
     # Keep normal sources ahead of speedup dependencies, preserving UI A/B order.
     ids=sorted(ids,key=lambda i:ws.store.entries[i]['variant']=='speedup')
-    batch={'id':uuid.uuid4().hex,'mode':mode,'state':'queued','order':ids,'phase':'initial',
+    batch={'id':uuid.uuid4().hex,'mode':mode,'provider':provider,'state':'queued','order':ids,'phase':'initial',
            'initial_done':[],'retry_order':None,'retry_done':[],'results':{},'current_id':None,'created_at':time.time()}
     if workers is not None:batch['workers']=workers
     checkpoint(ws,batch)
@@ -66,7 +68,7 @@ def run(ws,server,batch_id):
             # New response identity on retry avoids replaying the same malformed cached output.
             namespace=(batch['id']+':retry:'+id_) if phase=='retry' else None
             try:
-                result=ws.process([id_],server,mode=batch['mode'],retry_namespace=namespace)['episodes'][0]
+                result=ws.process([id_],server,mode=batch['mode'],retry_namespace=namespace,provider=batch.get('provider','doubao'))['episodes'][0]
             except Exception as exc:
                 result={'id':id_,'state':'failed','error':str(exc)}
                 with ws.lock:ws.queue[id_]={**result,'mode':batch['mode']};ws._checkpoint()
@@ -98,13 +100,13 @@ def run(ws,server,batch_id):
                 checkpoint(ws,batch)
     batch['state']='completed';batch['current_id']=None;batch['current_ids']=[];checkpoint(ws,batch)
     return {'episodes':[batch['results'][i] for i in batch['order']], 'batch_id':batch['id'],
-            'retry_count':len(batch['retry_order']), 'warning':'两轮后仍失败的片段保留错误，需人工处理。'}
+            'retry_count':len(batch['retry_order']), 'warning':'首轮处理后只重试失败项一次，成功和已保存结果不重复处理。'}
 
 
 def summary(ws):
     batch=active(ws)
     if not batch:return None
-    return {k:copy.deepcopy(batch.get(k)) for k in ('id','mode','state','phase','current_id','current_ids','current_index','current_total','workers')}|{
+    return {k:copy.deepcopy(batch.get(k)) for k in ('id','mode','provider','state','phase','current_id','current_ids','current_index','current_total','workers')}|{
         'total':len(batch['order']),'initial_completed':len(batch['initial_done']),
         'retry_total':len(batch['retry_order'] or []),'retry_completed':len(batch['retry_done']),
         'failed':sum(r['state']=='failed' for r in batch['results'].values())}

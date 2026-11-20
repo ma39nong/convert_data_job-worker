@@ -84,7 +84,7 @@ class Workspace:
                 if proposal_path.exists():
                     proposal=json.loads(proposal_path.read_text())
                     if proposal['source']==doc['source'] and proposal['base_annotation_revision']==doc['revision']:
-                        value={**value,'segments':proposal['segments'],'processing_mode':'coarse','processing_warning':proposal['warning'],'boundary_audit':proposal.get('provenance',{}).get('boundary_audit'),'unresolved_boundaries':proposal.get('provenance',{}).get('unresolved_boundaries',[])}
+                        value={**value,'segments':proposal['segments'],'processing_mode':'coarse','processing_provider':proposal.get('provenance',{}).get('provider','doubao'),'model_analysis':proposal.get('provenance',{}).get('model_analysis'),'processing_warning':proposal['warning'],'boundary_audit':proposal.get('provenance',{}).get('boundary_audit'),'unresolved_boundaries':proposal.get('provenance',{}).get('unresolved_boundaries',[])}
                         if proposal.get('provenance',{}).get('method') in {'doubao_coarse_overview_v1','doubao_coarse_source_frames_v2'}:
                             value['processing_warning']='旧版粗处理草稿已停用，保留作对照；等待完整分析重做，请勿将它视为新结果。'
             out[stage]=value
@@ -187,13 +187,20 @@ class Workspace:
                     'archived':override.get('archived',False),'original_episode_index':override.get('original_episode_index',entry['episode_index']),'coarse_saved':saved['coarse'],'fine_saved':saved['fine'],'error':q.get('error',''),
                     'fine_ready':fine_ready,'coarse_ready':coarse_ready,'coarse_state':states['coarse'],'fine_state':states['fine'],
                     'processing_mode':mode,'human_reviewed':reviewed,'depends_on':dependency['id'] if dependency else None}
+                timing_prov=proposal.get('provenance',{}) if rough_ready and not saved['coarse'] else {}
+                item['timing_conflict']=any('模型投放时间' in n for n in timing_prov.get('local_boundary_review_notes',[]))
+                item['timing_resolution']=bool(timing_prov.get('visual_timing_resolution'))
+                item['local_calibrated']=bool(timing_prov.get('local_boundary_refinement'))
+                item['local_calibration_eligible']=bool(rough_ready and not saved['coarse'] and entry['variant']=='normal' and not item['local_calibrated'] and [r.get('label') for r in proposal.get('segments',[])]==['pickup','harvest','adjust','harvest','return'])
                 if status=='waiting_normal':item['error']=dependency['reason']
                 elif legacy_wait:item['error']=''
                 for key in ('source_start_ns','source_end_ns'):
                     if item.get(key) is not None:item[key]=str(item[key])
                 exclusion=exclusions.get(entry['id'],{})
                 item['excluded']=bool(exclusion.get('excluded'));item['exclusion']=exclusion
-                if item['excluded']:status=item['state']=item['coarse_state']=item['fine_state']='excluded'
+                if item['excluded']:
+                    status=item['state']=item['coarse_state']=item['fine_state']='excluded'
+                    item['local_calibration_eligible']=False
                 episodes.append(item)
                 group=groups.setdefault(group_id,{'id':group_id,'path':group_directory,'host':host,'total':0,'ready':0,'pending':0,'running':0,'failed':0,'coarse_saved':0,'fine_saved':0,'excluded':0})
                 group['total']+=1
@@ -207,6 +214,7 @@ class Workspace:
                 item['media_profile']=media_profile(item['remote_directory'])
                 item['superseded_by']=roi.get((item['variant'],recording_key(item))) if item['media_profile']=='original_three' else None
                 item['superseded']=bool(item['superseded_by'])
+                if item['superseded'] or item['archived'] or item['workflow']!='without_return':item['local_calibration_eligible']=False
             for group in groups.values():
                 rows=[e for e in episodes if e['directory_id']==group['id']]
                 group['workflow']=workflow_group(group['path'])
@@ -348,7 +356,7 @@ class Workspace:
         if retry_namespace:client.retry_namespace=retry_namespace
         return client
 
-    def process_coarse_episode(self,ep,current,server,retry_namespace=None):
+    def process_coarse_episode(self,ep,current,server,retry_namespace=None,provider='doubao',qwen_local_only=False):
         """Generate an independent unsaved coarse proposal; never fabricate fine labels."""
         before=self.stages(ep,current)
         if before['coarse']['saved_at']:
@@ -371,6 +379,9 @@ class Workspace:
             mapped=project(normal,ep,annotation)
             result={'coarse_segments':coarse_segments(mapped['segments']),'method':'source_frame_coarse_projection',
                     'warning':'按normal来源帧映射粗阶段，需人工复核；没有生成细阶段。'}
+        elif provider=='qwen':
+            from .qwen import annotate
+            result=annotate(ep,self.store.output,retry_namespace=retry_namespace,**({'allow_network':False} if qwen_local_only else {}))
         else:
             client=self.model_client(ep,server,retry_namespace)
             analysis=self._proposal(ep,current,server,client)
@@ -419,11 +430,13 @@ class Workspace:
             atomic_json(proposal_path,proposal)
         return 'ready'
 
-    def process(self,ids,server,mode='fine',retry_namespace=None):
+    def process(self,ids,server,mode='fine',retry_namespace=None,provider='doubao',qwen_local_only=False):
         if mode not in {'coarse','fine'}:raise ValueError('请选择粗阶段或完整细阶段处理')
         from .doubao import Client
         from .style import transition_examples
-        if not server.doubao_key:raise ValueError('豆包连接不可用，请检查启动凭据')
+        if provider not in {'doubao','qwen'}:raise ValueError('未知标注模型')
+        if provider=='qwen' and mode!='coarse':raise ValueError('Qwen 当前仅支持粗阶段，请选择豆包处理细阶段')
+        if provider=='doubao' and not server.doubao_key:raise ValueError('豆包连接不可用，请检查启动凭据')
         results=[]
         ids=sorted(ids,key=lambda id_:self.store.entries[id_]['variant']=='speedup')
         for id_ in ids:
@@ -437,7 +450,7 @@ class Workspace:
                 with self.lock,self.store.lock:
                     ep=self.store.episode(id_);current=self.store.load(ep)
                 if mode=='coarse':
-                    status=self.process_coarse_episode(ep,current,server,retry_namespace)
+                    status=self.process_coarse_episode(ep,current,server,retry_namespace,provider=provider,qwen_local_only=qwen_local_only)
                     with self.lock:
                         self.queue[id_]={'state':'ready','mode':'coarse'};self._checkpoint()
                     results.append({'id':id_,'state':status,'mode':'coarse'});continue

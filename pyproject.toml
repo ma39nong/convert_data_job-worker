@@ -34,4 +34,4 @@ testpaths = ["tests"]
 [tool.setuptools.package-data]
 "convest.gui" = ["static/*.html", "static/*.css", "static/*.js", "static/*.png"]
 
-"convest.subtasks" = ["static/*.html", "static/*.css", "static/*.js"]
+"convest.subtasks" = ["static/*.html", "static/*.css", "static/*.js", "qwen_prompt.txt"]

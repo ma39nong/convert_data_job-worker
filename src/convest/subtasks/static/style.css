@@ -20,3 +20,6 @@
 .videos.four-streams .video-card:first-child{grid-column:auto}
 .videos.four-streams .video-card video{max-height:290px;aspect-ratio:4/3}
 .workflow-tabs{margin-bottom:10px}
+
+/* Keep one-click export feedback visible below its controls. */
+.savebar{flex-wrap:wrap}.savebar #saveActionResult{flex:0 0 100%;width:100%;max-height:100px;overflow:auto}

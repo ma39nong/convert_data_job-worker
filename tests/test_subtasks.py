@@ -347,7 +347,7 @@ def test_jev_client_caches_and_keeps_key_out_of_audit(tmp_path,monkeypatch,injec
     assert all(b'not-a-real-secret-for-test' not in p.read_bytes() for p in tmp_path.rglob('*') if p.is_file())
 
 
-def test_review_ui_has_only_doubao_and_no_jev_web_configuration(pair,tmp_path,monkeypatch):
+def test_review_ui_has_doubao_qwen_and_no_jev_web_configuration(pair,tmp_path,monkeypatch):
     normal,_=pair
     monkeypatch.setenv('SUBTASKS_HTTP_TOKEN','preserved-browser-session')
     server=Server(('127.0.0.1',0),[normal.root],tmp_path/'review')
@@ -357,7 +357,10 @@ def test_review_ui_has_only_doubao_and_no_jev_web_configuration(pair,tmp_path,mo
         bootstrap=json.load(urllib.request.urlopen(base+'/api/bootstrap'))
         assert server.token=='preserved-browser-session' and 'jev' not in bootstrap
         html=urllib.request.urlopen(base).read().decode()
-        assert 'subtask阶段标注' in html and '保存粗阶段' in html and '保存细阶段' in html
+        assert 'subtask阶段标注' in html and '审核通过并保存导出粗阶段' in html and '审核通过并保存导出细阶段' in html
+        assert 'value="doubao"' in html and 'value="qwen"' in html and 'processProvider' in html
+        assert bootstrap['qwen']['modes']==['coarse'] and bootstrap['qwen']['workflows']==['without_return']
+        assert 'localCalibrateCurrent' in html and 'localCalibrateRemaining' in html
         assert 'JEV' not in html and '配置视觉模型' not in html and 'href="/quality"' not in html
         for path in ['/models','/models.js','/api/models/status']:
             with pytest.raises(urllib.error.HTTPError) as error:urllib.request.urlopen(base+path)

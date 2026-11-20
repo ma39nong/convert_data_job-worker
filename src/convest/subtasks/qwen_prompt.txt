@@ -1,0 +1,47 @@
+请观看完整双臂机器人视频，按实际运动给出粗阶段时间标注。视频时长 {duration_seconds} 秒，时间从0开始。优先判断四处交接的运动起点，计数是次要信息。
+
+机器人右手拿起并持续持有番茄串，送到中间；左手逐颗摘果并投放左侧方形果盘。右手在中间调整所持番茄串的位置和朝向，左手再采摘，最后右手将持有对象放回右侧盘。调整时不放盘、不换到左手；最后是否剩果或空杆不影响放回标签。左右手按机器人自身定义，可结合“持串手”和“摘果手”识别，不能根据画面左右猜测。
+
+先根据视频找交接事件，再据此生成区间。不要先猜五段时间，再用符合任务描述的句子解释它们。
+
+四个边界的具体判据：
+B1 拿起→第一轮采摘：右手持串到中间后已经停稳，左手从静止开始朝番茄串移动的第一个可见时刻。不是接触、闭指或抓稳时刻。左手起始位置不限。
+B2 第一轮采摘→调整：左手已经把本轮最后一颗果放入左盘、释放并静止，然后右手开始主动改变番茄串位置或朝向的第一个可见时刻。最后一次投放完成只是前提，边界取之后右手开始调整的运动起点。左手还持果送盘或释放时仍属采摘；采摘中的右手小幅配合补偿不算调整。
+B3 调整→第二轮采摘：右手完成调整并持串停稳，左手从左盘上方静止位置开始离盘，向番茄串回程的第一个可见时刻。不是左手到达番茄串或再次摘果的时刻。
+B4 第二轮采摘→放回：左手已经把本轮最后一颗果放入左盘、释放并静止，然后右手开始持物向右盘回程的第一个可见时刻。不是左手释放时刻、右手到盘时刻或松手时刻。
+
+每处都要区分“前提已经完成”和“下一动作开始移动”。前提完成后的等待仍归前一段，边界取后者。尤其检查B2和B4：不要漏掉最后一次投放而提前切段。判断B3不要把正在进行的右手调整误当成第二轮采摘。
+
+证据要求：
+对每处边界先查看候选时刻之前和之后的左右手状态。observation简短写出实际看到的前后变化，例如“左手已释放果实并停住，随后持串手开始旋转”；不能只复述规则，不能用“回到盘附近”代替“释放并静止”的证据。
+无法确认静止、释放或运动起点，或两手动作重叠时，needs_review必须为true，reason说明具体缺失证据。可给有依据的候选时间，但不要把猜测写成已观察事实。如果连候选时间也看不清，时间填null。时间精度应符合实际视频采样；不宣称原始帧精度，不为了整齐而取整。
+
+五个时间顺序phase_index为1、2、3、4、5，label依次pickup、harvest、adjust、harvest、return。动作类别是四种，两轮harvest复用同一标签。采摘阶段包括左手靠拢、反复摘果、送盘、释放；不要逐颗拆粗阶段。
+若视频支持该流程，区间为[0,B1)、[B1,B2)、[B2,B3)、[B3,B4)、[B4,视频时长]，时间连续无空隙且末段准确覆盖给定时长。边界归后段。不要硬凑流程；缺阶段、调整不止一次或顺序不同，sequence_supported为false并说明实际情况。
+
+成功投放计数：仅计已看到左手持摘下的果实到左盘释放、果实留盘且不再持果的独立事件。不把空手往返或盘外掉果计入。两轮数量不必相等。仅能确认部分事件时数量填null，保留已确认投放时间；不要为完成计数猜测或改变粗边界。
+
+只输出一个JSON对象，不输出长篇推理：
+{
+  "sequence_supported": true,
+  "segments": [
+    {"phase_index":1,"label":"pickup","start_seconds":0,"end_seconds":B1},
+    {"phase_index":2,"label":"harvest","start_seconds":B1,"end_seconds":B2},
+    {"phase_index":3,"label":"adjust","start_seconds":B2,"end_seconds":B3},
+    {"phase_index":4,"label":"harvest","start_seconds":B3,"end_seconds":B4},
+    {"phase_index":5,"label":"return","start_seconds":B4,"end_seconds":视频时长}
+  ],
+  "handoffs": [
+    {"from_phase":1,"to_phase":2,"seconds":B1,"observation":"实际前后变化","needs_review":true,"reason":"具体不确定性"},
+    {"from_phase":2,"to_phase":3,"seconds":B2,"observation":"实际前后变化","needs_review":true,"reason":"具体不确定性"},
+    {"from_phase":3,"to_phase":4,"seconds":B3,"observation":"实际前后变化","needs_review":true,"reason":"具体不确定性"},
+    {"from_phase":4,"to_phase":5,"seconds":B4,"observation":"实际前后变化","needs_review":true,"reason":"具体不确定性"}
+  ],
+  "harvest_summary": {
+    "first_harvest":{"successful_count":null,"delivery_seconds":[]},
+    "second_harvest":{"successful_count":null,"delivery_seconds":[]}
+  },
+  "review_notes":[]
+}
+以上B1至B4和视频时长应替换为实际数字或null，不输出占位符。needs_review只有在前提和运动起点都实际可见时才可填false，此时reason为空字符串。整数successful_count必须与对应delivery_seconds事件数一致。review_notes简要列遮挡、掉果、空手送盘或流程异常。
+输出前在本次回答内检查四处运动起点是否与区间、交接时间一致；不追加请求，不假设缺失事实。

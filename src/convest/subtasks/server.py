@@ -36,24 +36,29 @@ class Server(ThreadingHTTPServer):
         self.cached_episodes = {}
         self.export_lock = threading.Lock()
         self.process_job = None
+        self.local_job = None
         self.processing_workers=max(1,min(8,int(os.environ.get('SUBTASKS_PROCESSING_WORKERS','1'))))
         super().__init__(address, Handler)
         from .processing_queue import active
         pending=active(self.workspace)
         if pending and pending['state'] in {'queued','running'}:self.start_processing(resume=pending)
 
-    def start_processing(self,ids=None,mode='fine',resume=None,workers=None):
+    def start_processing(self,ids=None,mode='fine',resume=None,workers=None,provider='doubao'):
         from .processing_queue import create,run
         with self.jobs_lock:
             if any(j['state'] in ('running','queued') for j in self.jobs.values()):raise ValueError('已有任务正在处理')
-            batch=resume or create(self.workspace,ids,mode,workers=self.processing_workers if workers is None else workers)
+            batch=resume or create(self.workspace,ids,mode,workers=self.processing_workers if workers is None else workers,provider=provider)
             job=self.submit(lambda:run(self.workspace,self,batch['id']),lock_store=False)
             self.process_job=job['job']
-            return {**job,'batch_id':batch['id'],'mode':batch['mode']}
+            return {**job,'batch_id':batch['id'],'mode':batch['mode'],'provider':batch.get('provider','doubao')}
 
     def doubao_status(self):
         return {'enabled': bool(self.doubao_key), 'configured': bool(self.doubao_key),
                 'model': self.doubao_model}
+
+    def qwen_status(self):
+        from .qwen import configured, MODEL
+        return {'configured':configured(),'model':MODEL,'modes':['coarse'],'workflows':['without_return']}
 
     def progress(self, done, total):
         from .processing_queue import summary
@@ -118,7 +123,7 @@ class Handler(BaseHTTPRequestHandler):
                                   'in_hand_boundary_policy':IN_HAND_POLICY,
                                   'labels': {k: {'coarse': v[0], 'text': v[1]} for k, v in LABELS.items()},
                                   'action_labels':list(ACTION_LABELS),'behavior_kinds':KINDS,'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
-                                  'active_process_job':({'id':self.server.process_job,'kind':'process'} if self.server.process_job and self.server.jobs.get(self.server.process_job,{}).get('state') in ('queued','running') else None),'quarantine_available':True,'processing_batch':summary(self.server.workspace),'coarse_boundary_policy':'full_analysis_v3','processing_modes':['coarse','fine'],'processing_workers':self.server.processing_workers,'training_binding_profile':'derived-dataset-source-v1','export_profile':PROMPT_PROFILE,'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status()})
+                                  'active_process_job':({'id':self.server.process_job,'kind':'process','provider':(summary(self.server.workspace) or {}).get('provider') or 'doubao'} if self.server.process_job and self.server.jobs.get(self.server.process_job,{}).get('state') in ('queued','running') else None),'active_local_job':({'id':self.server.local_job,'kind':'local'} if self.server.local_job and self.server.jobs.get(self.server.local_job,{}).get('state') in ('queued','running') else None),'quarantine_available':True,'processing_batch':summary(self.server.workspace),'coarse_boundary_policy':'full_analysis_v3','processing_modes':['coarse','fine'],'processing_workers':self.server.processing_workers,'training_binding_profile':'derived-dataset-source-v1','export_profile':PROMPT_PROFILE,'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status(),'qwen':self.server.qwen_status()})
             if route.path == '/api/quality-review':
                 path=self.server.store.output/'quality-review'/'report.json'
                 return self.send(json.loads(path.read_text()) if path.exists() else {'state':'not_started','episodes':[]})
@@ -249,6 +254,34 @@ class Handler(BaseHTTPRequestHandler):
                 from .delivery import publish,DEFAULT_TASK_PROMPT
                 ep=self.server.episode(body['id'])
                 return self.send(self.server.submit(lambda:publish(self.server.workspace,ep,body.get('stage'),target=body.get('target','dataset'),root=body.get('root'),kind=body.get('kind','json'),revision=body.get('revision'),prompt_mode=body.get('prompt_mode','goal'),task_prompt=body.get('task_prompt',DEFAULT_TASK_PROMPT)),lock_store=False))
+            if route == '/api/workspace/resolve-delivery-timing':
+                from .local_boundaries import resolve_delivery_timing
+                return self.send(self.server.submit(lambda:resolve_delivery_timing(self.server.workspace,body['id'],body['correction']),lock_store=False))
+            if route == '/api/workspace/audit-local':
+                from .local_boundaries import audit_existing
+                ids=body.get('ids')
+                if not isinstance(ids,list) or not 1<=len(ids)<=100 or any(i not in self.server.store.entries for i in ids):raise ValueError('请选择有效片段')
+                return self.send(self.server.submit(lambda:audit_existing(self.server.workspace,ids),lock_store=False))
+            if route == '/api/workspace/refine-local-batch':
+                from .local_boundaries import refine_batch
+                if body.get('all_remaining') is True:
+                    if body.get('workflow')!='without_return':raise ValueError('本地校准仅适用于无放回五阶段草稿')
+                    rows=self.server.workspace.catalog()['episodes']
+                    ids=[e['id'] for e in sorted(rows,key=lambda e:(e.get('remote_directory',''),e['episode_index'])) if e.get('workflow')==body['workflow'] and not e.get('superseded') and not e.get('excluded') and e.get('local_calibration_eligible')]
+                else:ids=body.get('ids')
+                if not isinstance(ids,list) or not 1<=len(ids)<=1000 or any(i not in self.server.store.entries for i in ids):raise ValueError('没有需要校准的有效草稿')
+                ids=list(dict.fromkeys(ids))
+                job=self.server.submit(lambda:refine_batch(self.server.workspace,ids,self.server.progress),lock_store=False)
+                self.server.local_job=job['job']
+                return self.send(job)
+            if route == '/api/workspace/refine-local':
+                from .local_boundaries import refine
+                return self.send(self.server.submit(lambda:refine(self.server.workspace,body['id']),lock_store=False))
+            if route == '/api/workspace/qwen-recover':
+                ids=body.get('ids')
+                if not isinstance(ids,list) or not ids or len(ids)>100 or any(i not in self.server.store.entries for i in ids):raise ValueError('请选择已导入的片段')
+                if any(j.get('state') in {'queued','running'} for j in self.server.jobs.values()):raise ValueError('请等待当前任务完成')
+                return self.send(self.server.submit(lambda:self.server.workspace.process(ids,self.server,mode='coarse',provider='qwen',qwen_local_only=True,retry_namespace=body.get('retry_namespace')),lock_store=False))
             if route == '/api/workspace/map':
                 return self.send({'result':self.server.workspace.map_saved(body['normal_id'],body['speedup_id'],body.get('stages'),replace=body.get('replace') is True)})
             if route == '/api/workspace/organize-prepare':
@@ -270,8 +303,15 @@ class Handler(BaseHTTPRequestHandler):
                 if workflow not in (None,'with_return','without_return'):raise ValueError('无效任务分栏')
                 ids=remaining(self.server.workspace,mode,workflow=workflow) if body.get('all_remaining') is True else body.get('ids')
                 if not isinstance(ids,list):raise ValueError('请选择有效片段')
-                if not self.server.doubao_key:raise ValueError('豆包连接不可用，请检查启动凭据')
-                return self.send(self.server.start_processing(ids,mode,workers=body.get('workers')))
+                provider=body.get('provider','doubao')
+                if provider not in {'doubao','qwen'}:raise ValueError('未知标注模型')
+                if provider=='qwen':
+                    from .workflow import in_hand_episode
+                    if mode!='coarse':raise ValueError('Qwen 当前仅支持粗阶段')
+                    if not self.server.qwen_status()['configured']:raise ValueError('Qwen 密钥未配置')
+                    if any(not in_hand_episode(self.server.store.episode(id_)) for id_ in ids):raise ValueError('Qwen 当前仅支持无放回摘一串')
+                elif not self.server.doubao_key:raise ValueError('豆包连接不可用，请检查启动凭据')
+                return self.send(self.server.start_processing(ids,mode,workers=body.get('workers'),provider=provider))
             if route == '/api/workspace/save':
                 ep=self.server.episode(body['id']);stage=body.get('stage')
                 if stage not in {'coarse','fine'}:raise ValueError('未知标注阶段')

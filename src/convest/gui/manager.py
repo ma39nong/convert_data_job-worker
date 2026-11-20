@@ -1,5 +1,7 @@
 """Persistent UI task control and read-only queue/telemetry snapshots."""
 import copy
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -63,8 +65,14 @@ class Manager:
                 raise ValueError('请先停止工作流并等待当前作业收尾，再保存配置')
             durable_json(self.root/'settings.json',cfg);self.settings=cfg
         return cfg
+    @contextmanager
+    def cleanup_start_lock(self):
+        with (self.root/'cleanup.lock').open('a') as lock:
+            try:fcntl.flock(lock,fcntl.LOCK_SH|fcntl.LOCK_NB)
+            except BlockingIOError:raise ValueError('本机历史清理正在运行，请等待完成后开始工作流')
+            yield
     def start(self,tid=None):
-        with self.lock:
+        with self.lock, self.cleanup_start_lock():
             selected=[self.task(tid)] if tid else [t for t in self.settings['tasks'] if t['enabled']]
             if tid and not selected[0]['enabled']:raise ValueError('请先启用此任务并保存设置')
             if not selected:raise ValueError('没有启用的任务')
@@ -112,7 +120,51 @@ class Manager:
                 if file.exists():
                     with sqlite3.connect(file) as db:
                         for sql in queries:db.execute(sql)
-            return self.snapshot()
+        return self.snapshot()
+
+    def cleanup(self, apply=False):
+        """Dispatch heavy remote hashing off the HTTP request/UI thread."""
+        import fcntl
+        from . import cleanup
+        with self.lock:
+            lock=(self.root/'cleanup.lock').open('a')
+            try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:
+                lock.close();raise ValueError('本机清理检查已在运行')
+            cfg=cleanup.policy(self.root)
+            report=self.root/'cleanup-report.json'
+            durable_json(report,{'status':'running','apply':apply,'keep_days':cfg['keep_days'],'runs':[]})
+            def run():
+                def progress(runs):
+                    durable_json(report,{'status':'running','apply':apply,'keep_days':cfg['keep_days'],'runs':runs})
+                try:
+                    runs=cleanup.scan(self.root,cfg['keep_days'],apply,progress)
+                    durable_json(report,{'status':'completed','apply':apply,'keep_days':cfg['keep_days'],
+                                         'runs':runs,'completed_ns':time.time_ns()})
+                except Exception as exc:
+                    durable_json(report,{'status':'error','error':str(exc),'apply':apply})
+                finally: lock.close()
+            threading.Thread(target=run,daemon=True).start()
+        return {'status':'running'}
+
+    def cleanup_policy(self, value):
+        from . import cleanup
+        cfg=cleanup.validate(value)
+        with self.lock: durable_json(self.root/'cleanup-policy.json',cfg)
+        return cfg
+
+    def cleanup_tick(self):
+        from . import cleanup
+        cfg=cleanup.policy(self.root)
+        if not cfg['enabled']:return
+        schedule=self.root/'cleanup-schedule.json'
+        # Manual previews must not reset the daily timer. A stale 'running'
+        # report is recoverable because cleanup() checks the actual OS lock.
+        if read(schedule,{}).get('next_ns',0)>time.time_ns():return
+        try:
+            self.cleanup(apply=True)
+            durable_json(schedule,{'next_ns':time.time_ns()+cleanup.DAY})
+        except ValueError:pass
 
     def snapshot(self):
         with self.lock:
@@ -152,7 +204,10 @@ class Manager:
                 item['versions']=versions
             result.append(item)
         disk=__import__('shutil').disk_usage(self.root)
+        from . import cleanup
         return {'settings':settings,'tasks':result,'updated_ns':time.time_ns(),
+                'cleanup':{'policy':cleanup.policy(self.root),'report':read(self.root/'cleanup-report.json',{}),
+                           'active_reports':[{'run':str(p.parent),**read(p,{})} for p in (self.root/'runs').glob('task-*/*/cleanup-auto.json')]},
                 'disk':{'free':disk.free,'total':disk.total},'batch_policy':{'mode':'combined-count','size':100}}
     def logs(self,tid):
         self.task(tid);root=self.current(tid)

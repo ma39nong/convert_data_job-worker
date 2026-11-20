@@ -622,6 +622,22 @@ function renderProgress() {
     ["running", "starting", "stopping"].includes(t.state),
   );
 }
+function renderCleanup() {
+  const c = snapshot.cleanup || {}, report = c.report || {};
+  const labels = {running: "检查中", completed: "已完成", error: "失败", candidate: "待远端复核", retained: "保留", released: "已释放", checked: "已检查"};
+  const lines = [(report.apply ? "执行清理" : "预览") + "：" + (labels[report.status] || "尚未检查")];
+  if (report.error) lines.push(report.error);
+  for (const run of report.runs || []) {
+    lines.push(run.run + " · " + (labels[run.status] || run.status) + (run.reason ? " · " + run.reason : ""));
+    for (const t of run.tasks || []) lines.push("  " + (t.name || t.id) + " · " + (labels[t.status] || t.status) + (t.reason ? " · " + t.reason : ""));
+  }
+  for (const run of c.active_reports || []) {
+    lines.push("自动清理：" + run.run);
+    for (const t of run.tasks || []) lines.push("  " + (t.name || t.id) + " · " + (labels[t.status] || t.status) + (t.reason ? " · " + t.reason : ""));
+  }
+  $("cleanup-result").textContent = lines.join("\n");
+  $("cleanup-preview").disabled = $("cleanup-apply").disabled = report.status === "running";
+}
 async function refresh() {
   if (polling) return;
   polling = true;
@@ -632,6 +648,7 @@ async function refresh() {
     $("disk").textContent = "可用空间 " + bytes(snapshot.disk.free);
     renderTasks();
     renderProgress();
+    renderCleanup();
     if (document.querySelector(".logs").open) await refreshLogs();
   } catch (e) {
     $("server-state").textContent = "本机服务未连接";
@@ -834,6 +851,21 @@ async function init() {
     snapshot = b.snapshot;
     draft = clone(snapshot.settings);
     selected = draft.tasks[0]?.id;
+    $("cleanup-enabled").checked = snapshot.cleanup?.policy.enabled || false;
+    $("cleanup-days").value = snapshot.cleanup?.policy.keep_days ?? 7;
+    $("cleanup-save").onclick = async () => {
+      try {
+        await api("/api/cleanup-policy", {enabled: $("cleanup-enabled").checked, keep_days: Number($("cleanup-days").value)});
+        toast("本机清理策略已保存；自动清理每日执行，历史任务也纳入检查。");
+        await refresh();
+      } catch (e) { toast(e.message, true); }
+    };
+    for (const name of ["preview", "apply"]) $("cleanup-" + name).onclick = async () => {
+      try {
+        await api("/api/cleanup-" + name, {scope: "all-history"});
+        await refresh();
+      } catch (e) { toast(e.message, true); }
+    };
     syncTrainingPort();
     document.querySelectorAll("[data-server]").forEach((el) => {
       el.value = draft[el.dataset.server][el.dataset.key];

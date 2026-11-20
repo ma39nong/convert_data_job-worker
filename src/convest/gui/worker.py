@@ -213,6 +213,8 @@ def role(spec, name):
                 training_upload(spec,q)
                 from .retention import release_complete_batches
                 release_complete_batches(spec,q,training_destination_name)
+                from .cleanup import automatic
+                automatic(spec,q)
             for _ in range(cfg['poll_seconds']*4):
                 if stop[0]:break
                 time.sleep(.25)

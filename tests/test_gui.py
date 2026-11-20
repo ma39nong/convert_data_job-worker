@@ -350,3 +350,137 @@ def test_gui_lerobot_release_option_is_saved_and_defaults_off(tmp_path, monkeypa
     settings['tasks'][0]['delete_lerobot']='yes'
     with pytest.raises(ValueError, match='任务开关无效'):
         config.validate(settings)
+
+
+def test_gui_cleanup_pair_retention_remote_failure_recovery_and_restart(gui_spec, monkeypatch):
+    from convest.gui import cleanup, retention
+    from convest.ingest.batches import durable_json
+    s=gui_spec
+    test_gui_native_pipeline_two_groups_separate_targets_and_retry(s, monkeypatch, True, False, True)
+    monkeypatch.setattr(retention,'verify_backup',local_verify)
+    with training.context(s['training']) as db:
+        rows=db.execute('SELECT * FROM tasks').fetchall()
+        roots=[Path(json.loads(r['payload'])['source']) for r in rows]
+        assert all(r['reason']=='仍在保留期' for r in cleanup.sweep(s,db,7))
+        preview=cleanup.sweep(s,db,0)
+        assert all(r['status']=='candidate' for r in preview)
+        assert all((p/'normal/videos').exists() for p in roots)
+        def unavailable(*args,**kwargs):raise OSError('offline')
+        monkeypatch.setattr(retention,'verify_backup',unavailable)
+        assert all(r['status']=='retained' for r in cleanup.sweep(s,db,0,True))
+        assert all((p/'normal/videos').exists() for p in roots)
+        for path in (Path(s['training']['state_root'])/'retention').glob('*.json'):
+            doc=json.loads(path.read_text());doc['retry_after_ns']=0;durable_json(path,doc)
+        monkeypatch.setattr(retention,'verify_backup',local_verify)
+        # First release the complete source, then interrupt in the pair cleanup.
+        for row in rows:retention.release_one(s,db,row,worker.training_destination_name)
+        # Old durable receipts alone are insufficient: detect changed remote bytes
+        # even after the complete local source was previously released.
+        receipt=json.loads((Path(s['training']['state_root'])/'receipts'/(rows[0]['id']+'.json')).read_text())
+        remote=next((Path(receipt['variants']['normal']['destination'])/'data').rglob('*.parquet'))
+        original_bytes=remote.read_bytes();remote.write_bytes(b'changed remote data')
+        failed=cleanup.sweep(s,db,0,True)
+        assert next(r for r in failed if r['id']==rows[0]['id'])['status']=='retained'
+        assert (roots[0]/'normal/data').exists()
+        remote.write_bytes(original_bytes)
+        original=retention.shutil.rmtree
+        once=[False]
+        def interrupted(path,*args,**kwargs):
+            original(path,*args,**kwargs)
+            if not once[0]:once[0]=True;raise OSError('power loss')
+        interrupted.avoids_symlink_attacks=True
+        monkeypatch.setattr(retention.shutil,'rmtree',interrupted)
+        first=cleanup.sweep(s,db,0,True)
+        assert any(r['status']=='retained' for r in first)
+        monkeypatch.setattr(retention.shutil,'rmtree',original)
+        assert all(r['status']=='released' for r in cleanup.sweep(s,db,0,True))
+        for root in roots:
+            for variant in ('normal','speedup'):
+                assert not (root/variant/'data').exists()
+                assert not (root/variant/'videos').exists()
+                assert (root/variant/'meta/info.json').exists()
+            assert (root/'source.json').exists() and (root/'pipeline.json').exists()
+        training.discover(s['training'],db)
+        assert db.execute('SELECT count(*) FROM tasks').fetchone()[0]==2
+        assert not training.process_once(s['training'],db)
+        assert not worker.training_upload(s,db)
+        assert all(r['status']=='released' for r in cleanup.sweep(s,db,0,True))
+
+
+def test_gui_cleanup_policy_and_scan_ownership(tmp_path, monkeypatch):
+    from convest.gui import cleanup
+    from convest.ingest.batches import durable_json
+    monkeypatch.setattr(config,'ROOT',tmp_path/'gui')
+    manager=Manager()
+    assert cleanup.policy(manager.root)=={'enabled':False,'keep_days':7}
+    assert manager.cleanup_policy({'enabled':True,'keep_days':30})['keep_days']==30
+    for value in ({'enabled':'yes','keep_days':7},{'enabled':True,'keep_days':-1},{'enabled':True,'keep_days':True}):
+        with pytest.raises(ValueError):manager.cleanup_policy(value)
+    run=manager.root/'runs/task-0123456789ab' / ('a'*20)
+    run.mkdir(parents=True)
+    # Historical removed task is still discovered, but unsafe paths cannot be used.
+    durable_json(run/'spec.json',{'root':str(run),'capture':{'state_root':'/unrelated'},'training':{}})
+    report=cleanup.scan(manager.root,0,True)
+    assert len(report)==1 and report[0]['status']=='retained'
+    assert 'ownership' in report[0]['reason']
+
+
+def test_gui_cleanup_scan_skips_live_worker_locks(tmp_path):
+    import fcntl
+    from convest.gui import cleanup
+    from convest.ingest.batches import durable_json
+    run=tmp_path/'runs/task-0123456789ab'/('a'*20)
+    for folder in ('capture/state','training/state'):(run/folder).mkdir(parents=True)
+    spec={'root':str(run),'capture':{k:str(run/v) for k,v in {'state_root':'capture/state','work_root':'capture/work','local_batch_root':'capture/batches'}.items()},
+          'training':{k:str(run/v) for k,v in {'state_root':'training/state','output_root':'training/datasets'}.items()}}
+    durable_json(run/'spec.json',spec)
+    with (run/'training/state/upload.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        report=cleanup.scan(tmp_path,0,True)
+    assert '运行或收尾' in report[0]['reason']
+    assert not (run/'training/state/queue.sqlite3').exists()
+
+
+def test_gui_cleanup_scans_old_versions_with_original_endpoints(tmp_path, monkeypatch):
+    import sqlite3
+    from convest.gui import cleanup
+    from convest.ingest.batches import durable_json
+    seen=[]
+    def sweep(spec, db, days, apply):
+        seen.append((spec['training_server'],days,apply))
+        return [{'id':'sample','status':'candidate'}]
+    monkeypatch.setattr(cleanup,'sweep',sweep)
+    for index in ('a','b'):
+        run=tmp_path/'runs/task-0123456789ab'/(index*20)
+        for folder in ('capture/state','training/state'):(run/folder).mkdir(parents=True)
+        spec={'root':str(run),'capture':{k:str(run/v) for k,v in {'state_root':'capture/state','work_root':'capture/work','local_batch_root':'capture/batches'}.items()},
+              'training':{k:str(run/v) for k,v in {'state_root':'training/state','output_root':'training/datasets'}.items()},
+              'training_server':{'host':index,'port':28}}
+        durable_json(run/'spec.json',spec)
+        with sqlite3.connect(run/'training/state/queue.sqlite3'):pass
+    assert len(cleanup.scan(tmp_path,30,False))==2
+    assert seen==[({'host':'a','port':28},30,False),({'host':'b','port':28},30,False)]
+
+
+def test_gui_cleanup_background_and_stale_running_report(tmp_path,monkeypatch):
+    from convest.gui import cleanup
+    from convest.ingest.batches import durable_json
+    monkeypatch.setattr(config,'ROOT',tmp_path/'gui')
+    manager=Manager();entered=threading.Event();finish=threading.Event()
+    def scan(*args):
+        entered.set();assert finish.wait(5);return []
+    monkeypatch.setattr(cleanup,'scan',scan)
+    manager.cleanup_policy({'enabled':True,'keep_days':7})
+    durable_json(manager.root/'cleanup-report.json',{'status':'running','apply':True})
+    manager.cleanup_tick()
+    assert entered.wait(2)
+    # Snapshot remains available while remote checks are blocked.
+    assert manager.snapshot()['cleanup']['report']['status']=='running'
+    with pytest.raises(ValueError,match='运行'):manager.cleanup()
+    with pytest.raises(ValueError,match='清理正在运行'):manager.start()
+    finish.set()
+    until=time.monotonic()+3
+    while time.monotonic()<until:
+        if manager.snapshot()['cleanup']['report']['status']=='completed':break
+        time.sleep(.01)
+    assert manager.snapshot()['cleanup']['report']['status']=='completed'

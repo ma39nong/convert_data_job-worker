@@ -35,6 +35,8 @@ class Server(ThreadingHTTPServer):
         self.jobs, self.jobs_lock = {}, threading.RLock()
         self.cached_episodes = {}
         self.export_lock = threading.Lock()
+        from .speedup_sync import SpeedupSync
+        self.speedup_sync=SpeedupSync(self)
         self.process_job = None
         self.local_job = None
         self.processing_workers=max(1,min(8,int(os.environ.get('SUBTASKS_PROCESSING_WORKERS','1'))))
@@ -91,6 +93,7 @@ class Server(ThreadingHTTPServer):
         return {'job': id_}
 
     def server_close(self):
+        self.speedup_sync.close()
         self.pool.shutdown(wait=True)
         super().server_close()
         self.store.lockfile.close()
@@ -123,7 +126,7 @@ class Handler(BaseHTTPRequestHandler):
                                   'in_hand_boundary_policy':IN_HAND_POLICY,
                                   'labels': {k: {'coarse': v[0], 'text': v[1]} for k, v in LABELS.items()},
                                   'action_labels':list(ACTION_LABELS),'behavior_kinds':KINDS,'episodes': list(self.server.store.entries.values()), 'output': str(self.server.store.output),
-                                  'active_process_job':({'id':self.server.process_job,'kind':'process','provider':(summary(self.server.workspace) or {}).get('provider') or 'doubao'} if self.server.process_job and self.server.jobs.get(self.server.process_job,{}).get('state') in ('queued','running') else None),'active_local_job':({'id':self.server.local_job,'kind':'local'} if self.server.local_job and self.server.jobs.get(self.server.local_job,{}).get('state') in ('queued','running') else None),'quarantine_available':True,'processing_batch':summary(self.server.workspace),'coarse_boundary_policy':'full_analysis_v3','processing_modes':['coarse','fine'],'processing_workers':self.server.processing_workers,'training_binding_profile':'derived-dataset-source-v1','export_profile':PROMPT_PROFILE,'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status(),'qwen':self.server.qwen_status()})
+                                  'active_process_job':({'id':self.server.process_job,'kind':'process','provider':(summary(self.server.workspace) or {}).get('provider') or 'doubao'} if self.server.process_job and self.server.jobs.get(self.server.process_job,{}).get('state') in ('queued','running') else None),'speedup_sync':self.server.speedup_sync.status(),'active_local_job':({'id':self.server.local_job,'kind':'local'} if self.server.local_job and self.server.jobs.get(self.server.local_job,{}).get('state') in ('queued','running') else None),'quarantine_available':True,'processing_batch':summary(self.server.workspace),'coarse_boundary_policy':'full_analysis_v3','processing_modes':['coarse','fine'],'processing_workers':self.server.processing_workers,'training_binding_profile':'derived-dataset-source-v1','export_profile':PROMPT_PROFILE,'coarse_labels':COARSE_LABELS,'workspace':self.server.workspace.catalog(),'doubao': self.server.doubao_status(),'qwen':self.server.qwen_status()})
             if route.path == '/api/quality-review':
                 path=self.server.store.output/'quality-review'/'report.json'
                 return self.send(json.loads(path.read_text()) if path.exists() else {'state':'not_started','episodes':[]})
@@ -135,6 +138,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(plan(self.server.workspace,q['id'][0]))
             if route.path == '/api/workspace':
                 return self.send(self.server.workspace.catalog())
+            if route.path == '/api/workspace/speedup-sync':
+                return self.send({'sync':self.server.speedup_sync.status()})
             if route.path == '/api/workspace/episode':
                 from .organization import registry
                 selected=q['id'][0];selected=registry(self.server.workspace)['retired'].get(selected,selected)
@@ -231,6 +236,12 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < length <= 2_000_000: raise ValueError('请求大小无效')
             body = json.loads(self.rfile.read(length)); route = urlsplit(self.path).path
             store = self.server.store
+            if route == '/api/workspace/speedup-sync':
+                return self.send({'sync':self.server.speedup_sync.start(body.get('workflow'))})
+            syncing=getattr(self.server.workspace,'syncing_ids',set())
+            sync_status=self.server.speedup_sync.status()
+            if sync_status and sync_status['state'] in {'queued','running'} and route.startswith('/api/workspace/organize'):raise ValueError('后台正在同步，请等同步完成后整理编号')
+            if syncing and any(body.get(k) in syncing for k in ('id','normal_id','speedup_id')):raise ValueError('这条数据正在后台同步，请稍后再写入；可以继续审核其他片段')
             if route in {'/api/models/connect','/api/jev-plan'}:
                 return self.send({'error':'该入口已移除；当前仅使用豆包'},404)
             if route == '/api/workspace/quarantine':
@@ -243,7 +254,7 @@ class Handler(BaseHTTPRequestHandler):
                 finally:self.server.export_lock.release()
             if route == '/api/workspace/export-direct':
                 from .delivery import publish,DEFAULT_TASK_PROMPT
-                if not self.server.export_lock.acquire(blocking=False):raise ValueError('已有导出正在执行，请稍后再试')
+                if not self.server.export_lock.acquire(timeout=60):raise ValueError('导出排队超时，请重试；人工审核已保存')
                 try:
                     ep=self.server.episode(body['id'])
                     result=publish(self.server.workspace,ep,body.get('stage'),target=body.get('target','dataset'),root=body.get('root'),kind=body.get('kind','json'),revision=body.get('revision'),prompt_mode=body.get('prompt_mode','goal'),task_prompt=body.get('task_prompt',DEFAULT_TASK_PROMPT))

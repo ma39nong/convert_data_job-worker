@@ -67,6 +67,8 @@ def change(ws,id_,excluded,reason,revision):
 
 
 def assert_included(ws,id_):
+    import threading
+    if id_ in getattr(ws,'syncing_ids',set()) and getattr(ws,'speedup_sync_owner',None)!=threading.get_ident():raise ValueError('当前片段正在后台同步，请稍后再写入；其他片段不受影响')
     from .organization import registry
     if id_ in getattr(ws,'organizing_ids',set()):raise ValueError('本包正在整理，请稍后')
     if id_ in registry(ws)['retired']:raise ValueError('片段已重新编号，请重新载入')

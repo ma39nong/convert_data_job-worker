@@ -93,6 +93,7 @@ class Workspace:
     def save_stage(self,ep,stage,body,*,projection=None,confirm_review=False):
         with self.lock,self.store.lock:
             from .organization import registry
+            if ep.id in getattr(self,'syncing_ids',set()) and getattr(self,'speedup_sync_owner',None)!=threading.get_ident():raise ValueError('当前片段正在后台同步，稍后可保存；其他片段不受影响')
             if ep.id in self.organizing_ids:raise ValueError('本包正在整理，请完成后再保存')
             if ep.id in registry(self)['retired']:raise ValueError('片段已重新编号，请重新载入后保存')
             doc=self.store.load(ep);current=self.stages(ep,doc)[stage]

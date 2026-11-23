@@ -356,6 +356,421 @@ def test_gui_lerobot_release_option_is_saved_and_defaults_off(tmp_path, monkeypa
         config.validate(settings)
 
 
+def test_gui_cleanup_pair_retention_remote_failure_recovery_and_restart(gui_spec, monkeypatch):
+    from convest.gui import cleanup, retention
+    from convest.ingest.batches import durable_json
+    s=gui_spec
+    test_gui_native_pipeline_two_groups_separate_targets_and_retry(s, monkeypatch, True, False, True)
+    monkeypatch.setattr(retention,'verify_backup',local_verify)
+    with training.context(s['training']) as db:
+        rows=db.execute('SELECT * FROM tasks').fetchall()
+        roots=[Path(json.loads(r['payload'])['source']) for r in rows]
+        preview=cleanup.sweep(s,db)
+        assert all(r['status']=='candidate' for r in preview)
+        assert all((p/'normal/videos').exists() for p in roots)
+        def unavailable(*args,**kwargs):raise OSError('offline')
+        monkeypatch.setattr(retention,'verify_backup',unavailable)
+        assert all(r['status']=='retained' for r in cleanup.sweep(s,db,True))
+        assert all((p/'normal/videos').exists() for p in roots)
+        for path in (Path(s['training']['state_root'])/'retention').glob('*.json'):
+            doc=json.loads(path.read_text());doc['retry_after_ns']=0;durable_json(path,doc)
+        monkeypatch.setattr(retention,'verify_backup',local_verify)
+        # First release the complete source, then interrupt in the pair cleanup.
+        for row in rows:retention.release_one(s,db,row,worker.training_destination_name)
+        # Old durable receipts alone are insufficient: detect changed remote bytes
+        # even after the complete local source was previously released.
+        receipt=json.loads((Path(s['training']['state_root'])/'receipts'/(rows[0]['id']+'.json')).read_text())
+        remote=next((Path(receipt['variants']['normal']['destination'])/'data').rglob('*.parquet'))
+        original_bytes=remote.read_bytes();remote.write_bytes(b'changed remote data')
+        failed=cleanup.sweep(s,db,True)
+        assert next(r for r in failed if r['id']==rows[0]['id'])['status']=='retained'
+        assert (roots[0]/'normal/data').exists()
+        remote.write_bytes(original_bytes)
+        original=retention.shutil.rmtree
+        once=[False]
+        def interrupted(path,*args,**kwargs):
+            original(path,*args,**kwargs)
+            if not once[0]:once[0]=True;raise OSError('power loss')
+        interrupted.avoids_symlink_attacks=True
+        monkeypatch.setattr(retention.shutil,'rmtree',interrupted)
+        first=cleanup.sweep(s,db,True)
+        assert any(r['status']=='retained' for r in first)
+        monkeypatch.setattr(retention.shutil,'rmtree',original)
+        assert all(r['status']=='released' for r in cleanup.sweep(s,db,True))
+        for root in roots:
+            for variant in ('normal','speedup'):
+                assert not (root/variant/'data').exists()
+                assert not (root/variant/'videos').exists()
+                assert (root/variant/'meta/info.json').exists()
+            assert (root/'source.json').exists() and (root/'pipeline.json').exists()
+        training.discover(s['training'],db)
+        assert db.execute('SELECT count(*) FROM tasks').fetchone()[0]==2
+        active=worker.prepare_training(s['training'],db)
+        assert training.recipe(active)==training.recipe(s['training'])
+        assert not training.process_once(active,db)
+        assert not worker.training_upload(s,db)
+        assert all(r['status']=='released' for r in cleanup.sweep(s,db,True))
+
+
+def test_gui_cleanup_policy_and_scan_ownership(tmp_path, monkeypatch):
+    from convest.gui import cleanup
+    from convest.ingest.batches import durable_json
+    monkeypatch.setattr(config,'ROOT',tmp_path/'gui')
+    manager=Manager()
+    assert cleanup.policy(manager.root)=={'enabled':True}
+    assert manager.cleanup_policy({'enabled':True,'keep_days':30})=={'enabled':True}
+    assert cleanup.validate({'enabled':False,'keep_days':7})=={'enabled':False}
+    for value in ({'enabled':'yes'},{'enabled':None},{}):
+        with pytest.raises(ValueError):manager.cleanup_policy(value)
+    run=manager.root/'runs/task-0123456789ab' / ('a'*20)
+    run.mkdir(parents=True)
+    # Historical removed task is still discovered, but unsafe paths cannot be used.
+    durable_json(run/'spec.json',{'root':str(run),'capture':{'state_root':'/unrelated'},'training':{}})
+    report=cleanup.scan(manager.root,True)
+    assert len(report)==1 and report[0]['status']=='retained'
+    assert 'ownership' in report[0]['reason']
+
+
+def test_gui_cleanup_scan_skips_live_worker_locks(tmp_path):
+    import fcntl
+    from convest.gui import cleanup
+    from convest.ingest.batches import durable_json
+    run=tmp_path/'runs/task-0123456789ab'/('a'*20)
+    for folder in ('capture/state','training/state'):(run/folder).mkdir(parents=True)
+    spec={'root':str(run),'capture':{k:str(run/v) for k,v in {'state_root':'capture/state','work_root':'capture/work','local_batch_root':'capture/batches'}.items()},
+          'training':{k:str(run/v) for k,v in {'state_root':'training/state','output_root':'training/datasets'}.items()}}
+    durable_json(run/'spec.json',spec)
+    with (run/'training/state/upload.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        report=cleanup.scan(tmp_path,True)
+    assert '运行或收尾' in report[0]['reason']
+    assert not (run/'training/state/queue.sqlite3').exists()
+
+
+def test_gui_cleanup_scans_old_versions_with_original_endpoints(tmp_path, monkeypatch):
+    import sqlite3
+    from convest.gui import cleanup
+    from convest.ingest.batches import durable_json
+    seen=[]
+    def sweep(spec, db, apply, allow_legacy_cd=False):
+        seen.append((spec['training_server'],apply))
+        return [{'id':'sample','status':'candidate'}]
+    monkeypatch.setattr(cleanup,'sweep',sweep)
+    for index in ('a','b'):
+        run=tmp_path/'runs/task-0123456789ab'/(index*20)
+        for folder in ('capture/state','training/state'):(run/folder).mkdir(parents=True)
+        spec={'root':str(run),'capture':{k:str(run/v) for k,v in {'state_root':'capture/state','work_root':'capture/work','local_batch_root':'capture/batches'}.items()},
+              'training':{k:str(run/v) for k,v in {'state_root':'training/state','output_root':'training/datasets'}.items()},
+              'training_server':{'host':index,'port':28}}
+        durable_json(run/'spec.json',spec)
+        with sqlite3.connect(run/'training/state/queue.sqlite3'):pass
+    assert len(cleanup.scan(tmp_path,False))==2
+    assert seen==[({'host':'a','port':28},False),({'host':'b','port':28},False)]
+
+
+def test_gui_cleanup_background_and_stale_running_report(tmp_path,monkeypatch):
+    from convest.gui import cleanup
+    from convest.ingest.batches import durable_json
+    monkeypatch.setattr(config,'ROOT',tmp_path/'gui')
+    manager=Manager();entered=threading.Event();finish=threading.Event()
+    def scan(*args):
+        entered.set();assert finish.wait(5);return []
+    monkeypatch.setattr(cleanup,'scan',scan)
+    manager.cleanup_policy({'enabled':True,'keep_days':7})
+    durable_json(manager.root/'cleanup-report.json',{'status':'running','apply':True})
+    durable_json(manager.root/'cleanup-schedule.json',{'next_ns':time.time_ns()+365*86400*10**9})
+    manager.cleanup_tick()
+    assert entered.wait(2)
+    # Snapshot remains available while remote checks are blocked.
+    assert manager.snapshot()['cleanup']['report']['status']=='running'
+    with pytest.raises(ValueError,match='运行'):manager.cleanup()
+    with pytest.raises(ValueError,match='清理正在运行'):manager.start()
+    finish.set()
+    until=time.monotonic()+3
+    while time.monotonic()<until:
+        if manager.snapshot()['cleanup']['report']['status']=='completed':break
+        time.sleep(.01)
+    assert manager.snapshot()['cleanup']['report']['status']=='completed'
+    assert json.loads((manager.root/'cleanup-schedule.json').read_text())['mode']=='immediate-v1'
+
+
+def raw_archive_spec(s,tmp_path):
+    s['root']=str(tmp_path/'gui-run')
+    s['task'].update(source=str(Path(s['capture']['routes'][0]['source']).parent),
+                     delete_raw=True,include_existing=True)
+    return s
+
+
+def test_gui_cd_direct_raw_upload_skips_all_content_validation_and_never_converts(gui_spec,tmp_path,monkeypatch):
+    from convest.gui import raw_archive
+    s=raw_archive_spec(gui_spec,tmp_path);c=s['capture']
+    monkeypatch.setattr(raw_archive,'transfer',local_transfer)
+    monkeypatch.setattr(raw_archive,'verify_backup',local_verify)
+    def forbidden(*a,**kw):raise AssertionError('C/D must not validate bag content or convert')
+    monkeypatch.setattr(raw_archive,'check_raw_ready',forbidden)
+    monkeypatch.setattr(training,'process_once',forbidden)
+    originals={}
+    for group in ('C','D'):
+        bagdir=Path(s['task']['source'])/group/'episode7';bagdir.mkdir(parents=True)
+        # Intentionally invalid SQLite and metadata; these are raw files to back up.
+        (bagdir/'data.db3').write_bytes(b'raw bytes without content inspection')
+        (bagdir/'metadata.yaml').write_text('not valid rosbag metadata')
+        originals[group]={p.name:p.read_bytes() for p in bagdir.iterdir()}
+    before=c['fingerprint'];now=time.time_ns()
+    with capture_context(c) as cap, raw_archive.context(s) as archive:
+        raw_archive.scan(s,archive,cap,now)
+        assert all((Path(s['task']['source'])/g/'episode7').exists() for g in 'CD')
+        for step in (2,4):raw_archive.scan(s,archive,cap,now+step*10**9)
+        assert {r['route']:r['state'] for r in archive.rows()}=={'sharpa-C':'deleted','sharpa-D':'deleted'}
+        assert not cap.rows()
+        assert cap.db.execute('SELECT count(*) FROM capture_batches').fetchone()[0]==0
+        assert c['fingerprint']==before
+        for g in 'CD':
+            assert not (Path(s['task']['source'])/g/'episode7').exists()
+            remote=Path(s['task']['raw_root'])/g/'episode7'
+            assert {p.name:p.read_bytes() for p in remote.iterdir()}==originals[g]
+        # Completed backup remains idempotent; a reused source name is retained.
+        newer=Path(s['task']['source'])/'C/episode7';newer.mkdir();(newer/'new').write_text('new recording')
+        raw_archive.scan(s,archive,cap,now+6*10**9)
+        assert archive.get('sharpa-C','episode7')['state']=='conflict'
+        assert (newer/'new').read_text()=='new recording'
+
+
+def test_gui_cd_remote_failure_and_interrupted_deletion_resume_without_reupload(gui_spec,tmp_path,monkeypatch):
+    from convest.gui import raw_archive
+    s=raw_archive_spec(gui_spec,tmp_path);s['task']['delete_raw']=False;now=time.time_ns()
+    source=Path(s['task']['source'])/'C/episode9';source.mkdir(parents=True);(source/'raw').write_bytes(b'original')
+    monkeypatch.setattr(raw_archive,'transfer',local_transfer)
+    def offline(*a,**kw):raise OSError('offline verify')
+    monkeypatch.setattr(raw_archive,'verify_backup',offline)
+    with capture_context(s['capture']) as cap, raw_archive.context(s) as archive:
+        raw_archive.scan(s,archive,cap,now)
+        raw_archive.scan(s,archive,cap,now+2*10**9)
+        assert source.exists()
+        assert archive.get('sharpa-C','episode9')['state']=='uploaded'
+        s['task']['delete_raw']=True
+        raw_archive.scan(s,archive,cap,now+4*10**9)
+        assert source.exists() and archive.get('sharpa-C','episode9')['state']=='uploaded'
+        monkeypatch.setattr(raw_archive,'verify_backup',local_verify)
+        def no_reupload(*a,**kw):raise AssertionError('Already uploaded; only resume deletion')
+        monkeypatch.setattr(raw_archive,'transfer',no_reupload)
+        original=raw_archive.shutil.rmtree;once=[False]
+        def interrupted(path,*a,**kw):
+            original(path,*a,**kw)
+            if not once[0]:once[0]=True;raise OSError('power loss after deletion')
+        interrupted.avoids_symlink_attacks=True
+        monkeypatch.setattr(raw_archive.shutil,'rmtree',interrupted)
+        raw_archive.scan(s,archive,cap,now+6*10**9)
+        assert archive.get('sharpa-C','episode9')['state']=='deleting'
+        monkeypatch.setattr(raw_archive.shutil,'rmtree',original)
+        raw_archive.scan(s,archive,cap,now+8*10**9)
+        assert archive.get('sharpa-C','episode9')['state']=='deleted'
+        assert not source.exists()
+
+
+def test_gui_ab_raw_backup_waits_for_existing_conversion_and_deletion(gui_spec,tmp_path,monkeypatch):
+    from convest.gui import raw_archive
+    s=raw_archive_spec(gui_spec,tmp_path);c=s['capture'];source=bag(c,0,21)
+    monkeypatch.setattr(raw_archive,'transfer',local_transfer)
+    monkeypatch.setattr(raw_archive,'verify_backup',local_verify)
+    now=time.time_ns()
+    with capture_context(c) as cap, raw_archive.context(s) as archive:
+        raw_archive.scan(s,archive,cap,now)
+        raw_archive.scan(s,archive,cap,now+2*10**9)
+        assert archive.get('sharpa-A','episode21')['state']=='uploaded'
+        assert source.exists()  # not yet converted: backup cannot destroy conversion input
+        ready(c,cap)
+        assert cap.get('sharpa-A','episode21')['state']=='converted'
+        assert worker.capture_upload(s,cap)
+        assert not source.exists()
+        raw_archive.scan(s,archive,cap,now+4*10**9)
+        assert archive.get('sharpa-A','episode21')['state']=='deleted'
+        assert cap.db.execute('SELECT count(*) FROM capture_batches').fetchone()[0]==1
+
+
+def test_gui_cd_active_recording_and_keep_raw_switch_are_respected(gui_spec,tmp_path,monkeypatch):
+    from convest.gui import raw_archive
+    s=raw_archive_spec(gui_spec,tmp_path);s['task']['delete_raw']=False
+    source=Path(s['task']['source'])/'D/episode4';source.mkdir(parents=True)
+    state=source/'collection_state.json';state.write_text(json.dumps({'state':'recording','finalized':False}))
+    (source/'raw').write_bytes(b'data')
+    monkeypatch.setattr(raw_archive,'transfer',local_transfer)
+    monkeypatch.setattr(raw_archive,'verify_backup',local_verify)
+    now=time.time_ns()
+    with capture_context(s['capture']) as cap, raw_archive.context(s) as archive:
+        raw_archive.scan(s,archive,cap,now)
+        raw_archive.scan(s,archive,cap,now+2*10**9)
+        assert not (Path(s['task']['raw_root'])/'D/episode4').exists()
+        state.write_text(json.dumps({'state':'finalized','finalized':True,'failures':['ignored quality']}))
+        raw_archive.scan(s,archive,cap,now+4*10**9)
+        raw_archive.scan(s,archive,cap,now+6*10**9)
+        assert archive.get('sharpa-D','episode4')['state']=='uploaded'
+        assert source.exists()  # switch off: backup only, no deletion
+
+
+def test_gui_cd_existing_different_remote_never_overwrites_or_deletes(gui_spec,tmp_path,monkeypatch):
+    from convest.gui import raw_archive
+    s=raw_archive_spec(gui_spec,tmp_path);now=time.time_ns()
+    source=Path(s['task']['source'])/'C/episode3';source.mkdir(parents=True);(source/'raw').write_bytes(b'new')
+    remote=Path(s['task']['raw_root'])/'C/episode3';remote.mkdir(parents=True);(remote/'raw').write_bytes(b'old')
+    monkeypatch.setattr(raw_archive,'transfer',local_transfer)
+    monkeypatch.setattr(raw_archive,'verify_backup',local_verify)
+    with capture_context(s['capture']) as cap, raw_archive.context(s) as archive:
+        raw_archive.scan(s,archive,cap,now)
+        raw_archive.scan(s,archive,cap,now+2*10**9)
+        assert archive.get('sharpa-C','episode3')['state']=='retry'
+        assert (source/'raw').read_bytes()==b'new'
+        assert (remote/'raw').read_bytes()==b'old'
+
+
+def test_gui_excluded_ab_is_backed_up_and_released_without_fake_batch(gui_spec,tmp_path,monkeypatch):
+    from convest.gui import raw_archive
+    s=raw_archive_spec(gui_spec,tmp_path);c=s['capture'];source=bag(c,0,22);now=time.time_ns()
+    monkeypatch.setattr(raw_archive,'transfer',local_transfer)
+    monkeypatch.setattr(raw_archive,'verify_backup',local_verify)
+    with capture_context(c) as cap, raw_archive.context(s) as archive:
+        raw_archive.scan(s,archive,cap,now)
+        raw_archive.scan(s,archive,cap,now+2*10**9)
+        row=archive.get('sharpa-A','episode22');proof=json.loads(row['proof'])
+        cap.put('sharpa-A','episode22','excluded-source','excluded',proof={'snapshot':proof['snapshot'],'files':proof['files']})
+        raw_archive.scan(s,archive,cap,now+4*10**9)
+        assert archive.get('sharpa-A','episode22')['state']=='deleted'
+        assert not source.exists()
+        assert cap.db.execute('SELECT count(*) FROM capture_batches').fetchone()[0]==0
+
+
+def test_completed_upload_cleanup_is_immediate_and_cleans_owned_work(gui_spec,monkeypatch):
+    from convest.gui import cleanup,retention
+    s=gui_spec;c=s['capture']
+    test_gui_native_pipeline_two_groups_separate_targets_and_retry(s,monkeypatch,True,False,True)
+    monkeypatch.setattr(retention,'verify_backup',local_verify)
+    with training.context(s['training']) as db:
+        row=db.execute('SELECT * FROM tasks LIMIT 1').fetchone();src=json.loads(row['spec'])
+        with __import__('sqlite3').connect(Path(c['state_root'])/'queue.sqlite3') as cap:
+            p=json.loads(cap.execute('SELECT payload FROM recordings WHERE route=? AND batch_id=?',(src['route'],src['batch_id'])).fetchone()[0])
+        work=Path(c['work_root'])/p['route']/p['episode']/p['identity']/'attempt-0001'
+        (work/'cleaned').mkdir(exist_ok=True);(work/'cleaned/leftover').write_bytes(b'large leftover')
+        (work/'dataset').mkdir(exist_ok=True);(work/'dataset/leftover').write_bytes(b'large duplicate')
+        assert all(r['status']=='candidate' for r in cleanup.sweep(s,db))
+        result=cleanup.sweep(s,db,True)
+        assert all(r['status']=='released' for r in result),result
+        assert not (work/'cleaned').exists() and not (work/'dataset').exists()
+        assert (work/'manifest.json').exists()
+        assert db.execute("SELECT count(*) FROM tasks WHERE state='uploaded'").fetchone()[0]==2
+
+
+def test_old_cd_releases_work_with_only_raw_backup_and_retires_training(gui_spec,tmp_path,monkeypatch):
+    from convest.gui import cleanup,cleanup_work,retention,raw_archive
+    s=raw_archive_spec(gui_spec,tmp_path);c=s['capture'];c['routes']=c['routes'][:1]
+    s['root']=str(tmp_path/'gui/runs/task-0123456789ab'/('a'*20))
+    route=c['routes'][0]
+    route.update(id='sharpa-C',group='C',source=str(Path(route['source']).parent/'C'),output=str(Path(c['local_batch_root'])/'sharpa/C'))
+    route['conversion']['source_root']=route['source']
+    Path(route['source']).mkdir(parents=True)
+    s['task']['delete_raw']=False;c['delete_raw_after_upload']=False
+    c['route_targets']={route['id']:{'raw':str(Path(s['task']['raw_root'])/'C')}}
+    monkeypatch.setattr(retention,'verify_backup',local_verify)
+    source=bag(c,0,7)
+    with capture_context(c) as cap:
+        ready(c,cap)
+        assert worker.capture_upload(s,cap)  # raw only; the batch is not sealed yet
+        daily.maintain(c,cap,due(c))
+        batch=cap.db.execute('SELECT * FROM capture_batches').fetchone()
+        raw_row=cap.db.execute('SELECT * FROM uploads WHERE raw_done=1').fetchone()
+        raw_receipt=Path(c['state_root'])/'receipts'/(raw_row['id']+'.json')
+        src={'route':route['id'],'robot':'sharpa','group':'C','batch_id':batch['batch_id'],'name':batch['name'],
+             'source':batch['generation'],'recipe':'old-cd-recipe'}
+    with training.context(s['training']) as db:
+        assert len(cleanup_work.unqueued_cd(s,[]))==1
+        assert cleanup.sweep(s,db,allow_legacy_cd=True)[0]['status']=='candidate'
+        tid=digest(['legacy-cd',src])
+        db.execute('INSERT INTO tasks(id,spec,state,updated_ns) VALUES(?,?,?,?)',(tid,json.dumps(src),'pending',time.time_ns()));db.commit()
+        # Current training code must leave old C/D conversions and uploads alone.
+        active=worker.prepare_training(s['training'],db)
+        assert training.recipe(active)==training.recipe(s['training'])
+        assert not training.process_once(active,db)
+        assert not worker.training_upload(s,db)
+        raw_receipt.unlink()
+        missing=cleanup.sweep(s,db,True,allow_legacy_cd=True)
+        assert missing[0]['status']=='retained' and (Path(src['source'])/'videos').exists()
+        # The new raw-only version can supply the missing original backup proof
+        # for an older C/D conversion, without uploading any derived dataset.
+        newer=copy.deepcopy(s);newer['root']=str(tmp_path/'gui/runs/task-0123456789ab'/('b'*20))
+        monkeypatch.setattr(raw_archive,'transfer',local_transfer)
+        monkeypatch.setattr(raw_archive,'verify_backup',local_verify)
+        from convest.ingest.batches import durable_json
+        with capture_context(c) as cap,raw_archive.context(newer) as archive:
+            durable_json(Path(newer['root'])/'spec.json',newer)
+            now=time.time_ns();raw_archive.scan(newer,archive,cap,now);raw_archive.scan(newer,archive,cap,now+2*10**9)
+            assert archive.get('sharpa-C','episode7')['state']=='uploaded'
+        result=cleanup.sweep(s,db,True,allow_legacy_cd=True)
+        assert result[0]['status']=='released',result
+        assert not (Path(src['source'])/'data').exists() and not (Path(src['source'])/'videos').exists()
+        assert (Path(src['source'])/'meta/info.json').exists() and source.exists()
+        assert db.execute('SELECT state FROM tasks WHERE id=?',(tid,)).fetchone()[0]=='archived_raw_only'
+        assert not Path(s['task']['normal_root']).exists()
+        assert not (Path(s['task']['lerobot_root'])/'C'/src['name']).exists()
+        with capture_context(c) as cap:
+            assert not worker.capture_upload(s,cap)
+            assert cap.db.execute("SELECT state FROM uploads WHERE dataset_done=0 AND episode LIKE 'batch-%'").fetchone()[0]=='archived_raw_only'
+
+
+def test_automatic_cleanup_new_completion_does_not_wait_for_timer(gui_spec,tmp_path,monkeypatch):
+    import sqlite3
+    from convest.gui import cleanup
+    from convest.ingest.batches import durable_json
+    s=gui_spec;s['root']=str(tmp_path/'gui/runs/task-0123456789ab'/('a'*20))
+    root=Path(s['root']).parents[2]
+    durable_json(root/'cleanup-policy.json',{'enabled':True,'keep_days':365})
+    called=[]
+    monkeypatch.setattr(cleanup,'sweep',lambda *a,**kw:called.append(True) or [])
+    with capture_context(s['capture']),training.context(s['training']) as db:
+        cleanup.automatic(s,db);cleanup.automatic(s,db)
+        assert len(called)==1
+        db.execute('INSERT INTO tasks(id,spec,state,updated_ns) VALUES(?,?,?,?)',('new','{}','uploaded',time.time_ns()));db.commit()
+        cleanup.automatic(s,db)
+        assert len(called)==2  # previous minute timer is still in the future
+        assert cleanup.policy(root)=={'enabled':True}
+
+
+def test_gui_port_in_use_preserves_original_error(tmp_path,monkeypatch):
+    monkeypatch.setattr(config,'ROOT',tmp_path/'ui')
+    server=Server(('127.0.0.1',0))
+    try:
+        with pytest.raises(OSError):Server(('127.0.0.1',server.server_port))
+    finally:server.server_close()
+
+
+def test_failed_cd_work_without_batch_cleans_after_raw_only_backup(gui_spec,tmp_path,monkeypatch):
+    from convest.gui import cleanup,raw_archive,retention
+    from convest.ingest.inputs import check_input,snapshot
+    from convest.ingest.batches import durable_json
+    s=raw_archive_spec(gui_spec,tmp_path);c=s['capture'];c['routes']=c['routes'][:1]
+    s['root']=str(tmp_path/'gui/runs/task-0123456789ab'/('a'*20));s['task']['delete_raw']=False
+    route=c['routes'][0];route.update(id='sharpa-D',group='D',source=str(Path(route['source']).parent/'D'),output=str(Path(c['local_batch_root'])/'sharpa/D'))
+    route['conversion']['source_root']=route['source'];Path(route['source']).mkdir(parents=True)
+    source=bag(c,0,31);proof=check_input(source,route,snapshot(source))
+    with capture_context(c):pass
+    attempt=Path(c['work_root'])/route['id']/source.name/proof['content_identity']/'attempt-0001'
+    durable_json(attempt/'manifest.json',{'owner':'convert-data-job-worker','config':route['conversion']})
+    for name in ('cleaned','dataset'):
+        (attempt/name).mkdir();(attempt/name/'leftover').write_bytes(b'failed conversion data')
+    monkeypatch.setattr(raw_archive,'transfer',local_transfer);monkeypatch.setattr(raw_archive,'verify_backup',local_verify)
+    monkeypatch.setattr(retention,'verify_backup',local_verify)
+    newer=copy.deepcopy(s);newer['root']=str(tmp_path/'gui/runs/task-0123456789ab'/('b'*20))
+    with capture_context(c) as cap,raw_archive.context(newer) as archive:
+        cap.put(route['id'],source.name,proof['content_identity'],'failed',proof=proof)
+        durable_json(Path(newer['root'])/'spec.json',newer)
+        now=time.time_ns();raw_archive.scan(newer,archive,cap,now);raw_archive.scan(newer,archive,cap,now+2*10**9)
+        assert archive.get(route['id'],source.name)['state']=='uploaded'
+        assert cap.db.execute('SELECT count(*) FROM capture_batches').fetchone()[0]==0
+    with training.context(s['training']) as db:
+        result=cleanup.sweep(s,db,True,allow_legacy_cd=True)
+        assert len(result)==1 and result[0]['status']=='released',result
+        assert not (attempt/'cleaned').exists() and not (attempt/'dataset').exists()
+        assert (attempt/'manifest.json').exists() and source.exists()
+
+
 def test_batch_size_saved_migrated_and_preserves_runtime(tmp_path,monkeypatch):
     root_test=config.WORKSPACE/'outputs'/('gui-size-test-'+__import__('uuid').uuid4().hex)
     monkeypatch.setattr(config,'ROOT',root_test)
@@ -387,6 +802,7 @@ def test_retry_uploads_preserves_active_complete_and_processing_rows(tmp_path,mo
     monkeypatch.setattr(manager,'state',lambda _:{'state':state})
     before={}
     for section,table,states in [
+        ('raw-archive','jobs',['retry','uploading','uploaded','deleting','deleted','conflict']),
         ('capture','uploads',['retry','uploading','completed','pending','conflict']),
         ('training','tasks',['upload_retry','uploading','uploaded','retry','processing','conflict','waiting_space'])]:
         file=root/section/'state/queue.sqlite3';file.parent.mkdir(parents=True)
@@ -396,8 +812,8 @@ def test_retry_uploads_preserves_active_complete_and_processing_rows(tmp_path,mo
                            [(s,s,999999999999999999,'previous failure',9,'unchanged') for s in states])
             before[section]=db.execute(f'SELECT * FROM {table} ORDER BY id').fetchall()
     result=manager.retry_uploads(tid)
-    assert result=={'task':tid,'state':state,'counts':{'data':1,'training':1}}
-    for section,table,target in [('capture','uploads','retry'),('training','tasks','upload_retry')]:
+    assert result=={'task':tid,'state':state,'counts':{'data':1,'training':1,'raw':1}}
+    for section,table,target in [('raw-archive','jobs','retry'),('capture','uploads','retry'),('training','tasks','upload_retry')]:
         with sqlite3.connect(root/section/'state/queue.sqlite3') as db:
             after=db.execute(f'SELECT * FROM {table} ORDER BY id').fetchall()
         assert after==[(*row[:2],0,*row[3:]) if row[0]==target else row for row in before[section]]
@@ -419,5 +835,5 @@ def test_retry_uploads_http_requires_token_and_handles_missing_queues(tmp_path,m
         assert exc.value.code==403
         request.add_header('X-Workflow-Token',server.token)
         with opener.open(request) as response:
-            assert json.load(response)=={'task':tid,'state':'stopped','counts':{'data':0,'training':0}}
+            assert json.load(response)=={'task':tid,'state':'stopped','counts':{'data':0,'training':0,'raw':0}}
     finally:server.shutdown();server.server_close();thread.join()

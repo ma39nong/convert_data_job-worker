@@ -34,6 +34,7 @@ function clearRecordDisplay() {
     ["job", s.jobs],
     ["batch", s.batches],
     ["training", s.training],
+    ["archive", s.raw_archives],
   ]) {
     for (const row of rows || []) hidden.add(recordKey(kind, row));
   }
@@ -59,6 +60,10 @@ const names = {
   conflict: "文件冲突",
   waiting_stable: "等待录制稳定",
   waiting_space: "等待磁盘空间",
+  archived_raw_only: "原包已备份 · 旧转换已归档",
+  archive_only: "仅保留原包备份流程",
+  raw_integrity_check: "检查 A/B 原包完整性",
+  uploading_original_files: "C/D 原文件直传",
   active: "累计中",
   sealed: "已封存",
   uploading: "上传中",
@@ -168,14 +173,14 @@ function renderUploadPaths() {
     $(field).disabled = !t || t.auto_upload_paths;
     $(field).title = t?.auto_upload_paths
       ? "由项目、手型和场景自动生成；取消生成默认上传路径后可手动选择"
-      : "手动选择上传父目录，上传时追加 A / B 和包名";
+      : "手动选择上传父目录，原包追加 A/B/C/D；LeRobot 与训练成品仅追加 A/B";
     const browseButton = document.querySelector(
       '[data-browse="' + field + '"]',
     );
     browseButton.disabled = !t;
     browseButton.title = t?.auto_upload_paths
       ? "可浏览服务器；选择目录后切换为手动路径"
-      : "选择服务器上的场景父目录（内含 A / B）";
+      : (field === "raw_root" ? "选择原包场景父目录（按 A/B/C/D 保存）" : "选择服务器上的场景父目录（内含 A / B）");
   });
   renderPreviews();
 }
@@ -247,10 +252,10 @@ function renderPreviews() {
     $(id).innerHTML = t
       ? "<strong>" +
         esc(t[field] || "请选择存储目录") +
-        "</strong><br>├ A / " +
-        child +
-        "<br>└ B / " +
-        child
+        "</strong><br>" +
+        (field === "raw_root" ? ["A", "B", "C", "D"] : ["A", "B"])
+          .map((g, i, gs) => (i === gs.length - 1 ? "└ " : "├ ") + g + " / " + child)
+          .join("<br>")
       : "添加任务后配置存储路径";
   });
   const source = (t?.source || "").replace(/\/+$/, "");
@@ -261,7 +266,7 @@ function renderPreviews() {
       "</strong><br>" +
       (["A", "B"].includes(group)
         ? "└ episode…"
-        : "├ A / episode…<br>└ B / episode…")
+        : "├ A / episode…（备份与转换）<br>├ B / episode…（备份与转换）<br>├ C / episode…（仅原包备份）<br>└ D / episode…（仅原包备份）")
     : "添加任务后配置读取路径";
 }
 function renderTasks() {
@@ -433,7 +438,10 @@ function renderProgress() {
       (j) => !["converted", "excluded"].includes(j.state),
     ).length,
     done = jobs.filter((j) => j.state === "converted").length,
-    backed = uploads.filter((u) => u.raw_done).length,
+    backed = new Set([
+      ...uploads.filter((u) => u.raw_done).map((u) => JSON.stringify([u.route,u.episode])),
+      ...(s.raw_archives || []).filter((u) => ["uploaded","deleting","deleted"].includes(u.state)).map((u) => JSON.stringify([u.route,u.episode])),
+    ]).size,
     trained = training.filter((j) => j.state === "uploaded").length;
   $("metrics").innerHTML = [
     ["待处理录制", pending],
@@ -453,7 +461,7 @@ function renderProgress() {
   const processing = currentProgress(s.processing, jobs.find((j) => j.route === s.processing?.route && j.episode === s.processing?.episode)) || {},
     tp = currentProgress(s.training_processing, training.find((j) => j.id === s.training_processing?.task)) || {},
     videos = s.videos || {};
-  const rawUpload = currentProgress(s.raw_upload, uploads.find((u) => u.route === s.raw_upload?.route && u.episode === s.raw_upload?.episode)),
+  const rawUpload = currentProgress(s.raw_upload, (s.raw_upload?.archive ? (s.raw_archives || []) : uploads).find((u) => u.route === s.raw_upload?.route && u.episode === s.raw_upload?.episode)),
     batchUpload = currentProgress(s.batch_upload, uploads.find((u) => u.route === s.batch_upload?.route && u.episode === s.batch_upload?.episode)),
     normalUpload = currentProgress(s.normal_upload, training.find((j) => j.id === s.normal_upload?.task)),
     speedupUpload = currentProgress(s.speedup_upload, training.find((j) => j.id === s.speedup_upload?.task)),
@@ -496,7 +504,7 @@ function renderProgress() {
   $("current-phase").textContent = phase;
   $("transfer-grid").innerHTML =
     transferCard(
-      "原始 ROSbag → 202",
+      "A/B/C/D 原始 ROSbag → 202",
       rawUpload,
       false,
       backed + " 包备份完成",
@@ -523,6 +531,7 @@ function renderProgress() {
     s.error,
     tp.error,
     trainingUpload?.error,
+    ...(s.raw_archives || []).map((u) => currentError(u) && `${u.route}/${u.episode} · ${currentError(u)}`),
     ...jobs.map(currentError),
     ...uploads.map((u) => currentError(u) &&
       `${u.route}/${u.episode} · ${u.state === "retry" ? "等待重试，上次失败：" : ""}${currentError(u)}`),
@@ -532,7 +541,7 @@ function renderProgress() {
     ...Object.values(s.discovery?.routes || {}).map((r) => r.error),
   ].filter(Boolean);
   $("workflow-error").classList.toggle("hidden", !errors.length);
-  const retryCount = uploads.filter((u) => u.state === "retry").length +
+  const retryCount = (s.raw_archives || []).filter((u) => u.state === "retry").length + uploads.filter((u) => u.state === "retry").length +
     training.filter((j) => j.state === "upload_retry").length;
   $("workflow-error").textContent =
     (retryCount ? `${retryCount} 项上传等待${s.state === "running" ? "自动重试（失败后等待30秒，当前传输完成后依次处理）" : "重试（开始任务后继续）"}，可点击“重试上传”取消等待。\n` : "") +
@@ -582,6 +591,12 @@ function renderProgress() {
         " 条录制</td></tr>",
     )
     .join("");
+  html += (s.raw_archives || [])
+    .filter(visibleRecord("archive"))
+    .map((j) => "<tr><td>原包备份 · " + esc(j.episode) + "</td><td>" + esc(j.route) +
+      "</td><td>" + (/[AB]$/.test(j.route) ? "A/B 保留转换流程" : "仅备份，不转换") +
+      "</td><td>" + esc(({uploaded:"备份完成 · 本机暂保留",deleting:"正在释放原包",deleted:"备份完成 · 本机已释放"})[j.state] || label(j.state)) +
+      "</td><td>" + esc(j.error || "—") + "</td></tr>").join("");
   html += training
     .filter(visibleRecord("training"))
     .map(
@@ -653,6 +668,22 @@ function renderProgress() {
     ["running", "starting", "stopping"].includes(t.state),
   );
 }
+function renderCleanup() {
+  const c = snapshot.cleanup || {}, report = c.report || {};
+  const labels = {running: "检查中", completed: "已完成", error: "失败", candidate: "待远端复核", retained: "保留", released: "已释放", checked: "已检查"};
+  const lines = [(report.apply ? "执行清理" : "预览") + "：" + (labels[report.status] || "尚未检查")];
+  if (report.error) lines.push(report.error);
+  for (const run of report.runs || []) {
+    lines.push(run.run + " · " + (labels[run.status] || run.status) + (run.reason ? " · " + run.reason : ""));
+    for (const t of run.tasks || []) lines.push("  " + (t.name || t.id) + " · " + (labels[t.status] || t.status) + (t.reason ? " · " + t.reason : ""));
+  }
+  for (const run of c.active_reports || []) {
+    lines.push("自动清理：" + run.run);
+    for (const t of run.tasks || []) lines.push("  " + (t.name || t.id) + " · " + (labels[t.status] || t.status) + (t.reason ? " · " + t.reason : ""));
+  }
+  $("cleanup-result").textContent = lines.join("\n");
+  $("cleanup-preview").disabled = $("cleanup-apply").disabled = report.status === "running";
+}
 async function refresh() {
   if (polling) return;
   polling = true;
@@ -663,6 +694,7 @@ async function refresh() {
     $("disk").textContent = "可用空间 " + bytes(snapshot.disk.free);
     renderTasks();
     renderProgress();
+    renderCleanup();
     if (document.querySelector(".logs").open) await refreshLogs();
   } catch (e) {
     $("server-state").textContent = "本机服务未连接";
@@ -706,7 +738,7 @@ async function retryUploads() {
   renderProgress();
   try {
     const result = await api("/api/retry-uploads", { task: id });
-    const total = result.counts.data + result.counts.training;
+    const total = result.counts.data + result.counts.training + (result.counts.raw || 0);
     toast(total
       ? `已将 ${total} 项失败上传设为可立即重试。` +
         (result.state === "running"
@@ -902,6 +934,20 @@ async function init() {
     snapshot = b.snapshot;
     draft = clone(snapshot.settings);
     selected = draft.tasks[0]?.id;
+    $("cleanup-enabled").checked = snapshot.cleanup?.policy.enabled ?? true;
+    $("cleanup-save").onclick = async () => {
+      try {
+        await api("/api/cleanup-policy", {enabled: $("cleanup-enabled").checked});
+        toast("设置已保存。开启时交付确认后立即释放大文件，历史任务也纳入检查。");
+        await refresh();
+      } catch (e) { toast(e.message, true); }
+    };
+    for (const name of ["preview", "apply"]) $("cleanup-" + name).onclick = async () => {
+      try {
+        await api("/api/cleanup-" + name, {scope: "all-history"});
+        await refresh();
+      } catch (e) { toast(e.message, true); }
+    };
     syncTrainingPort();
     document.querySelectorAll("[data-server]").forEach((el) => {
       el.value = draft[el.dataset.server][el.dataset.key];

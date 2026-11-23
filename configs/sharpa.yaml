@@ -14,7 +14,7 @@ fps: 30
 max_staleness_ms: 150
 # false: report tactile staleness but do not reject it; true restores <=150ms gating.
 # Missing channels, invalid payloads and samples before the first recording remain invalid.
-tactile_freshness_check: false
+tactile_freshness_check: true
 # RGB short gaps; depth may share this bound only at known cleaner seams.
 camera_short_gap_max_frames: 2
 camera_short_gap_max_age_ms: 250

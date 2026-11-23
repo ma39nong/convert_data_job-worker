@@ -53,6 +53,7 @@ def mirror_capture(spec,queue):
 def capture_upload(spec, queue):
     cfg = spec['capture']; task = spec['task']; db = queue.db
     rows = [dict(r) for r in db.execute("SELECT * FROM uploads WHERE state IN ('pending','retry','uploading') AND next_ns<=? ORDER BY updated_ns,id", (time.time_ns(),))]
+    rows = [r for r in rows if json.loads(r['payload']).get('kind')=='raw' or json.loads(r['payload']).get('group') in ('A','B')]
     if not rows:
         mirror_capture(spec,queue)
         return False
@@ -125,7 +126,8 @@ def training_upload(spec, db):
         if delivery['mode'] == 'oss':
             return oss_transfer.transfer(*args, **kwargs, delivery=delivery)
         return transfer(*args, **kwargs)
-    row=db.execute("SELECT * FROM tasks WHERE state IN ('local_ready','upload_retry','uploading') AND next_ns<=? ORDER BY updated_ns,id LIMIT 1",(time.time_ns(),)).fetchone()
+    row=next((r for r in db.execute("SELECT * FROM tasks WHERE state IN ('local_ready','upload_retry','uploading') AND next_ns<=? ORDER BY updated_ns,id",(time.time_ns(),))
+              if json.loads(r['spec']).get('group') in ('A','B')),None)
     if not row: return False
     p=json.loads(row['payload']); tid=row['id']; results={}
     latest = {}
@@ -194,6 +196,17 @@ class VideoProgress:
     def flush(self):self.stream.flush()
 
 
+def prepare_training(cfg, db):
+    """Park obsolete C/D work without changing native conversion recipe hashes."""
+    for row in db.execute("SELECT * FROM tasks WHERE state IN ('pending','retry','processing','waiting_space','local_ready','upload_retry','uploading')").fetchall():
+        if json.loads(row['spec']).get('group') not in ('C','D'):continue
+        durable_json(Path(cfg['state_root'])/'cd-transition'/(row['id']+'.json'),
+                     {'task':row['id'],'previous_state':row['state'],'reason':'C/D now raw archive only',
+                      'changed_ns':time.time_ns()})
+        training.update(db,row['id'],state='archive_only',next_ns=0,error=None)
+    return {**cfg,'capture':{**cfg['capture'],'routes':[r for r in cfg['capture']['routes'] if r['group'] in ('A','B')]}}
+
+
 def role(spec, name):
     stop=[False]
     def request(*_): stop[0]=True
@@ -205,14 +218,19 @@ def role(spec, name):
     with context(cfg,'upload' if name.endswith('upload') else 'processing') as q:
         while not stop[0]:
             if name=='capture-process': scan(cfg,q,should_stop=lambda:stop[0])
-            elif name=='capture-upload': capture_upload(spec,q)
+            elif name=='capture-upload':
+                capture_upload(spec,q)
+                from . import raw_archive
+                with raw_archive.context(spec) as archive:
+                    raw_archive.scan(spec,archive,q,should_stop=lambda:stop[0])
             elif name=='training-process':
-                training.discover(cfg,q)
-                if not stop[0]:training.process_once(cfg,q)
+                active=prepare_training(cfg,q)
+                training.discover(active,q)
+                if not stop[0]:training.process_once(active,q)
             else:
                 training_upload(spec,q)
-                from .retention import release_complete_batches
-                release_complete_batches(spec,q,training_destination_name)
+                from .cleanup import automatic
+                automatic(spec,q)
             for _ in range(cfg['poll_seconds']*4):
                 if stop[0]:break
                 time.sleep(.25)

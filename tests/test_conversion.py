@@ -45,6 +45,7 @@ def test_actual_cdr_multimodal_write_reindex_and_full_source_verification(tmp_pa
                 row['message_count']=db.execute('SELECT count(*) FROM messages JOIN topics ON messages.topic_id=topics.id WHERE topics.name=?',(row['topic_metadata']['name'],)).fetchone()[0]
         (raw/'metadata.yaml').write_text(yaml.safe_dump(meta))
     cfg=load_config(WORKSPACE/f'configs/{robot}.yaml');cfg['source_root']=str(raw)
+    if sparse:cfg['tactile_freshness_check']=False
     contract=yaml.safe_load(Path(cfg['contract']).read_text())
     readiness=check_ready(raw,contract,cfg['schema_dir']);assert readiness['messages']>0
     item=source.discover(raw)[0];out=tmp_path/'dataset';out.mkdir()
@@ -298,7 +299,7 @@ def test_depth_rgb_partial_overlap_at_cleaner_seam(seam,overlap,frames,allowed,m
 
 @pytest.mark.parametrize('kind',['deformation','wrench'])
 def test_sharpa_tactile_freshness_switch_retains_causality_and_diagnostics(kind):
-    raw=raw_streams(hand=22);cfg=load_config(WORKSPACE/'configs/sharpa.yaml')
+    raw=raw_streams(hand=22);cfg=load_config(WORKSPACE/'configs/sharpa.yaml');cfg['tactile_freshness_check']=False
     original=raw['cam0'];ts=original.times
     for key,spec in source.modalities('sharpa').items():
         raw[key]=Series(ts,[np.zeros(6) if spec['kind']=='wrench' else 0 for _ in ts],ts)
@@ -344,7 +345,7 @@ def test_tactile_queue_policy_preserves_ownership_but_not_job_proofs():
 
 
 def test_relaxed_tactile_never_backfills_from_first_future_sample():
-    raw=raw_streams(hand=22);cfg=load_config(WORKSPACE/'configs/sharpa.yaml');ts=raw['cam0'].times
+    raw=raw_streams(hand=22);cfg=load_config(WORKSPACE/'configs/sharpa.yaml');cfg['tactile_freshness_check']=False;ts=raw['cam0'].times
     for key in source.modalities('sharpa'):raw[key]=Series(ts,[0]*len(ts),ts)
     key='observation.tactile.left.thumb.deformation'
     raw[key]=Series(ts[6:],[0]*len(ts[6:]),ts[6:])
@@ -354,3 +355,7 @@ def test_relaxed_tactile_never_backfills_from_first_future_sample():
     assert not aligned.valid_mask[:6].any() and aligned.valid_mask[6:].all()
     assert output_segments(item,aligned,cfg)[0]['bounds']==(6,31)
     assert aligned.report['tactile_freshness']['streams'][key]['unavailable_frames']==6
+
+
+def test_default_sharpa_policy_preserves_strict_freshness():
+    assert load_config(WORKSPACE/'configs/sharpa.yaml')['tactile_freshness_check'] is True

@@ -105,6 +105,44 @@ class Manager:
                 if root and self.state(t['id'])['state'] in ('starting','running','stopping'):
                     durable_json(root/'stop-request.json',{'requested_ns':time.time_ns()})
         return self.snapshot()
+    def upload_now(self,tid):
+        from convest.capture import group_batches
+        with self.lock:
+            self.task(tid)
+            if self.state(tid)['state']!='running':
+                raise ValueError('请先开始当前任务，运行中才能立即上传')
+            root=self.current(tid)
+            spec=read(root/'spec.json',{})
+            try:
+                if not group_batches.flush(spec['capture']):
+                    raise ValueError('当前没有可封包的有效录制，请等待清洗、转换完成')
+            except BlockingIOError:
+                raise ValueError('正在提交或封存批次，请稍后再点击立即上传') from None
+        return self.snapshot()
+
+    def retry_uploads(self,tid):
+        """Make queued upload retries due without touching active transfers or processing."""
+        with self.lock:
+            self.task(tid)
+            state=self.state(tid)['state']
+            if state in ('starting','stopping'):
+                raise ValueError('任务正在启动或收尾，请稍后重试上传')
+            root=self.current(tid)
+            counts={'data':0,'training':0,'raw':0}
+            if root:
+                for key,file,sql in [
+                    ('raw',root/'raw-archive/state/queue.sqlite3',
+                     "UPDATE jobs SET next_ns=0 WHERE state='retry'"),
+                    ('data',root/'capture/state/queue.sqlite3',
+                     "UPDATE uploads SET next_ns=0 WHERE state='retry'"),
+                    ('training',root/'training/state/queue.sqlite3',
+                     "UPDATE tasks SET next_ns=0 WHERE state='upload_retry'")]:
+                    if file.exists():
+                        # Never create a missing queue; the worker owns initialization.
+                        with sqlite3.connect(file.as_uri()+'?mode=rw',uri=True,timeout=2) as db:
+                            counts[key]=db.execute(sql).rowcount
+            return {'task':tid,'state':state,'counts':counts}
+
     def retry(self,tid):
         with self.lock:
             self.task(tid)
@@ -174,7 +212,7 @@ class Manager:
             settings=copy.deepcopy(self.settings)
         result=[]
         for task in settings['tasks']:
-            item={'id':task['id'],**self.state(task['id']), 'batch_policy':{'mode':'combined-count','size':100}}
+            item={'id':task['id'],**self.state(task['id']), 'batch_policy':{'mode':'combined-count','size':task.get('batch_group_size',100)}}
             root=self.current(task['id'])
             if root:
                 capture=root/'capture/state';train=root/'training/state'
@@ -191,8 +229,9 @@ class Manager:
                 item['raw_archives']=rows(archive/'queue.sqlite3','SELECT route,episode,state,error FROM jobs ORDER BY route,episode')
                 archive_progress=read(archive/'upload_progress.json',{})
                 if archive_progress.get('updated_ns',0)>item['raw_upload'].get('updated_ns',0):
-                    item['raw_upload']=archive_progress
+                    item['raw_upload']={**archive_progress,'archive':True}
                 spec=read(root/'spec.json',{})
+                item['batch_policy']['size']=spec.get('capture',{}).get('batch_group_size',task.get('batch_group_size',100))
                 routes=spec.get('capture',{}).get('routes',[])
                 catalogue={}
                 for route in routes:
@@ -200,6 +239,8 @@ class Manager:
                         catalogue[(route['id'],batch['id'])]=batch
                 for batch in item['batches']:
                     source=catalogue.get((batch['route'],batch['batch_id']),{})
+                    if batch['state']=='active' and source.get('state')=='sealed':
+                        batch.update(state='sealed',name=source['name'])
                     for key in ('group_id','group_size','group_total','group_ready'):
                         if key in source:batch[key]=source[key]
                 item['capture_status']=read(capture/'status.json',{})
@@ -215,7 +256,7 @@ class Manager:
         return {'settings':settings,'tasks':result,'updated_ns':time.time_ns(),
                 'cleanup':{'policy':cleanup.policy(self.root),'report':read(self.root/'cleanup-report.json',{}),
                            'active_reports':[{'run':str(p.parent),**read(p,{})} for p in (self.root/'runs').glob('task-*/*/cleanup-auto.json')]},
-                'disk':{'free':disk.free,'total':disk.total},'batch_policy':{'mode':'combined-count','size':100}}
+                'disk':{'free':disk.free,'total':disk.total},'batch_policy':{'mode':'combined-count'}}
     def logs(self,tid):
         self.task(tid);root=self.current(tid)
         if not root:return '尚未开始工作流。保存设置后点击“开始工作流”。'

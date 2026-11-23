@@ -15,6 +15,8 @@ let token = "",
   selected = null,
   dirty = false,
   polling = false,
+  flushing = new Set(),
+  retryingUploads = new Set(),
   browser = null,
   toastTimer;
 // Display-only masks: polling and task switches must not restore cleared rows.
@@ -66,7 +68,7 @@ const names = {
   sealed: "已封存",
   uploading: "上传中",
   waiting_batch: "等待新批次",
-  waiting_seal: "等待 A+B 满 100 条封包",
+  waiting_seal: "等待 A+B 达到设定条数封包",
   blocked: "受阻",
   transferring: "传输中",
   oss_prepare: "准备 OSS 中转",
@@ -353,6 +355,20 @@ function transitStages(p) {
     "</div>"
   );
 }
+// Queue state is authoritative; telemetry can still describe a previous attempt.
+function currentProgress(progress, row) {
+  if (!row || !progress) return progress;
+  if (["completed", "uploaded", "converted", "local_ready"].includes(row.state))
+    return { ...progress, phase: ["completed", "uploaded"].includes(row.state) ? "completed" : row.state,
+      error: null, failed_phase: null };
+  if (!row.error && progress.error)
+    return { ...progress, phase: row.state, error: null, failed_phase: null };
+  return progress;
+}
+function currentError(row) {
+  return row && !["completed", "uploaded", "converted", "local_ready", "processing", "uploading", "pending"].includes(row.state)
+    ? row.error : null;
+}
 function transferCard(title, p, violet = false, count = "") {
   p = p || {};
   const total = p.bytes_total || 0,
@@ -391,7 +407,7 @@ function transferCard(title, p, violet = false, count = "") {
     (p.phase === "completed" && p.transit_cleaned
       ? '<div class="hint">最终数据已校验 · 中转已清理</div>'
       : "") +
-    (p.error
+    (p.error && p.phase !== "completed"
       ? '<p class="hint error">' +
         esc(p.failed_phase ? label(p.failed_phase) + "失败，等待重试：" : "") +
         esc(p.error) +
@@ -442,9 +458,14 @@ function renderProgress() {
         "</div></div>",
     )
     .join("");
-  const processing = s.processing || {},
-    tp = s.training_processing || {},
+  const processing = currentProgress(s.processing, jobs.find((j) => j.route === s.processing?.route && j.episode === s.processing?.episode)) || {},
+    tp = currentProgress(s.training_processing, training.find((j) => j.id === s.training_processing?.task)) || {},
     videos = s.videos || {};
+  const rawUpload = currentProgress(s.raw_upload, (s.raw_upload?.archive ? (s.raw_archives || []) : uploads).find((u) => u.route === s.raw_upload?.route && u.episode === s.raw_upload?.episode)),
+    batchUpload = currentProgress(s.batch_upload, uploads.find((u) => u.route === s.batch_upload?.route && u.episode === s.batch_upload?.episode)),
+    normalUpload = currentProgress(s.normal_upload, training.find((j) => j.id === s.normal_upload?.task)),
+    speedupUpload = currentProgress(s.speedup_upload, training.find((j) => j.id === s.speedup_upload?.task)),
+    trainingUpload = currentProgress(s.training_upload, training.find((j) => j.id === s.training_upload?.task));
   let phase =
     s.state === "stopped"
       ? s.root
@@ -475,7 +496,7 @@ function renderProgress() {
     uploads.every((u) => u.state === "completed")
   ) {
     if (batches.some((b) => b.state === "active"))
-      phase = "原包已完成备份，等待 A+B 合计满 100 条封包；继续监听新录制。";
+      phase = "原包已完成备份，等待 A+B 达到设定条数封包，也可立即上传；继续监听新录制。";
     else if (training.length && training.every((j) => j.state === "uploaded"))
       phase = "已发现的录制与两版成品均已校验上传，继续监听新录制。";
   }
@@ -484,40 +505,47 @@ function renderProgress() {
   $("transfer-grid").innerHTML =
     transferCard(
       "A/B/C/D 原始 ROSbag → 202",
-      s.raw_upload,
+      rawUpload,
       false,
       backed + " 包备份完成",
     ) +
     transferCard(
       "完整 LeRobot → 202",
-      s.batch_upload,
+      batchUpload,
       false,
       uploads.filter((u) => u.dataset_done).length + " 批完成",
     ) +
     transferCard(
       "normal → 训练服务器",
-      s.normal_upload,
+      normalUpload,
       true,
       trained + " 批完成",
     ) +
     transferCard(
       "speedup → 训练服务器",
-      s.speedup_upload,
+      speedupUpload,
       true,
       trained + " 批完成",
     );
   const errors = [
     s.error,
-    s.training_processing?.error,
-    s.training_upload?.error,
-    ...jobs.map((j) => j.error),
-    ...uploads.map((j) => j.error),
-    ...training.map((j) => j.error),
+    tp.error,
+    trainingUpload?.error,
+    ...(s.raw_archives || []).map((u) => currentError(u) && `${u.route}/${u.episode} · ${currentError(u)}`),
+    ...jobs.map(currentError),
+    ...uploads.map((u) => currentError(u) &&
+      `${u.route}/${u.episode} · ${u.state === "retry" ? "等待重试，上次失败：" : ""}${currentError(u)}`),
+    ...training.map((j) => currentError(j) &&
+      `${j.route || "训练"}/${j.name || j.id} · ${j.state === "upload_retry" ? "等待重试，上次失败：" : ""}${currentError(j)}`),
     ...Object.values(s.capture_status?.route_errors || {}),
     ...Object.values(s.discovery?.routes || {}).map((r) => r.error),
   ].filter(Boolean);
   $("workflow-error").classList.toggle("hidden", !errors.length);
-  $("workflow-error").textContent = [...new Set(errors)].slice(0, 5).join("\n");
+  const retryCount = (s.raw_archives || []).filter((u) => u.state === "retry").length + uploads.filter((u) => u.state === "retry").length +
+    training.filter((j) => j.state === "upload_retry").length;
+  $("workflow-error").textContent =
+    (retryCount ? `${retryCount} 项上传等待${s.state === "running" ? "自动重试（失败后等待30秒，当前传输完成后依次处理）" : "重试（开始任务后继续）"}，可点击“重试上传”取消等待。\n` : "") +
+    [...new Set(errors)].slice(0, 5).join("\n");
   const uploadMap = new Map(uploads.map((u) => [u.route + "/" + u.episode, u]));
   const hiddenRecords = clearedRecords.get(selected);
   const visibleRecord = (kind) => (row) =>
@@ -537,9 +565,9 @@ function renderProgress() {
         "</td><td>" +
         esc(u ? label(u.state) : "—") +
         '</td><td class="' +
-        (j.error || u?.error ? "error" : "") +
+        (currentError(j) || currentError(u) ? "error" : "") +
         '">' +
-        esc(j.error || u?.error || "—") +
+        esc(currentError(j) || currentError(u) || "—") +
         "</td></tr>"
       );
     })
@@ -548,7 +576,7 @@ function renderProgress() {
     .filter(visibleRecord("batch"))
     .map(
       (b) =>
-        (b.group_id ? "<tr><td>100条一轮 · " : "<tr><td>历史批次 · ") +
+        (b.group_id ? "<tr><td>合计 " + esc(b.group_total ?? b.group_size) + " 条 · " : "<tr><td>历史批次 · ") +
         esc(b.name || b.batch_id) +
         "</td><td>" +
         esc(b.route) +
@@ -588,9 +616,9 @@ function renderProgress() {
         "</td><td>训练端 · " +
         esc(label(j.state)) +
         '</td><td class="' +
-        (j.error ? "error" : "") +
+        (currentError(j) ? "error" : "") +
         '">' +
-        esc(j.error || j.batch_id || "—") +
+        esc(currentError(j) || j.batch_id || "—") +
         "</td></tr>",
     )
     .join("");
@@ -607,14 +635,15 @@ function renderProgress() {
     (n, b) => n + JSON.parse(b.sources || "[]").length,
     0,
   );
+  const limit = s.batch_policy?.size ?? t?.batch_group_size ?? 100;
   const sealing = batches.some((b) => b.group_id && b.group_ready === false);
   $("batch-clock").textContent = sealing
-    ? "本轮 A+B 已满 100 条，正在校验封包；通过后衔接两版处理"
+    ? "本轮 A+B 正在校验封包；通过后衔接两版处理"
     : "本轮 A+B 已累计 " +
       count +
-      "/100 条有效录制" +
-      (count < 100 ? " · 还差 " + (100 - count) + " 条" : " · 等待封包校验") +
-      "；不足 100 条继续累计";
+      "/" + limit + " 条有效录制" +
+      (count < limit ? " · 还差 " + (limit - count) + " 条" : " · 等待封包校验") +
+      "；达到设定条数自动上传，也可立即上传";
   $("runtime-path").textContent = s.root
     ? "运行记录：" +
       s.root +
@@ -626,8 +655,11 @@ function renderProgress() {
     ? "最近更新 " +
       new Date(snapshot.updated_ns / 1e6).toLocaleTimeString("zh-CN")
     : "";
+  $("upload-now").disabled = !t || s.state !== "running" || !count || sealing || flushing.has(selected);
   $("retry-one").disabled =
     !t || ["running", "starting", "stopping"].includes(s.state);
+  $("retry-uploads").disabled =
+    !t || ["starting", "stopping"].includes(s.state) || retryingUploads.has(selected);
   $("start-one").disabled =
     !t || !t.enabled || ["running", "starting", "stopping"].includes(s.state);
   $("stop-one").disabled =
@@ -697,6 +729,43 @@ async function action(path, id) {
     );
   } catch (e) {
     toast(e.message, true);
+  }
+}
+async function retryUploads() {
+  const id = selected;
+  if (!id || retryingUploads.has(id) || $("retry-uploads").disabled) return;
+  retryingUploads.add(id);
+  renderProgress();
+  try {
+    const result = await api("/api/retry-uploads", { task: id });
+    const total = result.counts.data + result.counts.training + (result.counts.raw || 0);
+    toast(total
+      ? `已将 ${total} 项失败上传设为可立即重试。` +
+        (result.state === "running"
+          ? "上传队列会在当前传输完成后依次处理。"
+          : "开始该任务后继续上传。")
+      : "当前任务没有等待重试的上传项；正在上传和已完成的内容保持原状。");
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    retryingUploads.delete(id);
+    renderProgress();
+  }
+}
+async function uploadNow() {
+  const id = selected;
+  if (!id || flushing.has(id) || $("upload-now").disabled) return;
+  if (!window.confirm("确定立即上传当前任务已累计的有效录制吗？\n当前已完成清洗、转换的录制将封包并进入校验上传流程；处理中和后续录制从新一轮按设定条数继续累计。")) return;
+  flushing.add(id);
+  renderProgress();
+  try {
+    snapshot = await api("/api/upload-now", { task: id });
+    toast("已封包，将按现有流程校验上传；后续录制继续累计。");
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    flushing.delete(id);
+    renderProgress();
   }
 }
 const checkVersions = new Map();
@@ -904,7 +973,7 @@ async function init() {
         (el.oninput = () => {
           if (!current()) return;
           current()[el.dataset.task] =
-            el.type === "checkbox" ? el.checked : el.value;
+            el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value;
           if (
             current().auto_upload_paths &&
             ["project", "robot", "scene", "auto_upload_paths"].includes(
@@ -960,6 +1029,8 @@ async function init() {
         toast(e.message, true);
       }
     };
+    $("upload-now").onclick = uploadNow;
+    $("retry-uploads").onclick = retryUploads;
     $("start").onclick = () => action("start");
     $("stop").onclick = () => action("stop");
     $("start-one").onclick = () => action("start", selected);

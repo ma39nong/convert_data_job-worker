@@ -1,7 +1,7 @@
 """Capture configuration is separate from the production server receiver."""
 from pathlib import Path
 import yaml
-from convest.config import WORKSPACE, load_config, digest
+from convest.config import WORKSPACE, load_config, digest, queue_identity
 from convest.ingest.config import history_policy
 from bag_worker.idle import ALGORITHM_VERSION, default_config
 from dataclasses import asdict
@@ -71,6 +71,6 @@ def load(path):
     cfg['routes'] = routes
     # Pin all roots and history policies: changing destination must never silently
     # reinterpret the existing queue's completed uploads.
-    cfg['fingerprint'] = digest({'config': cfg, 'idle': asdict(default_config()), 'idle_version': ALGORITHM_VERSION,
+    cfg['fingerprint'] = digest({'config': queue_identity(cfg), 'idle': asdict(default_config()), 'idle_version': ALGORITHM_VERSION,
                                  'protocol': 'capture-daily-v2' if mode=='daily' else 'capture-single-recording-v1'})
     return cfg

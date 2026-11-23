@@ -1,7 +1,7 @@
 """Validate all paths without creating them or touching a remote server."""
 from pathlib import Path
 import yaml
-from convest.config import WORKSPACE,load_config,digest
+from convest.config import queue_identity, WORKSPACE,load_config,digest
 from convest.registry import get_target
 from bag_worker.idle import ALGORITHM_VERSION,default_config
 from dataclasses import asdict
@@ -67,6 +67,6 @@ def load_service_config(path):
             if ar.is_relative_to(br) or br.is_relative_to(ar):raise ValueError('Input/state/work/output paths overlap')
     cfg['routes']=routes
     cfg['initial_history_by_route']=history
-    cfg['fingerprint']=digest({'routes':routes,'idle':asdict(default_config()),'idle_version':ALGORITHM_VERSION,
+    cfg['fingerprint']=digest({'routes':queue_identity(routes),'idle':asdict(default_config()),'idle_version':ALGORITHM_VERSION,
         'converter_version':get_target('lerobot_v21_multimodal').version,'publisher':'timed-batches-v1','readiness':'stable-structural-v1'})
     return cfg

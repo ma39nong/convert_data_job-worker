@@ -139,3 +139,113 @@ test('raw preview includes C/D while conversion stays A/B and raw backup counts 
   assert.match(elements.get('metrics').innerHTML, /202 已备份原包<\/div><div class="value">3<\/div>/);
   assert.match(elements.get('records').innerHTML, /仅备份，不转换/);
 });
+
+test('manual upload requires confirmation, sends the selected task and blocks double clicks', async () => {
+  const elements=new Map();
+  let confirmed=false, requests=0, release;
+  const context=vm.createContext({
+    document:{getElementById(id) {
+      if(!elements.has(id))elements.set(id,{classList:{toggle(){}},getAttribute:()=> 'true'});
+      return elements.get(id);
+    }},
+    window:{confirm:()=>confirmed},
+    fetch:async (url,options)=>{
+      requests++;
+      assert.equal(url,'/api/upload-now');
+      assert.deepEqual(JSON.parse(options.body),{task:'a'});
+      await new Promise(resolve=>{release=resolve;});
+      return {ok:true,json:async()=>({tasks:[{id:'a',state:'running',batch_policy:{size:25},batches:[]}],updated_ns:0})};
+    },
+  });
+  const source=fs.readFileSync(path.join(__dirname,'../src/convest/gui/static/app.js'),'utf8');
+  vm.runInContext(source.replace(/init\(\);\s*$/, ''),context);
+  vm.runInContext(`toast=()=>{};draft={tasks:[{id:'a',enabled:true,batch_group_size:50}]};selected='a';
+    snapshot={updated_ns:0,tasks:[{id:'a',state:'running',batch_policy:{size:25},batches:[{route:'A',state:'active',sources:'["episode1"]'}]}]};renderProgress();`,context);
+  assert.match(elements.get('batch-clock').textContent,/1\/25/); // active policy, not unsaved input
+  await vm.runInContext('uploadNow()',context);
+  assert.equal(requests,0);
+  confirmed=true;
+  const pending=vm.runInContext('uploadNow()',context);
+  assert.equal(elements.get('upload-now').disabled,true);
+  await vm.runInContext('uploadNow()',context);
+  assert.equal(requests,1);
+  release();
+  await pending;
+  assert.equal(elements.get('upload-now').disabled,true); // no pending recordings
+});
+
+test('recovered queue state clears stale telemetry errors while genuine retries stay visible', () => {
+  const elements=new Map();
+  const context=vm.createContext({document:{getElementById(id) {
+    if(!elements.has(id))elements.set(id,{classList:{toggle(){}},getAttribute:()=> 'true'});
+    return elements.get(id);
+  }}});
+  const source=fs.readFileSync(path.join(__dirname,'../src/convest/gui/static/app.js'),'utf8');
+  vm.runInContext(source.replace(/init\(\);\s*$/, ''),context);
+  vm.runInContext(`draft={tasks:[{id:'a',enabled:true}]};selected='a';snapshot={tasks:[],updated_ns:0};
+    var fixture={state:'running',jobs:[{route:'A',episode:'one',state:'converted',error:'old conversion'}],
+      uploads:[{route:'A',episode:'one',state:'completed',error:'old network'}],
+      training:[{id:'train',state:'uploaded',error:'old upload'}],
+      raw_upload:{route:'A',episode:'one',phase:'retry',error:'stale raw'},
+      normal_upload:{task:'train',phase:'retry',error:'stale normal'},
+      training_upload:{task:'train',phase:'retry',error:'stale overall'},
+      training_processing:{task:'train',phase:'retry',error:'stale processing'}};
+    state=()=>fixture;renderProgress();`,context);
+  assert.equal(elements.get('workflow-error').textContent,'');
+  assert.doesNotMatch(elements.get('transfer-grid').innerHTML,/stale/);
+  assert.doesNotMatch(elements.get('records').innerHTML,/old network|old upload|old conversion/);
+  vm.runInContext(`fixture.uploads[0].state='retry';fixture.uploads[0].error='still disconnected';renderProgress();`,context);
+  assert.match(elements.get('workflow-error').textContent,/1 项上传等待自动重试/);
+  assert.match(elements.get('workflow-error').textContent,/still disconnected/);
+  vm.runInContext(`fixture.uploads[0].state='uploading';fixture.uploads[0].error=null;renderProgress();`,context);
+  assert.equal(elements.get('workflow-error').textContent,'');
+  assert.doesNotMatch(elements.get('transfer-grid').innerHTML,/stale raw/);
+});
+
+test('retry upload button works while running, targets one task and prevents duplicate requests', async () => {
+  const elements=new Map();let release,requests=0,messages=[];
+  const context=vm.createContext({document:{getElementById(id) {
+    if(!elements.has(id))elements.set(id,{classList:{toggle(){}},getAttribute:()=> 'true'});
+    return elements.get(id);
+  }},fetch:async(url,options)=>{
+    requests++;assert.equal(url,'/api/retry-uploads');
+    assert.deepEqual(JSON.parse(options.body),{task:'a'});
+    await new Promise(resolve=>{release=resolve;});
+    return {ok:true,json:async()=>({task:'a',state:'running',counts:{data:2,training:1}})};
+  }});
+  const source=fs.readFileSync(path.join(__dirname,'../src/convest/gui/static/app.js'),'utf8');
+  vm.runInContext(source.replace(/init\(\);\s*$/, ''),context);
+  context.report=(message)=>messages.push(message);
+  vm.runInContext(`toast=report;draft={tasks:[{id:'a',enabled:true}]};selected='a';
+    snapshot={tasks:[{id:'a',state:'running'}],updated_ns:0};renderProgress();`,context);
+  assert.equal(elements.get('retry-uploads').disabled,false);
+  const pending=vm.runInContext('retryUploads()',context);
+  assert.equal(elements.get('retry-uploads').disabled,true);
+  await vm.runInContext('retryUploads()',context);assert.equal(requests,1);
+  release();await pending;
+  assert.match(messages[0],/3 项失败上传/);
+  assert.equal(elements.get('retry-uploads').disabled,false);
+  vm.runInContext(`snapshot.tasks[0].state='stopping';renderProgress();`,context);
+  assert.equal(elements.get('retry-uploads').disabled,true);
+});
+
+
+test('ABCD archive telemetry uses its own queue and counts independent retries', () => {
+  const elements = new Map();
+  const context = vm.createContext({document:{getElementById(id) {
+    if (!elements.has(id)) elements.set(id,{classList:{toggle(){}},getAttribute:()=> 'true'});
+    return elements.get(id);
+  }}});
+  const source=fs.readFileSync(path.join(__dirname,'../src/convest/gui/static/app.js'),'utf8');
+  vm.runInContext(source.replace(/init\(\);\s*$/, ''),context);
+  vm.runInContext(`draft={tasks:[{id:'a',enabled:true}]};selected='a';snapshot={tasks:[],updated_ns:0};
+    var fixture={state:'running',uploads:[{route:'A',episode:'one',state:'completed'}],
+      raw_archives:[{route:'A',episode:'one',state:'retry',error:'archive unavailable'}],
+      raw_upload:{archive:true,route:'A',episode:'one',phase:'retry',error:'archive unavailable'}};
+    state=()=>fixture;renderProgress();`,context);
+  assert.match(elements.get('workflow-error').textContent,/1 项上传等待自动重试/);
+  assert.match(elements.get('transfer-grid').innerHTML,/archive unavailable/);
+  vm.runInContext(`fixture.raw_archives[0].state='uploaded';fixture.raw_archives[0].error=null;renderProgress();`,context);
+  assert.equal(elements.get('workflow-error').textContent,'');
+  assert.doesNotMatch(elements.get('transfer-grid').innerHTML,/archive unavailable/);
+});

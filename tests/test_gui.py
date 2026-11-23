@@ -48,7 +48,7 @@ def gui_spec(daily_cfg,tmp_path,monkeypatch):
     return {'capture':cfg,'training':train,'task':task,'data_server':{},'training_server':{}}
 
 
-@pytest.mark.parametrize('dated,oss,counted_mode', [(False, False, False), (True, False, False), (True, True, False), (True, True, True)])
+@pytest.mark.parametrize('dated,oss,counted_mode', [(False, False, False), (True, False, False), (True, True, False), (True, True, True), (True, True, 'manual')])
 def test_gui_native_pipeline_two_groups_separate_targets_and_retry(gui_spec,monkeypatch,dated,oss,counted_mode):
     s=gui_spec;c=s['capture'];t=s['task']
     if oss:
@@ -66,12 +66,16 @@ def test_gui_native_pipeline_two_groups_separate_targets_and_retry(gui_spec,monk
     if dated:
         for r in c['routes']:r['batch_name_format']='completion-mmdd-v1'
     if counted_mode:
-        c['batch_group_size']=2
-        for r in c['routes']:r.update(batch_group_size=2,batch_name_format='seal-mmdd-v1')
+        c['batch_group_size']=3 if counted_mode=='manual' else 2
+        for r in c['routes']:r.update(batch_group_size=c['batch_group_size'],batch_name_format='seal-mmdd-v1')
         s['training']['destination_name_format']='variant-short-v1'
     for i in range(2):bag(c,i,1)
     with capture_context(c) as q:
         ready(c,q)
+        if counted_mode=='manual':
+            from convest.capture import group_batches
+            assert group_batches.flush(c)
+            assert not daily.maintain(c,q)
         for _ in range(4 if counted_mode else 2):assert worker.capture_upload(s,q)
         assert all(not (Path(r['source'])/'episode1').exists() for r in c['routes'])
         for r in c['routes']:
@@ -765,3 +769,71 @@ def test_failed_cd_work_without_batch_cleans_after_raw_only_backup(gui_spec,tmp_
         assert len(result)==1 and result[0]['status']=='released',result
         assert not (attempt/'cleaned').exists() and not (attempt/'dataset').exists()
         assert (attempt/'manifest.json').exists() and source.exists()
+
+
+def test_batch_size_saved_migrated_and_preserves_runtime(tmp_path,monkeypatch):
+    root_test=config.WORKSPACE/'outputs'/('gui-size-test-'+__import__('uuid').uuid4().hex)
+    monkeypatch.setattr(config,'ROOT',root_test)
+    manager=Manager();settings=copy.deepcopy(manager.settings);task=settings['tasks'][0]
+    root,original=config.runtime(settings,task)
+    task['batch_group_size']=25
+    manager.save(settings)
+    assert Manager().settings['tasks'][0]['batch_group_size']==25
+    same,updated=config.runtime(settings,task)
+    assert same==root
+    assert original['capture']['fingerprint']==updated['capture']['fingerprint']
+    assert original['training']['fingerprint']==updated['training']['fingerprint']
+    assert all(r['batch_group_size']==25 for r in updated['capture']['routes'])
+    legacy=copy.deepcopy(settings);del legacy['tasks'][0]['batch_group_size']
+    assert config.validate(legacy)['tasks'][0]['batch_group_size']==100
+    for value in (0,-1,1.5,True,'25',None,1000001):
+        task['batch_group_size']=value
+        with pytest.raises(ValueError,match='累计上传条数'):config.validate(settings)
+    with pytest.raises(ValueError,match='请先开始'):manager.upload_now(task['id'])
+    shutil.rmtree(root_test)
+
+
+@pytest.mark.parametrize('state',['running','stopped'])
+def test_retry_uploads_preserves_active_complete_and_processing_rows(tmp_path,monkeypatch,state):
+    import sqlite3
+    monkeypatch.setattr(config,'ROOT',tmp_path/'ui')
+    manager=Manager();tid=manager.settings['tasks'][0]['id'];root=tmp_path/'run'
+    monkeypatch.setattr(manager,'current',lambda _:root)
+    monkeypatch.setattr(manager,'state',lambda _:{'state':state})
+    before={}
+    for section,table,states in [
+        ('raw-archive','jobs',['retry','uploading','uploaded','deleting','deleted','conflict']),
+        ('capture','uploads',['retry','uploading','completed','pending','conflict']),
+        ('training','tasks',['upload_retry','uploading','uploaded','retry','processing','conflict','waiting_space'])]:
+        file=root/section/'state/queue.sqlite3';file.parent.mkdir(parents=True)
+        with sqlite3.connect(file) as db:
+            db.execute(f'CREATE TABLE {table}(id TEXT,state TEXT,next_ns INTEGER,error TEXT,attempts INTEGER,payload TEXT)')
+            db.executemany(f'INSERT INTO {table} VALUES(?,?,?,?,?,?)',
+                           [(s,s,999999999999999999,'previous failure',9,'unchanged') for s in states])
+            before[section]=db.execute(f'SELECT * FROM {table} ORDER BY id').fetchall()
+    result=manager.retry_uploads(tid)
+    assert result=={'task':tid,'state':state,'counts':{'data':1,'training':1,'raw':1}}
+    for section,table,target in [('raw-archive','jobs','retry'),('capture','uploads','retry'),('training','tasks','upload_retry')]:
+        with sqlite3.connect(root/section/'state/queue.sqlite3') as db:
+            after=db.execute(f'SELECT * FROM {table} ORDER BY id').fetchall()
+        assert after==[(*row[:2],0,*row[3:]) if row[0]==target else row for row in before[section]]
+    for transition in ['starting','stopping']:
+        monkeypatch.setattr(manager,'state',lambda _,value=transition:{'state':value})
+        with pytest.raises(ValueError,match='启动或收尾'):manager.retry_uploads(tid)
+    with pytest.raises(ValueError,match='任务不存在'):manager.retry_uploads('unknown-task')
+
+
+def test_retry_uploads_http_requires_token_and_handles_missing_queues(tmp_path,monkeypatch):
+    monkeypatch.setattr(config,'ROOT',tmp_path/'ui')
+    server=Server(('127.0.0.1',0));thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    tid=server.manager.settings['tasks'][0]['id']
+    request=urllib.request.Request(f'http://127.0.0.1:{server.server_port}/api/retry-uploads',
+        data=json.dumps({'task':tid}).encode(),headers={'Content-Type':'application/json'})
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:opener.open(request)
+        assert exc.value.code==403
+        request.add_header('X-Workflow-Token',server.token)
+        with opener.open(request) as response:
+            assert json.load(response)=={'task':tid,'state':'stopped','counts':{'data':0,'training':0,'raw':0}}
+    finally:server.shutdown();server.server_close();thread.join()

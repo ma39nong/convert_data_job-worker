@@ -34,7 +34,12 @@ def audit_recording(bag, contract, config, item):
     limit = int(config['max_staleness_ms'] * 1e6)
     def fresh(key, i):
         j = indices[key][i]
-        return j >= 0 and 0 <= int(timeline[i]-streams[key].times[j]) <= limit
+        if j < 0:return False
+        age=int(timeline[i]-streams[key].times[j])
+        if (config['robot']=='sharpa' and key.startswith('observation.tactile.')
+                and config.get('tactile_freshness_check',True) is False):
+            return age>=0
+        return 0<=age<=limit
     states, actions, engaged = [], [], []
     low_valid = np.ones(n, bool)
     for row, t in enumerate(timeline):

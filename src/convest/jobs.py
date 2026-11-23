@@ -29,8 +29,8 @@ def checksum(path, progress=None):
     return value.hexdigest()
 
 
-def check_ready(path,contract,schema_dir,profile=None,progress=None):
-    """No writes; consistency, finalized capture, full hashes and stable snapshots."""
+def check_raw_ready(path,progress=None):
+    """Read-only finalized SQLite bag integrity, independent of conversion eligibility."""
     path=Path(path).resolve();before=snapshot(path)
     if any(p.name.endswith(('.partial','.tmp','-wal','-shm')) for p in path.iterdir()):
         raise ValueError('Input has transfer/SQLite temporary files')
@@ -57,6 +57,17 @@ def check_ready(path,contract,schema_dir,profile=None,progress=None):
     expected={v['topic_metadata']['name']:v['message_count'] for v in meta['topics_with_message_count']}
     if any(topic_counts.get(k,0)!=v for k,v in expected.items()) or set(topic_counts)-set(expected):
         raise ValueError('Topic counts differ from metadata')
+    ready={'source':str(path),'snapshot':before,'volumes':files,'messages':total,
+           'metadata_sha256':checksum(path/'metadata.yaml'),
+           'collection_state_sha256':checksum(path/'collection_state.json')}
+    if snapshot(path)!=before:raise ValueError('Input changed during readiness check')
+    return ready
+
+
+def check_ready(path,contract,schema_dir,profile=None,progress=None):
+    """Full conversion readiness; raw archival does not require sensor/robot contracts."""
+    ready=check_raw_ready(path,progress)
+    path=Path(ready['source']);before=ready['snapshot']
     # Decode low-dimensional streams and inspect all required sensor headers before trimming.
     if progress:progress('required_streams')
     with Bag(path,schema_dir) as bag:
@@ -71,9 +82,7 @@ def check_ready(path,contract,schema_dir,profile=None,progress=None):
             from .reporting import stream_profile
             profile.update(streams={k:stream_profile(v) for k,v in streams.items()},rgb_shapes=rgb,sensor_shapes=sensors)
     if snapshot(path)!=before:raise ValueError('Input changed during readiness check')
-    return {'source':str(path),'snapshot':before,'volumes':files,'messages':total,
-            'metadata_sha256':checksum(path/'metadata.yaml'),
-            'collection_state_sha256':checksum(path/'collection_state.json')}
+    return ready
 
 
 def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None,*,validated_inputs=None,progress=None,defer_source_final_hash=False):

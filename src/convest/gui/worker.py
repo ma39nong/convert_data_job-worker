@@ -205,7 +205,11 @@ def role(spec, name):
     with context(cfg,'upload' if name.endswith('upload') else 'processing') as q:
         while not stop[0]:
             if name=='capture-process': scan(cfg,q,should_stop=lambda:stop[0])
-            elif name=='capture-upload': capture_upload(spec,q)
+            elif name=='capture-upload':
+                capture_upload(spec,q)
+                from . import raw_archive
+                with raw_archive.context(spec) as archive:
+                    raw_archive.scan(spec,archive,q,should_stop=lambda:stop[0])
             elif name=='training-process':
                 training.discover(cfg,q)
                 if not stop[0]:training.process_once(cfg,q)

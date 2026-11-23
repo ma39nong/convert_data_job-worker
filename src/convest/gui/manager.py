@@ -116,7 +116,9 @@ class Manager:
                     "UPDATE jobs SET state='retry',attempts=0,next_ns=0 WHERE state IN ('failed','retry')",
                     "UPDATE uploads SET next_ns=0 WHERE state='retry'"]),
                 (root/'training/state/queue.sqlite3',[
-                    "UPDATE tasks SET next_ns=0 WHERE state IN ('retry','upload_retry','waiting_space')"])]:
+                    "UPDATE tasks SET next_ns=0 WHERE state IN ('retry','upload_retry','waiting_space')"]),
+                (root/'raw-archive/state/queue.sqlite3',[
+                    "UPDATE jobs SET next_ns=0 WHERE state IN ('retry','uploaded','deleting')"])]:
                 if file.exists():
                     with sqlite3.connect(file) as db:
                         for sql in queries:db.execute(sql)
@@ -185,6 +187,11 @@ class Manager:
                             discovery=read(train/'discovery.json',{}),videos=read(train/'video_progress.json',{}),
                             raw_upload=read(capture/'upload_progress_raw.json',{}),batch_upload=read(capture/'upload_progress_batch.json',{}),
                             normal_upload=read(train/'upload_progress_normal.json',{}),speedup_upload=read(train/'upload_progress_speedup.json',{}))
+                archive=root/'raw-archive/state'
+                item['raw_archives']=rows(archive/'queue.sqlite3','SELECT route,episode,state,error FROM jobs ORDER BY route,episode')
+                archive_progress=read(archive/'upload_progress.json',{})
+                if archive_progress.get('updated_ns',0)>item['raw_upload'].get('updated_ns',0):
+                    item['raw_upload']=archive_progress
                 spec=read(root/'spec.json',{})
                 routes=spec.get('capture',{}).get('routes',[])
                 catalogue={}

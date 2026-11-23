@@ -484,3 +484,148 @@ def test_gui_cleanup_background_and_stale_running_report(tmp_path,monkeypatch):
         if manager.snapshot()['cleanup']['report']['status']=='completed':break
         time.sleep(.01)
     assert manager.snapshot()['cleanup']['report']['status']=='completed'
+
+
+def raw_archive_spec(s,tmp_path):
+    s['root']=str(tmp_path/'gui-run')
+    s['task'].update(source=str(Path(s['capture']['routes'][0]['source']).parent),
+                     delete_raw=True,include_existing=True)
+    return s
+
+
+def test_gui_cd_direct_raw_upload_skips_all_content_validation_and_never_converts(gui_spec,tmp_path,monkeypatch):
+    from convest.gui import raw_archive
+    s=raw_archive_spec(gui_spec,tmp_path);c=s['capture']
+    monkeypatch.setattr(raw_archive,'transfer',local_transfer)
+    monkeypatch.setattr(raw_archive,'verify_backup',local_verify)
+    def forbidden(*a,**kw):raise AssertionError('C/D must not validate bag content or convert')
+    monkeypatch.setattr(raw_archive,'check_raw_ready',forbidden)
+    monkeypatch.setattr(training,'process_once',forbidden)
+    originals={}
+    for group in ('C','D'):
+        bagdir=Path(s['task']['source'])/group/'episode7';bagdir.mkdir(parents=True)
+        # Intentionally invalid SQLite and metadata; these are raw files to back up.
+        (bagdir/'data.db3').write_bytes(b'raw bytes without content inspection')
+        (bagdir/'metadata.yaml').write_text('not valid rosbag metadata')
+        originals[group]={p.name:p.read_bytes() for p in bagdir.iterdir()}
+    before=c['fingerprint'];now=time.time_ns()
+    with capture_context(c) as cap, raw_archive.context(s) as archive:
+        raw_archive.scan(s,archive,cap,now)
+        assert all((Path(s['task']['source'])/g/'episode7').exists() for g in 'CD')
+        for step in (2,4):raw_archive.scan(s,archive,cap,now+step*10**9)
+        assert {r['route']:r['state'] for r in archive.rows()}=={'sharpa-C':'deleted','sharpa-D':'deleted'}
+        assert not cap.rows()
+        assert cap.db.execute('SELECT count(*) FROM capture_batches').fetchone()[0]==0
+        assert c['fingerprint']==before
+        for g in 'CD':
+            assert not (Path(s['task']['source'])/g/'episode7').exists()
+            remote=Path(s['task']['raw_root'])/g/'episode7'
+            assert {p.name:p.read_bytes() for p in remote.iterdir()}==originals[g]
+        # Completed backup remains idempotent; a reused source name is retained.
+        newer=Path(s['task']['source'])/'C/episode7';newer.mkdir();(newer/'new').write_text('new recording')
+        raw_archive.scan(s,archive,cap,now+6*10**9)
+        assert archive.get('sharpa-C','episode7')['state']=='conflict'
+        assert (newer/'new').read_text()=='new recording'
+
+
+def test_gui_cd_remote_failure_and_interrupted_deletion_resume_without_reupload(gui_spec,tmp_path,monkeypatch):
+    from convest.gui import raw_archive
+    s=raw_archive_spec(gui_spec,tmp_path);s['task']['delete_raw']=False;now=time.time_ns()
+    source=Path(s['task']['source'])/'C/episode9';source.mkdir(parents=True);(source/'raw').write_bytes(b'original')
+    monkeypatch.setattr(raw_archive,'transfer',local_transfer)
+    def offline(*a,**kw):raise OSError('offline verify')
+    monkeypatch.setattr(raw_archive,'verify_backup',offline)
+    with capture_context(s['capture']) as cap, raw_archive.context(s) as archive:
+        raw_archive.scan(s,archive,cap,now)
+        raw_archive.scan(s,archive,cap,now+2*10**9)
+        assert source.exists()
+        assert archive.get('sharpa-C','episode9')['state']=='uploaded'
+        s['task']['delete_raw']=True
+        raw_archive.scan(s,archive,cap,now+4*10**9)
+        assert source.exists() and archive.get('sharpa-C','episode9')['state']=='uploaded'
+        monkeypatch.setattr(raw_archive,'verify_backup',local_verify)
+        def no_reupload(*a,**kw):raise AssertionError('Already uploaded; only resume deletion')
+        monkeypatch.setattr(raw_archive,'transfer',no_reupload)
+        original=raw_archive.shutil.rmtree;once=[False]
+        def interrupted(path,*a,**kw):
+            original(path,*a,**kw)
+            if not once[0]:once[0]=True;raise OSError('power loss after deletion')
+        interrupted.avoids_symlink_attacks=True
+        monkeypatch.setattr(raw_archive.shutil,'rmtree',interrupted)
+        raw_archive.scan(s,archive,cap,now+6*10**9)
+        assert archive.get('sharpa-C','episode9')['state']=='deleting'
+        monkeypatch.setattr(raw_archive.shutil,'rmtree',original)
+        raw_archive.scan(s,archive,cap,now+8*10**9)
+        assert archive.get('sharpa-C','episode9')['state']=='deleted'
+        assert not source.exists()
+
+
+def test_gui_ab_raw_backup_waits_for_existing_conversion_and_deletion(gui_spec,tmp_path,monkeypatch):
+    from convest.gui import raw_archive
+    s=raw_archive_spec(gui_spec,tmp_path);c=s['capture'];source=bag(c,0,21)
+    monkeypatch.setattr(raw_archive,'transfer',local_transfer)
+    monkeypatch.setattr(raw_archive,'verify_backup',local_verify)
+    now=time.time_ns()
+    with capture_context(c) as cap, raw_archive.context(s) as archive:
+        raw_archive.scan(s,archive,cap,now)
+        raw_archive.scan(s,archive,cap,now+2*10**9)
+        assert archive.get('sharpa-A','episode21')['state']=='uploaded'
+        assert source.exists()  # not yet converted: backup cannot destroy conversion input
+        ready(c,cap)
+        assert cap.get('sharpa-A','episode21')['state']=='converted'
+        assert worker.capture_upload(s,cap)
+        assert not source.exists()
+        raw_archive.scan(s,archive,cap,now+4*10**9)
+        assert archive.get('sharpa-A','episode21')['state']=='deleted'
+        assert cap.db.execute('SELECT count(*) FROM capture_batches').fetchone()[0]==1
+
+
+def test_gui_cd_active_recording_and_keep_raw_switch_are_respected(gui_spec,tmp_path,monkeypatch):
+    from convest.gui import raw_archive
+    s=raw_archive_spec(gui_spec,tmp_path);s['task']['delete_raw']=False
+    source=Path(s['task']['source'])/'D/episode4';source.mkdir(parents=True)
+    state=source/'collection_state.json';state.write_text(json.dumps({'state':'recording','finalized':False}))
+    (source/'raw').write_bytes(b'data')
+    monkeypatch.setattr(raw_archive,'transfer',local_transfer)
+    monkeypatch.setattr(raw_archive,'verify_backup',local_verify)
+    now=time.time_ns()
+    with capture_context(s['capture']) as cap, raw_archive.context(s) as archive:
+        raw_archive.scan(s,archive,cap,now)
+        raw_archive.scan(s,archive,cap,now+2*10**9)
+        assert not (Path(s['task']['raw_root'])/'D/episode4').exists()
+        state.write_text(json.dumps({'state':'finalized','finalized':True,'failures':['ignored quality']}))
+        raw_archive.scan(s,archive,cap,now+4*10**9)
+        raw_archive.scan(s,archive,cap,now+6*10**9)
+        assert archive.get('sharpa-D','episode4')['state']=='uploaded'
+        assert source.exists()  # switch off: backup only, no deletion
+
+
+def test_gui_cd_existing_different_remote_never_overwrites_or_deletes(gui_spec,tmp_path,monkeypatch):
+    from convest.gui import raw_archive
+    s=raw_archive_spec(gui_spec,tmp_path);now=time.time_ns()
+    source=Path(s['task']['source'])/'C/episode3';source.mkdir(parents=True);(source/'raw').write_bytes(b'new')
+    remote=Path(s['task']['raw_root'])/'C/episode3';remote.mkdir(parents=True);(remote/'raw').write_bytes(b'old')
+    monkeypatch.setattr(raw_archive,'transfer',local_transfer)
+    monkeypatch.setattr(raw_archive,'verify_backup',local_verify)
+    with capture_context(s['capture']) as cap, raw_archive.context(s) as archive:
+        raw_archive.scan(s,archive,cap,now)
+        raw_archive.scan(s,archive,cap,now+2*10**9)
+        assert archive.get('sharpa-C','episode3')['state']=='retry'
+        assert (source/'raw').read_bytes()==b'new'
+        assert (remote/'raw').read_bytes()==b'old'
+
+
+def test_gui_excluded_ab_is_backed_up_and_released_without_fake_batch(gui_spec,tmp_path,monkeypatch):
+    from convest.gui import raw_archive
+    s=raw_archive_spec(gui_spec,tmp_path);c=s['capture'];source=bag(c,0,22);now=time.time_ns()
+    monkeypatch.setattr(raw_archive,'transfer',local_transfer)
+    monkeypatch.setattr(raw_archive,'verify_backup',local_verify)
+    with capture_context(c) as cap, raw_archive.context(s) as archive:
+        raw_archive.scan(s,archive,cap,now)
+        raw_archive.scan(s,archive,cap,now+2*10**9)
+        row=archive.get('sharpa-A','episode22');proof=json.loads(row['proof'])
+        cap.put('sharpa-A','episode22','excluded-source','excluded',proof={'snapshot':proof['snapshot'],'files':proof['files']})
+        raw_archive.scan(s,archive,cap,now+4*10**9)
+        assert archive.get('sharpa-A','episode22')['state']=='deleted'
+        assert not source.exists()
+        assert cap.db.execute('SELECT count(*) FROM capture_batches').fetchone()[0]==0

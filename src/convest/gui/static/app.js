@@ -32,6 +32,7 @@ function clearRecordDisplay() {
     ["job", s.jobs],
     ["batch", s.batches],
     ["training", s.training],
+    ["archive", s.raw_archives],
   ]) {
     for (const row of rows || []) hidden.add(recordKey(kind, row));
   }
@@ -57,6 +58,8 @@ const names = {
   conflict: "文件冲突",
   waiting_stable: "等待录制稳定",
   waiting_space: "等待磁盘空间",
+  raw_integrity_check: "检查 A/B 原包完整性",
+  uploading_original_files: "C/D 原文件直传",
   active: "累计中",
   sealed: "已封存",
   uploading: "上传中",
@@ -166,14 +169,14 @@ function renderUploadPaths() {
     $(field).disabled = !t || t.auto_upload_paths;
     $(field).title = t?.auto_upload_paths
       ? "由项目、手型和场景自动生成；取消生成默认上传路径后可手动选择"
-      : "手动选择上传父目录，上传时追加 A / B 和包名";
+      : "手动选择上传父目录，原包追加 A/B/C/D；LeRobot 与训练成品仅追加 A/B";
     const browseButton = document.querySelector(
       '[data-browse="' + field + '"]',
     );
     browseButton.disabled = !t;
     browseButton.title = t?.auto_upload_paths
       ? "可浏览服务器；选择目录后切换为手动路径"
-      : "选择服务器上的场景父目录（内含 A / B）";
+      : (field === "raw_root" ? "选择原包场景父目录（按 A/B/C/D 保存）" : "选择服务器上的场景父目录（内含 A / B）");
   });
   renderPreviews();
 }
@@ -245,10 +248,10 @@ function renderPreviews() {
     $(id).innerHTML = t
       ? "<strong>" +
         esc(t[field] || "请选择存储目录") +
-        "</strong><br>├ A / " +
-        child +
-        "<br>└ B / " +
-        child
+        "</strong><br>" +
+        (field === "raw_root" ? ["A", "B", "C", "D"] : ["A", "B"])
+          .map((g, i, gs) => (i === gs.length - 1 ? "└ " : "├ ") + g + " / " + child)
+          .join("<br>")
       : "添加任务后配置存储路径";
   });
   const source = (t?.source || "").replace(/\/+$/, "");
@@ -259,7 +262,7 @@ function renderPreviews() {
       "</strong><br>" +
       (["A", "B"].includes(group)
         ? "└ episode…"
-        : "├ A / episode…<br>└ B / episode…")
+        : "├ A / episode…（备份与转换）<br>├ B / episode…（备份与转换）<br>├ C / episode…（仅原包备份）<br>└ D / episode…（仅原包备份）")
     : "添加任务后配置读取路径";
 }
 function renderTasks() {
@@ -417,7 +420,10 @@ function renderProgress() {
       (j) => !["converted", "excluded"].includes(j.state),
     ).length,
     done = jobs.filter((j) => j.state === "converted").length,
-    backed = uploads.filter((u) => u.raw_done).length,
+    backed = new Set([
+      ...uploads.filter((u) => u.raw_done).map((u) => JSON.stringify([u.route,u.episode])),
+      ...(s.raw_archives || []).filter((u) => ["uploaded","deleting","deleted"].includes(u.state)).map((u) => JSON.stringify([u.route,u.episode])),
+    ]).size,
     trained = training.filter((j) => j.state === "uploaded").length;
   $("metrics").innerHTML = [
     ["待处理录制", pending],
@@ -475,7 +481,7 @@ function renderProgress() {
   $("current-phase").textContent = phase;
   $("transfer-grid").innerHTML =
     transferCard(
-      "原始 ROSbag → 202",
+      "A/B/C/D 原始 ROSbag → 202",
       s.raw_upload,
       false,
       backed + " 包备份完成",
@@ -555,6 +561,12 @@ function renderProgress() {
         " 条录制</td></tr>",
     )
     .join("");
+  html += (s.raw_archives || [])
+    .filter(visibleRecord("archive"))
+    .map((j) => "<tr><td>原包备份 · " + esc(j.episode) + "</td><td>" + esc(j.route) +
+      "</td><td>" + (/[AB]$/.test(j.route) ? "A/B 保留转换流程" : "仅备份，不转换") +
+      "</td><td>" + esc(({uploaded:"备份完成 · 本机暂保留",deleting:"正在释放原包",deleted:"备份完成 · 本机已释放"})[j.state] || label(j.state)) +
+      "</td><td>" + esc(j.error || "—") + "</td></tr>").join("");
   html += training
     .filter(visibleRecord("training"))
     .map(

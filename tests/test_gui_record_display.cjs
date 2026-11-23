@@ -109,3 +109,33 @@ test('batch footer counts A+B valid sources and no longer shows a 24-hour countd
   assert.match(elements.get('batch-clock').textContent,/还差 1 条/);
   assert.doesNotMatch(elements.get('transfer-grid').innerHTML,/24h/);
 });
+
+test('raw preview includes C/D while conversion stays A/B and raw backup counts deduplicate', () => {
+  const elements = new Map();
+  const context = vm.createContext({ document: { getElementById(id) {
+    if (!elements.has(id)) elements.set(id, {
+      classList: { toggle() {} }, getAttribute: () => 'true',
+    });
+    return elements.get(id);
+  } } });
+  const source = fs.readFileSync(path.join(__dirname, '../src/convest/gui/static/app.js'), 'utf8');
+  vm.runInContext(source.replace(/init\(\);\s*$/, ''), context);
+  vm.runInContext(`
+    draft = {tasks:[{id:'a',name:'A',source:'/bags/scene',raw_root:'/raw',lerobot_root:'/full',normal_root:'/normal',speedup_root:'/speedup'}]};
+    selected='a'; renderTransitPreview=()=>{}; renderPreviews();
+    snapshot={tasks:[],updated_ns:0};
+    state=()=>({state:'stopped',jobs:[],batches:[],training:[],
+      uploads:[{route:'sharpa-A',episode:'episode1',raw_done:1}],
+      raw_archives:[{route:'sharpa-A',episode:'episode1',state:'uploaded'},
+                    {route:'sharpa-C',episode:'episode2',state:'deleted'},
+                    {route:'sharpa-D',episode:'episode3',state:'uploaded'}]});
+    renderProgress();
+  `, context);
+  assert.match(elements.get('raw-preview').innerHTML, /C \/ episode/);
+  assert.match(elements.get('raw-preview').innerHTML, /D \/ episode/);
+  for (const id of ['data-preview','normal-preview','train-preview']) {
+    assert.doesNotMatch(elements.get(id).innerHTML, /[CD] \/ /);
+  }
+  assert.match(elements.get('metrics').innerHTML, /202 已备份原包<\/div><div class="value">3<\/div>/);
+  assert.match(elements.get('records').innerHTML, /仅备份，不转换/);
+});

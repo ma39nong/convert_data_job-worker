@@ -257,14 +257,7 @@
                 </summary>
                 <div id="train-preview" class="preview-content"></div>
               </details>
-              <label
-                class="checkbox release-option"
-                title="默认关闭。等待202完整备份、normal/speedup两版上传及配对校验全部通过后，释放本机完整批次的数据与视频；保留元数据、凭据和两版成品。"
-                ><input
-                  type="checkbox"
-                  data-task="delete_lerobot"
-                />两版上传校验后释放本机完整 LeRobot</label
-              >
+              <p class="hint">封包、202备份和训练两版交付确认后，按下方自动清理设置立即释放本机大文件。</p>
             </div>
           </div>
           <details class="server-settings oss-transit" id="oss-transit">
@@ -393,13 +386,12 @@
       </section>
       <details class="logs" id="cleanup-panel">
         <summary>本机空间清理（包含历史任务）</summary>
-        <p class="hint">仅释放超过保留期、202 完整备份与 28 两版及配对材料重新校验通过的完整 LeRobot、normal/speedup 数据和视频。保留队列、元数据和凭据。原始 ROSbag 仍由原有开关管理；中间失败作业保留排查。</p>
-        <label class="checkbox"><input type="checkbox" id="cleanup-enabled" />启用本机自动清理（每日检查）</label>
-        <label>上传完成后保留天数 <input type="number" id="cleanup-days" min="0" max="3650" value="7" /></label>
+        <p class="hint">A/B：封包、202备份与训练两版交付确认后，立即释放本机完整 LeRobot、normal/speedup 大文件及已完成的转换中间文件。C/D：原包备份到202后即可释放对应旧转换残留，不要求训练两版。保留队列、元数据和凭据；原包删除仍由202区域的开关控制。</p>
+        <label class="checkbox"><input type="checkbox" id="cleanup-enabled" />交付完成后自动释放本机大文件（不等待天数）</label>
         <button id="cleanup-save">保存清理策略</button>
         <button id="cleanup-preview">预览可清理批次</button>
         <button id="cleanup-apply">按已保存策略清理</button>
-        <p class="hint">预览不做远端核验；执行时逐批复核。手动清理跳过运行中的任务，可先停止并等收尾。自动清理在运行任务的上传角色中执行。历史版本使用各自原来的服务器和路径。</p>
+        <p class="hint">预览不删除文件；执行时逐批核验。运行任务由上传角色在交付后检查，历史停止版本每分钟巡检。缺凭据、上传失败、文件冲突或仍在使用的数据保留并显示原因；历史版本使用各自原来的服务器和路径。</p>
         <pre id="cleanup-result">尚未检查</pre>
       </details>
       <footer>

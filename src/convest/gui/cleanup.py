@@ -19,8 +19,8 @@ from convest.capture.transfer import ensure_real_path, manifest, verify_tree
 from convest.training import worker as training
 from . import retention
 
-DAY = 86400 * 10**9
-DEFAULT = {'enabled': False, 'keep_days': 7}
+INTERVAL = 60 * 10**9
+DEFAULT = {'enabled': True}
 
 
 def read(path):
@@ -33,9 +33,10 @@ def policy(root):
 
 
 def validate(value):
-    if type(value.get('enabled')) is not bool or type(value.get('keep_days')) is not int or not 0 <= value['keep_days'] <= 3650:
-        raise ValueError('清理策略需包含自动开关及 0–3650 天保留期')
-    return {k: value[k] for k in DEFAULT}
+    if type(value.get('enabled')) is not bool:
+        raise ValueError('清理策略需包含自动清理开关')
+    # Old day settings are ignored. An explicitly disabled policy stays disabled.
+    return {'enabled': value['enabled']}
 
 
 def pair_path(spec, row):
@@ -95,11 +96,15 @@ def release_pair(spec, db, row, destination_name):
     old = read(state) if state.exists() else {}
     if old.get('status') == 'released': return old
     if row['state'] != 'uploaded': raise ValueError('Pair is not uploaded')
-    # Full source must finish releasing first; its validation needs the intact pair.
-    retention.release_one(spec, db, row, destination_name)
+    # Verify the whole delivery BEFORE releasing any local payload. Reuse this
+    # verification for both local releases instead of hashing every remote twice.
+    from . import cleanup_work
+    _,recordings=cleanup_work.members(spec,json.loads(row['spec']))
+    for p in recordings:cleanup_work.raw_receipt(spec,p)
+    verify_remotes(spec, row, destination_name)
+    retention.release_one(spec, db, row, destination_name,remote_verified=True)
     full = read(Path(cfg['state_root']) / 'retention' / (tid + '.json'))
     if full.get('status') != 'released': raise ValueError('Complete LeRobot release still pending')
-    verify_remotes(spec, row, destination_name)
     p = json.loads(row['payload'])
     if not old.get('trees'):
         require_same(root, p['snapshot']); verify_tree(root, p['files'])
@@ -134,27 +139,45 @@ def release_pair(spec, db, row, destination_name):
     return old
 
 
-def sweep(spec, db, keep_days, apply=False):
+def sweep(spec, db, apply=False, allow_legacy_cd=False):
     from .worker import training_destination_name
+    from . import cleanup_work
     result = []
-    for row in db.execute('SELECT * FROM tasks ORDER BY updated_ns,id').fetchall():
+    tasks=list(db.execute('SELECT * FROM tasks ORDER BY updated_ns,id').fetchall())
+    if allow_legacy_cd:
+        tasks.extend(cleanup_work.unqueued_cd(spec,tasks))
+        tasks.extend(cleanup_work.unbatched_cd(spec))
+    for row in tasks:
         item = {'id': row['id'], 'status': 'retained'}
         try:
+            if not re.fullmatch('[a-f0-9]{64}',row['id']):raise ValueError('Invalid cleanup task identity')
+            source=json.loads(row['spec'])
+            item['name']=source.get('name',row['id'])
+            if source.get('group') in ('C','D'):
+                item['name']=source['name']
+                if not allow_legacy_cd:
+                    item['reason']='旧C/D转换残留，请停止任务后清理';continue
+                item['status']=(cleanup_work.legacy_cd_work(spec,row,apply) if source.get('work_only')
+                                else cleanup_work.legacy_cd(spec,db,row,apply));continue
             if row['state'] != 'uploaded':
                 item['reason'] = '未完成上传'; continue
-            # Use completion time rather than directory age. Never refresh this on retry.
             receipt = read(Path(spec['training']['state_root']) / 'receipts' / (row['id'] + '.json'))
-            completed = max(receipt['variants'][v]['completed_ns'] for v in ('normal', 'speedup'))
-            if max(completed, row['updated_ns']) + keep_days * DAY > time.time_ns():
-                item['reason'] = '仍在保留期'; continue
+            if receipt.get('status') != 'completed':
+                raise ValueError('Missing completed training pair receipt')
             root = pair_path(spec, row)
             released = Path(spec['training']['state_root']) / 'pair-retention' / (row['id'] + '.json')
             if released.exists() and read(released).get('status') == 'released':
+                if apply:
+                    work=Path(spec['training']['state_root'])/'work-retention'/(row['id']+'.json')
+                    if not work.exists() or read(work).get('status')!='released':
+                        verify_remotes(spec,row,training_destination_name)
+                        cleanup_work.release_work(spec,row)
                 item['status'] = 'released'; continue
             # Preview deliberately does not contact remote servers or promise deletion.
             item.update(status='candidate', name=json.loads(row['spec'])['name'], source=str(root))
             if apply:
                 release_pair(spec, db, row, training_destination_name)
+                cleanup_work.release_work(spec,row)
                 item['status'] = 'released'
         except Exception as exc:
             item.update(status='retained', reason=str(exc))
@@ -163,7 +186,7 @@ def sweep(spec, db, keep_days, apply=False):
     return result
 
 
-def scan(root, keep_days, apply=False, progress=lambda value: None):
+def scan(root, apply=False, progress=lambda value: None):
     """Includes deleted UI tasks and old config versions using their ORIGINAL endpoints."""
     root = Path(root); result = []
     for file in sorted((root / 'runs').glob('task-*/*/spec.json')):
@@ -185,7 +208,7 @@ def scan(root, keep_days, apply=False, progress=lambda value: None):
                 for key, suffix in fields.items():
                     if Path(cfg[key]) != run / suffix: raise ValueError('Run ownership path mismatch')
             for route in spec['capture'].get('routes', []):
-                if (route['robot'] not in ('sharpa', 'wuji') or route['group'] not in ('A', 'B')
+                if (route['robot'] not in ('sharpa', 'wuji') or route['group'] not in ('A', 'B','C','D')
                         or Path(route['output']) != run / 'capture/batches' / route['robot'] / route['group']):
                     raise ValueError('Run route ownership mismatch')
             if spec['training'].get('capture', spec['capture']) != spec['capture']:
@@ -198,9 +221,9 @@ def scan(root, keep_days, apply=False, progress=lambda value: None):
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 db_path = run / 'training/state/queue.sqlite3'
                 ensure_real_path(db_path)
-                db = stack.enter_context(sqlite3.connect(db_path.as_uri() + '?mode=ro', uri=True))
+                db = stack.enter_context(sqlite3.connect(db_path.as_uri() + ('?mode=rw' if apply else '?mode=ro'), uri=True))
                 db.row_factory = sqlite3.Row
-                item.update(status='checked', tasks=sweep(spec, db, keep_days, apply))
+                item.update(status='checked', tasks=sweep(spec, db, apply,allow_legacy_cd=True))
                 if not item['tasks']:
                     item['reason'] = '暂无已登记训练批次；未封存或未转换数据保持保留'
         except BlockingIOError:
@@ -217,7 +240,10 @@ def automatic(spec, db):
     if not cfg['enabled']: return
     report = Path(spec['root']) / 'cleanup-auto.json'
     previous = read(report) if report.exists() else {}
-    if previous.get('next_ns', 0) > time.time_ns(): return
-    durable_json(report, {'status': 'running', 'next_ns': time.time_ns() + DAY})
-    results = sweep(spec, db, cfg['keep_days'], apply=True)
-    durable_json(report, {'status': 'completed', 'tasks': results, 'next_ns': time.time_ns() + DAY})
+    with sqlite3.connect(Path(spec['capture']['state_root']).joinpath('queue.sqlite3').as_uri()+'?mode=ro',uri=True) as cap:
+        uploads=list(cap.execute('SELECT id,state,raw_done,dataset_done,updated_ns FROM uploads ORDER BY id'))
+    signature=digest([[tuple(r) for r in db.execute('SELECT id,state,updated_ns FROM tasks ORDER BY id')],uploads])
+    if previous.get('signature') == signature and previous.get('next_ns', 0) > time.time_ns(): return
+    durable_json(report, {'status': 'running', 'signature':signature, 'next_ns': time.time_ns() + INTERVAL})
+    results = sweep(spec, db, apply=True)
+    durable_json(report, {'status': 'completed', 'tasks': results, 'signature':signature,'next_ns': time.time_ns() + INTERVAL})

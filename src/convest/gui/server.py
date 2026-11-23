@@ -17,9 +17,9 @@ STATIC=Path(__file__).parent/'static'
 class Server(ThreadingHTTPServer):
     daemon_threads=True
     def __init__(self,address):
+        self.cleanup_stopped=threading.Event()
         self.manager=Manager();self.token=secrets.token_urlsafe(32)
         super().__init__(address,Handler)
-        self.cleanup_stopped=threading.Event()
         def tick():
             while not self.cleanup_stopped.wait(60):
                 try:self.manager.cleanup_tick()

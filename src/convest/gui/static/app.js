@@ -58,6 +58,8 @@ const names = {
   conflict: "文件冲突",
   waiting_stable: "等待录制稳定",
   waiting_space: "等待磁盘空间",
+  archived_raw_only: "原包已备份 · 旧转换已归档",
+  archive_only: "仅保留原包备份流程",
   raw_integrity_check: "检查 A/B 原包完整性",
   uploading_original_files: "C/D 原文件直传",
   active: "累计中",
@@ -863,12 +865,11 @@ async function init() {
     snapshot = b.snapshot;
     draft = clone(snapshot.settings);
     selected = draft.tasks[0]?.id;
-    $("cleanup-enabled").checked = snapshot.cleanup?.policy.enabled || false;
-    $("cleanup-days").value = snapshot.cleanup?.policy.keep_days ?? 7;
+    $("cleanup-enabled").checked = snapshot.cleanup?.policy.enabled ?? true;
     $("cleanup-save").onclick = async () => {
       try {
-        await api("/api/cleanup-policy", {enabled: $("cleanup-enabled").checked, keep_days: Number($("cleanup-days").value)});
-        toast("本机清理策略已保存；自动清理每日执行，历史任务也纳入检查。");
+        await api("/api/cleanup-policy", {enabled: $("cleanup-enabled").checked});
+        toast("设置已保存。开启时交付确认后立即释放大文件，历史任务也纳入检查。");
         await refresh();
       } catch (e) { toast(e.message, true); }
     };

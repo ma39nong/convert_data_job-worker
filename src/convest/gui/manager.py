@@ -133,15 +133,14 @@ class Manager:
             try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             except BlockingIOError:
                 lock.close();raise ValueError('本机清理检查已在运行')
-            cfg=cleanup.policy(self.root)
             report=self.root/'cleanup-report.json'
-            durable_json(report,{'status':'running','apply':apply,'keep_days':cfg['keep_days'],'runs':[]})
+            durable_json(report,{'status':'running','apply':apply,'runs':[]})
             def run():
                 def progress(runs):
-                    durable_json(report,{'status':'running','apply':apply,'keep_days':cfg['keep_days'],'runs':runs})
+                    durable_json(report,{'status':'running','apply':apply,'runs':runs})
                 try:
-                    runs=cleanup.scan(self.root,cfg['keep_days'],apply,progress)
-                    durable_json(report,{'status':'completed','apply':apply,'keep_days':cfg['keep_days'],
+                    runs=cleanup.scan(self.root,apply,progress)
+                    durable_json(report,{'status':'completed','apply':apply,
                                          'runs':runs,'completed_ns':time.time_ns()})
                 except Exception as exc:
                     durable_json(report,{'status':'error','error':str(exc),'apply':apply})
@@ -160,12 +159,13 @@ class Manager:
         cfg=cleanup.policy(self.root)
         if not cfg['enabled']:return
         schedule=self.root/'cleanup-schedule.json'
-        # Manual previews must not reset the daily timer. A stale 'running'
+        # Manual previews must not reset the retry timer. A stale 'running'
         # report is recoverable because cleanup() checks the actual OS lock.
-        if read(schedule,{}).get('next_ns',0)>time.time_ns():return
+        previous=read(schedule,{})
+        if previous.get('mode')=='immediate-v1' and previous.get('next_ns',0)>time.time_ns():return
         try:
             self.cleanup(apply=True)
-            durable_json(schedule,{'next_ns':time.time_ns()+cleanup.DAY})
+            durable_json(schedule,{'mode':'immediate-v1','next_ns':time.time_ns()+cleanup.INTERVAL})
         except ValueError:pass
 
     def snapshot(self):

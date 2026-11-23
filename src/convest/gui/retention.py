@@ -43,7 +43,7 @@ def check_tree(root, tree, partial=False):
             raise ValueError('Release file contents changed; retained')
 
 
-def release_one(spec, db, row, destination_name, remote_verified=False):
+def release_one(spec, db, row, destination_name):
     cfg = spec['training']; task = spec['task']; tid = row['id']
     state = Path(cfg['state_root']) / 'retention' / (tid + '.json')
     old = read(state) if state.exists() else {}
@@ -86,16 +86,16 @@ def release_one(spec, db, row, destination_name, remote_verified=False):
             files = [{**f, 'path': f['path'][len(variant)+1:]} for f in p['files'] if f['path'].startswith(variant + '/')]
             dest = Path(task[variant + '_root']) / p['group'] / destination_name(p, variant)
             if receipt['variants'][variant]['destination'] != str(dest): raise ValueError('Training destination changed')
-            if not remote_verified:verify_backup(spec['training_server'], dest, files, digest([cfg['fingerprint'], tid, variant]))
+            verify_backup(spec['training_server'], dest, files, digest([cfg['fingerprint'], tid, variant]))
             audit = Path(cfg['state_root']) / 'pair-reports' / tid
             pair_dest = Path(task[variant + '_root']) / p['group'] / '.workflow-pairs' / p['name']
             if receipt['pair_reports'][variant]['destination'] != str(pair_dest): raise ValueError('Pair proof destination changed')
-            if not remote_verified:verify_backup(spec['training_server'], pair_dest, manifest(audit), digest([cfg['fingerprint'], tid, 'pair-report']))
+            verify_backup(spec['training_server'], pair_dest, manifest(audit), digest([cfg['fingerprint'], tid, 'pair-report']))
         dest = Path(task['lerobot_root']) / p['group'] / source_spec['name']
         upstream_receipt = read(Path(cfg['capture']['state_root']) / 'receipts' / (upstream['id'] + '.json'))
         if upstream_receipt.get('status') != 'completed' or upstream_receipt.get('destination') != str(dest):
             raise ValueError('Missing durable 202 receipt; retained')
-        if not remote_verified:verify_backup(spec['data_server'], dest, proof['files'], digest([cfg['capture']['fingerprint'], upstream['id']]))
+        verify_backup(spec['data_server'], dest, proof['files'], digest([cfg['capture']['fingerprint'], upstream['id']]))
         if not old.get('trees'):
             require_same(source, payload['dataset_snapshot'])
             verify_tree(source, proof['files'])

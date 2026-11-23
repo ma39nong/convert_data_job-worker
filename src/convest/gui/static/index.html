@@ -28,7 +28,7 @@
               <span class="step">01</span>
               <h2>本机读取</h2>
             </div>
-            <span class="tag">原包 A/B/C/D · 转换 A/B</span>
+            <span class="tag">自动识别 A / B</span>
           </div>
           <div id="task-list" class="task-list"></div>
           <div class="task-editor">
@@ -74,7 +74,8 @@
               </div></label
             >
             <p class="hint">
-              选择场景目录：A/B 备份并转换，C/D 仅上传原文件，不做内容/质量校验。也可单独选择 A/B。
+              选择场景目录（内含 A / B），或单独选择 A /
+              B。启动后持续读取完整且稳定的 episode 录制。
             </p>
             <details class="destination-preview" open>
               <summary aria-label="本地读取目录预览">
@@ -130,7 +131,7 @@
                 </div></label
               >
               <p class="hint">
-                按 A/B/C/D 保存原包。C/D 不清洗、不转换；确认上传完整后按开关释放本机原包。A/B 先确保转换安全入批。
+                按 A / B 保存。备份与校验完成后，再按设置释放本机原包。
               </p>
               <details class="destination-preview" open>
                 <summary aria-label="原始 ROSbag目录预览">
@@ -155,12 +156,8 @@
                 </div></label
               >
               <p class="hint">
-                本机清洗、转换并校验，A+B 合计达到设置条数后封包上传，也可点击“立即上传”。
+                本机清洗、转换并校验，A+B 合计满 100 条有效录制后封包上传。
               </p>
-              <label>累计上传条数（A+B 合计）
-                <input id="batch_group_size" data-task="batch_group_size" type="number" min="1" max="1000000" step="1" />
-              </label>
-              <p class="hint">默认 100 条。修改后保存设置，再开始任务。</p>
               <details class="destination-preview" open>
                 <summary aria-label="完整 LeRobot目录预览">
                   完整目录<span class="preview-arrow" aria-hidden="true"
@@ -261,7 +258,14 @@
                 </summary>
                 <div id="train-preview" class="preview-content"></div>
               </details>
-              <p class="hint">封包、202备份和训练两版交付确认后，按下方自动清理设置立即释放本机大文件。</p>
+              <label
+                class="checkbox release-option"
+                title="默认关闭。等待202完整备份、normal/speedup两版上传及配对校验全部通过后，释放本机完整批次的数据与视频；保留元数据、凭据和两版成品。"
+                ><input
+                  type="checkbox"
+                  data-task="delete_lerobot"
+                />两版上传校验后释放本机完整 LeRobot</label
+              >
             </div>
           </div>
           <details class="server-settings oss-transit" id="oss-transit">
@@ -305,7 +309,6 @@
                 <span class="control-symbol" aria-hidden="true">■</span>
                 停止当前任务
               </button>
-              <button id="upload-now">立即上传</button>
               <button id="start-one" class="primary">
                 <span class="control-symbol" aria-hidden="true">▶</span>
                 开始当前任务
@@ -334,7 +337,6 @@
           </div>
           <div class="actions">
             <span id="run-state" class="pill">尚未开始</span
-            ><button id="retry-uploads" title="上传失败会自动重试；点击可取消等待，正在上传的内容继续完成">重试上传</button
             ><button id="retry-one">重试失败项</button>
           </div>
         </div>
@@ -390,18 +392,8 @@
         </details>
         <p class="hint" id="last-updated"></p>
       </section>
-      <details class="logs" id="cleanup-panel">
-        <summary>本机空间清理（包含历史任务）</summary>
-        <p class="hint">A/B：封包、202备份与训练两版交付确认后，立即释放本机完整 LeRobot、normal/speedup 大文件及已完成的转换中间文件。C/D：原包备份到202后即可释放对应旧转换残留，不要求训练两版。保留队列、元数据和凭据；原包删除仍由202区域的开关控制。</p>
-        <label class="checkbox"><input type="checkbox" id="cleanup-enabled" />交付完成后自动释放本机大文件（不等待天数）</label>
-        <button id="cleanup-save">保存清理策略</button>
-        <button id="cleanup-preview">预览可清理批次</button>
-        <button id="cleanup-apply">按已保存策略清理</button>
-        <p class="hint">预览不删除文件；执行时逐批核验。运行任务由上传角色在交付后检查，历史停止版本每分钟巡检。缺凭据、上传失败、文件冲突或仍在使用的数据保留并显示原因；历史版本使用各自原来的服务器和路径。</p>
-        <pre id="cleanup-result">尚未检查</pre>
-      </details>
       <footer>
-        本机处理 · A+B 按设定条数封包 · 全文件 SHA256 校验 · 断点续传
+        本机处理 · A+B 合计 100 条一批 · 全文件 SHA256 校验 · 断点续传
         <span>所有测试和运行记录保存在工程 outputs/gui 下</span>
       </footer>
     </main>

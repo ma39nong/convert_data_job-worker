@@ -1,7 +1,5 @@
 """Persistent UI task control and read-only queue/telemetry snapshots."""
 import copy
-from contextlib import contextmanager
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -65,14 +63,8 @@ class Manager:
                 raise ValueError('请先停止工作流并等待当前作业收尾，再保存配置')
             durable_json(self.root/'settings.json',cfg);self.settings=cfg
         return cfg
-    @contextmanager
-    def cleanup_start_lock(self):
-        with (self.root/'cleanup.lock').open('a') as lock:
-            try:fcntl.flock(lock,fcntl.LOCK_SH|fcntl.LOCK_NB)
-            except BlockingIOError:raise ValueError('本机历史清理正在运行，请等待完成后开始工作流')
-            yield
     def start(self,tid=None):
-        with self.lock, self.cleanup_start_lock():
+        with self.lock:
             selected=[self.task(tid)] if tid else [t for t in self.settings['tasks'] if t['enabled']]
             if tid and not selected[0]['enabled']:raise ValueError('请先启用此任务并保存设置')
             if not selected:raise ValueError('没有启用的任务')
@@ -105,44 +97,6 @@ class Manager:
                 if root and self.state(t['id'])['state'] in ('starting','running','stopping'):
                     durable_json(root/'stop-request.json',{'requested_ns':time.time_ns()})
         return self.snapshot()
-    def upload_now(self,tid):
-        from convest.capture import group_batches
-        with self.lock:
-            self.task(tid)
-            if self.state(tid)['state']!='running':
-                raise ValueError('请先开始当前任务，运行中才能立即上传')
-            root=self.current(tid)
-            spec=read(root/'spec.json',{})
-            try:
-                if not group_batches.flush(spec['capture']):
-                    raise ValueError('当前没有可封包的有效录制，请等待清洗、转换完成')
-            except BlockingIOError:
-                raise ValueError('正在提交或封存批次，请稍后再点击立即上传') from None
-        return self.snapshot()
-
-    def retry_uploads(self,tid):
-        """Make queued upload retries due without touching active transfers or processing."""
-        with self.lock:
-            self.task(tid)
-            state=self.state(tid)['state']
-            if state in ('starting','stopping'):
-                raise ValueError('任务正在启动或收尾，请稍后重试上传')
-            root=self.current(tid)
-            counts={'data':0,'training':0,'raw':0}
-            if root:
-                for key,file,sql in [
-                    ('raw',root/'raw-archive/state/queue.sqlite3',
-                     "UPDATE jobs SET next_ns=0 WHERE state='retry'"),
-                    ('data',root/'capture/state/queue.sqlite3',
-                     "UPDATE uploads SET next_ns=0 WHERE state='retry'"),
-                    ('training',root/'training/state/queue.sqlite3',
-                     "UPDATE tasks SET next_ns=0 WHERE state='upload_retry'")]:
-                    if file.exists():
-                        # Never create a missing queue; the worker owns initialization.
-                        with sqlite3.connect(file.as_uri()+'?mode=rw',uri=True,timeout=2) as db:
-                            counts[key]=db.execute(sql).rowcount
-            return {'task':tid,'state':state,'counts':counts}
-
     def retry(self,tid):
         with self.lock:
             self.task(tid)
@@ -154,57 +108,11 @@ class Manager:
                     "UPDATE jobs SET state='retry',attempts=0,next_ns=0 WHERE state IN ('failed','retry')",
                     "UPDATE uploads SET next_ns=0 WHERE state='retry'"]),
                 (root/'training/state/queue.sqlite3',[
-                    "UPDATE tasks SET next_ns=0 WHERE state IN ('retry','upload_retry','waiting_space')"]),
-                (root/'raw-archive/state/queue.sqlite3',[
-                    "UPDATE jobs SET next_ns=0 WHERE state IN ('retry','uploaded','deleting')"])]:
+                    "UPDATE tasks SET next_ns=0 WHERE state IN ('retry','upload_retry','waiting_space')"])]:
                 if file.exists():
                     with sqlite3.connect(file) as db:
                         for sql in queries:db.execute(sql)
-        return self.snapshot()
-
-    def cleanup(self, apply=False):
-        """Dispatch heavy remote hashing off the HTTP request/UI thread."""
-        import fcntl
-        from . import cleanup
-        with self.lock:
-            lock=(self.root/'cleanup.lock').open('a')
-            try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-            except BlockingIOError:
-                lock.close();raise ValueError('本机清理检查已在运行')
-            report=self.root/'cleanup-report.json'
-            durable_json(report,{'status':'running','apply':apply,'runs':[]})
-            def run():
-                def progress(runs):
-                    durable_json(report,{'status':'running','apply':apply,'runs':runs})
-                try:
-                    runs=cleanup.scan(self.root,apply,progress)
-                    durable_json(report,{'status':'completed','apply':apply,
-                                         'runs':runs,'completed_ns':time.time_ns()})
-                except Exception as exc:
-                    durable_json(report,{'status':'error','error':str(exc),'apply':apply})
-                finally: lock.close()
-            threading.Thread(target=run,daemon=True).start()
-        return {'status':'running'}
-
-    def cleanup_policy(self, value):
-        from . import cleanup
-        cfg=cleanup.validate(value)
-        with self.lock: durable_json(self.root/'cleanup-policy.json',cfg)
-        return cfg
-
-    def cleanup_tick(self):
-        from . import cleanup
-        cfg=cleanup.policy(self.root)
-        if not cfg['enabled']:return
-        schedule=self.root/'cleanup-schedule.json'
-        # Manual previews must not reset the retry timer. A stale 'running'
-        # report is recoverable because cleanup() checks the actual OS lock.
-        previous=read(schedule,{})
-        if previous.get('mode')=='immediate-v1' and previous.get('next_ns',0)>time.time_ns():return
-        try:
-            self.cleanup(apply=True)
-            durable_json(schedule,{'mode':'immediate-v1','next_ns':time.time_ns()+cleanup.INTERVAL})
-        except ValueError:pass
+            return self.snapshot()
 
     def snapshot(self):
         with self.lock:
@@ -212,7 +120,7 @@ class Manager:
             settings=copy.deepcopy(self.settings)
         result=[]
         for task in settings['tasks']:
-            item={'id':task['id'],**self.state(task['id']), 'batch_policy':{'mode':'combined-count','size':task.get('batch_group_size',100)}}
+            item={'id':task['id'],**self.state(task['id']), 'batch_policy':{'mode':'combined-count','size':100}}
             root=self.current(task['id'])
             if root:
                 capture=root/'capture/state';train=root/'training/state'
@@ -225,13 +133,7 @@ class Manager:
                             discovery=read(train/'discovery.json',{}),videos=read(train/'video_progress.json',{}),
                             raw_upload=read(capture/'upload_progress_raw.json',{}),batch_upload=read(capture/'upload_progress_batch.json',{}),
                             normal_upload=read(train/'upload_progress_normal.json',{}),speedup_upload=read(train/'upload_progress_speedup.json',{}))
-                archive=root/'raw-archive/state'
-                item['raw_archives']=rows(archive/'queue.sqlite3','SELECT route,episode,state,error FROM jobs ORDER BY route,episode')
-                archive_progress=read(archive/'upload_progress.json',{})
-                if archive_progress.get('updated_ns',0)>item['raw_upload'].get('updated_ns',0):
-                    item['raw_upload']={**archive_progress,'archive':True}
                 spec=read(root/'spec.json',{})
-                item['batch_policy']['size']=spec.get('capture',{}).get('batch_group_size',task.get('batch_group_size',100))
                 routes=spec.get('capture',{}).get('routes',[])
                 catalogue={}
                 for route in routes:
@@ -239,8 +141,6 @@ class Manager:
                         catalogue[(route['id'],batch['id'])]=batch
                 for batch in item['batches']:
                     source=catalogue.get((batch['route'],batch['batch_id']),{})
-                    if batch['state']=='active' and source.get('state')=='sealed':
-                        batch.update(state='sealed',name=source['name'])
                     for key in ('group_id','group_size','group_total','group_ready'):
                         if key in source:batch[key]=source[key]
                 item['capture_status']=read(capture/'status.json',{})
@@ -252,11 +152,8 @@ class Manager:
                 item['versions']=versions
             result.append(item)
         disk=__import__('shutil').disk_usage(self.root)
-        from . import cleanup
         return {'settings':settings,'tasks':result,'updated_ns':time.time_ns(),
-                'cleanup':{'policy':cleanup.policy(self.root),'report':read(self.root/'cleanup-report.json',{}),
-                           'active_reports':[{'run':str(p.parent),**read(p,{})} for p in (self.root/'runs').glob('task-*/*/cleanup-auto.json')]},
-                'disk':{'free':disk.free,'total':disk.total},'batch_policy':{'mode':'combined-count'}}
+                'disk':{'free':disk.free,'total':disk.total},'batch_policy':{'mode':'combined-count','size':100}}
     def logs(self,tid):
         self.task(tid);root=self.current(tid)
         if not root:return '尚未开始工作流。保存设置后点击“开始工作流”。'

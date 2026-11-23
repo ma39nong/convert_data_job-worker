@@ -17,17 +17,8 @@ STATIC=Path(__file__).parent/'static'
 class Server(ThreadingHTTPServer):
     daemon_threads=True
     def __init__(self,address):
-        self.cleanup_stopped=threading.Event()
         self.manager=Manager();self.token=secrets.token_urlsafe(32)
         super().__init__(address,Handler)
-        def tick():
-            while not self.cleanup_stopped.wait(60):
-                try:self.manager.cleanup_tick()
-                except Exception:pass  # failed scans retain their persistent report
-        threading.Thread(target=tick,daemon=True).start()
-    def server_close(self):
-        self.cleanup_stopped.set()
-        super().server_close()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -68,12 +59,7 @@ class Handler(BaseHTTPRequestHandler):
             if route=='/api/save':return self.send({'settings':m.save(body)})
             if route=='/api/start':return self.send(m.start(body.get('task')))
             if route=='/api/stop':return self.send(m.stop(body.get('task')))
-            if route=='/api/upload-now':return self.send(m.upload_now(body['task']))
-            if route=='/api/retry-uploads':return self.send(m.retry_uploads(body['task']))
             if route=='/api/retry':return self.send(m.retry(body['task']))
-            if route=='/api/cleanup-policy':return self.send(m.cleanup_policy(body))
-            if route=='/api/cleanup-preview':return self.send(m.cleanup(apply=False))
-            if route=='/api/cleanup-apply':return self.send(m.cleanup(apply=True))
             if route=='/api/new-task':
                 task=new_task(body.get('index',1))
                 for group in ('A','B'):(Path(task['source'])/group).mkdir(parents=True,exist_ok=True)

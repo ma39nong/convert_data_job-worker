@@ -1,0 +1,27 @@
+分析完整的同步多视角双臂机器人摘番茄视频。只报告真实“成功释放入左侧方形果盘”的事件，不直接生成单颗周期，不预设颗数或均分时间。
+
+画面是同一源帧的多视角拼图，各格标记V（视角序号）、F（原始源帧号）和T（原视频秒数）；V按文末camera_order从0编号。左右手以机器人自身为准。右手持串，左手摘果并投放到左盘；右手在中间调整持串，不换手，不中途放回。粗阶段由人工给定，只分析第2和第4粗阶段，绝不能修改粗边界。
+
+按完整视频先核对真实投放次数，再逐次找证据：
+1. last_held_frame：投放附近，最后一个明确仍由左手持有该颗番茄的已显示源帧。
+2. first_released_frame：之后第一个能明确看见该颗番茄已落入/被放入左侧果盘，并且左手已不再持有它的已显示源帧。必须先完成释放，才可以切分下一颗。
+3. 必须同时确认fruit_in_tray和left_hand_empty，并给出实际支持判断的相机名和简短画面描述。主视角看不清时结合左腕与interaction等局部视角，不能靠动作预期猜测。
+取首次有把握已释放的帧，可以保守稍晚；还握着果、正抓取、运送中、刚到盘上方、尚未松手时，绝对不能当成下一颗的分界。不能用关节起动、手指变化、手臂抬起或下一次靠近替代释放证据。
+
+同一颗的抓空、重抓、调整抓姿、空手往返、暂时松动后再抓，均不增加成功投放次数。同一投放只能报告一次。该轮只成功放下一颗就只报一个事件，即使这一轮较长，也绝不能凑两个。某颗离开左手但掉在盘外不算成功入盘。
+逐轮核对整个范围是否所有投放都可确认，不能漏掉前面或最后一颗。若遮挡、仍持果、看不出落点、无法区分重复尝试等使次数或释放不确定，coverage_complete=false，在uncertainties说明对应源帧范围和原因；不要用虚构成功补齐。完全没看到成功投放时events可为空，不猜测。
+
+只引用视频实际印出的源帧号，不输出未显示的原始帧。每个事件last_held_frame < first_released_frame，按时间排序；不同事件的持果证据不得早于上一颗确认释放。事件证据须位于对应粗阶段内（末帧可以等于粗终点）。同一次投放可使用不同视角相互佐证，但不同相机同时看到同一颗不算多个事件。
+
+只返回一个JSON，不需要长篇推理：
+{
+ "sequence_supported": true,
+ "rounds": [
+  {"coarse_phase_index":2,"coverage_complete":true,"events":[
+   {"last_held_frame":0,"first_released_frame":0,"left_hand_empty":true,"fruit_in_tray":true,"evidence_views":["observation.images.cam0"],"observation":"实际持果与放下证据"}
+  ],"uncertainties":[]},
+  {"coarse_phase_index":4,"coverage_complete":true,"events":[],"uncertainties":[]}
+ ],
+ "review_notes":[]
+}
+示例零值和空事件仅说明格式，必须替换为实际观察。uncertainties每项使用start_frame、end_frame、reason。所有结果都还要人工审核，不能因希望返回成功结果而编造空手、投放或颗数。

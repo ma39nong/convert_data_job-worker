@@ -16,6 +16,11 @@ from convest.training.adatempo.lerobot_io import data_path, video_path, values
 # Fine labels determine coarse labels, so the two tracks cannot disagree.
 LABELS = {
     'unknown': ('待确认', '待确认'),
+    'pickup': ('拿起番茄', '右手拿起番茄'),
+    'harvest_wait': ('摘取番茄', '采摘后等待（不计颗数）'),
+    'harvest': ('摘取番茄', '左手成功摘取一颗番茄并放入左侧果盘'),
+    'adjust': ('调整番茄', '右手调整番茄串'),
+    'return': ('放回番茄', '右手放回番茄串'),
     'grasp_truss': ('拿起番茄', '右手抓稳整串番茄'),
     'lift_truss': ('拿起番茄', '右手提起番茄串并移至中间位置'),
     'grasp_fruit': ('摘取番茄', '左手接近并抓紧一颗番茄，右手稳定托持番茄串'),

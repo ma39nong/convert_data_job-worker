@@ -5,6 +5,8 @@ They are the review workspace's explicit, versioned user results.
 """
 import hashlib
 import json
+import os
+import tempfile
 from pathlib import Path
 import threading
 import time
@@ -12,7 +14,7 @@ import time
 from .core import atomic_json, validate_segments
 
 COARSE_LABELS={'unknown':'待标注','pickup':'右手拿起番茄','harvest':'左手采摘番茄','adjust':'右手调整番茄','return':'右手放回番茄'}
-COARSE_FROM_FINE={'grasp_truss':'pickup','lift_truss':'pickup','grasp_fruit':'harvest','pick_and_place':'harvest',
+COARSE_FROM_FINE={'harvest_wait':'harvest','pickup':'pickup','harvest':'harvest','adjust':'adjust','return':'return','grasp_truss':'pickup','lift_truss':'pickup','grasp_fruit':'harvest','pick_and_place':'harvest',
     'return_truss':'return','return_stem':'return','rotate_stem':'adjust'}
 
 
@@ -56,6 +58,90 @@ class Workspace:
         self.organizing_ids=set()
         from .organization import recover
         recover(self)
+        from .fine_cycles import migrate_release_proposals
+        migrate_release_proposals(self)
+        self.archive_obsolete_fine_proposals()
+
+    def archive_obsolete_fine_proposals(self):
+        """Retire obsolete unsaved proposals, retaining their exact bytes in history."""
+        from .fine_cycles import POLICY
+        archived=[]
+        with self.lock,self.store.lock:
+            for path in (self.root/'fine-proposals').glob('*.json'):
+                id_=path.stem
+                if id_ not in self.store.entries or self.stage_path(id_,'fine').exists():continue
+                doc=json.loads(path.read_text())
+                if doc.get('provenance',{}).get('policy')==POLICY:continue
+                annotation=self.store.path(id_)
+                if annotation.exists() and json.loads(annotation.read_text()).get('status')=='reviewed':continue
+                raw=path.read_bytes();digest=hashlib.sha256(raw).hexdigest()
+                target=self.root/'fine-proposal-history'/id_/('retired-'+digest+'.json')
+                target.parent.mkdir(parents=True,exist_ok=True)
+                if target.exists():
+                    if target.read_bytes()!=raw:raise ValueError('旧细草稿归档校验失败，保留当前稿')
+                else:
+                    fd,temporary=tempfile.mkstemp(prefix='.retired-',dir=target.parent)
+                    try:
+                        with os.fdopen(fd,'wb') as stream:
+                            stream.write(raw);stream.flush();os.fsync(stream.fileno())
+                        os.replace(temporary,target)
+                        directory_fd=os.open(target.parent,os.O_RDONLY|os.O_DIRECTORY)
+                        try:os.fsync(directory_fd)
+                        finally:os.close(directory_fd)
+                    finally:
+                        Path(temporary).unlink(missing_ok=True)
+                if target.read_bytes()!=raw:raise ValueError('旧细草稿归档校验失败，保留当前稿')
+                record={'source':doc['source'],'base_annotation_revision':doc['base_annotation_revision'],
+                    'archived_path':str(target),'sha256':digest,'old_policy':doc.get('provenance',{}).get('policy'),
+                    'new_policy':POLICY,'at':time.time()}
+                atomic_json(self.root/'fine-retired'/(id_+'.json'),record)
+                if path.read_bytes()!=raw:raise ValueError('归档期间细草稿变化，保留当前稿')
+                path.unlink();archived.append(id_)
+        return archived
+
+    def discard_qwen_fine(self,id_,proposal_key):
+        """Archive exactly the selected unsaved Qwen draft; coarse/saved layers stay intact."""
+        from .quarantine import assert_included
+        from .processing_queue import active
+        with self.lock,self.store.lock:
+            assert_included(self,id_)
+            batch=active(self)
+            if (self.queue.get(id_,{}).get('state')=='running' or
+                batch and batch['state'] in {'queued','running'} and id_ in batch['order']):
+                raise ValueError('当前条仍在处理队列中，请结束后再清除')
+            ep=self.store.episode(id_);fine=self.stages(ep)['fine']
+            if self.store.entries[id_]['variant']!='normal':raise ValueError('只清除 normal 的 Qwen 细草稿')
+            if fine.get('saved_at') or self.stage_path(id_,'fine').exists():
+                raise ValueError('细阶段已人工保存，不能作为 Qwen 草稿清除')
+            path=self.root/'fine-proposals'/(id_+'.json')
+            if not path.exists():raise ValueError('当前条没有可清除的 Qwen 细草稿')
+            raw=path.read_bytes();digest=hashlib.sha256(raw).hexdigest();doc=json.loads(raw)
+            if not isinstance(proposal_key,str) or proposal_key!=digest:
+                raise ValueError('细草稿已变化，请重新载入后再清除')
+            if doc.get('provenance',{}).get('provider')!='qwen':raise ValueError('当前不是 Qwen 细草稿')
+            if doc['source']!=ep.identity():raise ValueError('来源已变化，未清除')
+            target=self.root/'fine-proposal-history'/id_/('user-cleared-'+digest+'.json')
+            target.parent.mkdir(parents=True,exist_ok=True)
+            if not target.exists():
+                fd,tmp=tempfile.mkstemp(prefix='.cleared-',dir=target.parent)
+                try:
+                    with os.fdopen(fd,'wb') as stream:
+                        stream.write(raw);stream.flush();os.fsync(stream.fileno())
+                    os.replace(tmp,target)
+                    directory_fd=os.open(target.parent,os.O_RDONLY|os.O_DIRECTORY)
+                    try:os.fsync(directory_fd)
+                    finally:os.close(directory_fd)
+                finally:Path(tmp).unlink(missing_ok=True)
+            if target.read_bytes()!=raw or path.read_bytes()!=raw:raise ValueError('归档校验失败，保留当前稿')
+            atomic_json(self.root/'fine-retired'/(id_+'.json'),{
+                'source':doc['source'],'base_annotation_revision':doc['base_annotation_revision'],
+                'archived_path':str(target),'sha256':digest,'reason':'user_cleared_qwen_fine',
+                'old_policy':doc.get('provenance',{}).get('policy'),'at':time.time()})
+            path.unlink()
+            directory_fd=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
+            try:os.fsync(directory_fd)
+            finally:os.close(directory_fd)
+            return {'id':id_,'archived_path':str(target),'sha256':digest,'network_requests':0}
 
     def _checkpoint(self):atomic_json(self.queue_path,self.queue)
 
@@ -87,6 +173,43 @@ class Workspace:
                         value={**value,'segments':proposal['segments'],'processing_mode':'coarse','processing_provider':proposal.get('provenance',{}).get('provider','doubao'),'model_analysis':proposal.get('provenance',{}).get('model_analysis'),'processing_warning':proposal['warning'],'boundary_audit':proposal.get('provenance',{}).get('boundary_audit'),'unresolved_boundaries':proposal.get('provenance',{}).get('unresolved_boundaries',[])}
                         if proposal.get('provenance',{}).get('method') in {'doubao_coarse_overview_v1','doubao_coarse_source_frames_v2'}:
                             value['processing_warning']='旧版粗处理草稿已停用，保留作对照；等待完整分析重做，请勿将它视为新结果。'
+            if stage=='fine' and not path.exists():
+                proposal_path=self.root/'fine-proposals'/(ep.id+'.json')
+                if proposal_path.exists():
+                    proposal=json.loads(proposal_path.read_text())
+                    if proposal['source']==doc['source'] and proposal['base_annotation_revision']==doc['revision']:
+                        from .fine_cycles import binding_matches
+                        value={**value,'fine_boundary_policy':proposal.get('provenance',{}).get('policy'),'proposal_key':hashlib.sha256(proposal_path.read_bytes()).hexdigest(),**{k:proposal[k] for k in ('segments','fine_profile','coarse_binding')},
+                            'processing_provider':'qwen','model_analysis':proposal['provenance']['model_analysis'],
+                            'processing_warning':proposal['warning'],'fine_model_motion_evidence':proposal['provenance'].get('fine_local_evidence')}
+                        value['coarse_binding_stale']=not binding_matches(out['coarse'],value['coarse_binding'])
+            if stage=='fine' and not value.get('saved_at') and not path.exists() and not (self.root/'fine-proposals'/(ep.id+'.json')).exists():
+                retired=self.root/'fine-retired'/(ep.id+'.json')
+                if retired.exists():
+                    value['segments']=validate_segments([{'start_frame':0,'end_frame':ep.length,'label':'unknown','reviewed':False}],ep.length,ep.fps)
+                    value['needs_fine_generation']=True
+                    value['proposal_key']='retired:'+hashlib.sha256(retired.read_bytes()).hexdigest()
+                    value['processing_warning']='细草稿已归档，等待按粗阶段范围与内部投放分界重新生成。请点“单颗细标注当前条”或本包“开始单颗细标注”。'
+            if stage=='fine' and value.get('fine_profile') and not value.get('saved_at'):
+                from .fine_cycles import POLICY
+                proposal_path=self.root/'fine-proposals'/(ep.id+'.json')
+                value['fine_policy_current']=proposal_path.exists() and json.loads(proposal_path.read_text()).get('provenance',{}).get('policy')==POLICY
+                if not value['fine_policy_current']:value['processing_warning']='旧规则细草稿：尚未采用粗阶段前后范围＋内部投放分界。可用 Qwen 重新生成；原草稿保留历史。'
+            if stage=='fine' and value.get('fine_profile') and not value.get('projection'):
+                from .fine_cycles import binding_matches
+                value['coarse_binding_stale']=not binding_matches(out['coarse'],value.get('coarse_binding',{}))
+            if stage=='fine' and value.get('fine_profile') and value.get('model_analysis'):
+                from .fine_cycles import audit_notes
+                value['fine_review_notes']=audit_notes(value['model_analysis'],out['coarse'])
+                value.pop('fine_local_evidence',None)
+                from .fine_local import fingerprint
+                from .fine_cycles import binding
+                evidence_path=self.root/'fine-local-evidence'/(ep.id+'.json')
+                if evidence_path.exists():
+                    evidence=json.loads(evidence_path.read_text())
+                    if evidence.get('source')==value['source'] and evidence.get('fine_sha256')==fingerprint(value) and evidence.get('coarse_binding')==binding(out['coarse']):
+                        value['fine_local_evidence']=evidence
+                        value['fine_review_notes'].extend(evidence['notes'])
             out[stage]=value
         return out
 
@@ -100,9 +223,19 @@ class Workspace:
             if type(body.get('revision')) is not int or body['revision']!=current['revision']:raise ValueError('这一阶段已在其他窗口更新，请重新载入')
             if body.get('source')!=doc['source']:raise ValueError('标注来源不一致')
             if body.get('base_annotation_revision')!=current['base_annotation_revision']:raise ValueError('草稿已更新，请重新载入后保存')
+            if stage=='fine':
+                if body.get('proposal_key')!=current.get('proposal_key'):
+                    raise ValueError('细草稿已更新或归档，此窗口仍是旧内容；请保留未保存修改并在新页面载入当前草稿')
+                if current.get('needs_fine_generation') and projection is None:
+                    raise ValueError('旧细草稿已归档，请先按粗阶段范围与内部投放分界重新生成细标注')
             note=body.get('note','')
             if not isinstance(note,str) or len(note)>10000:raise ValueError('备注最长10000字')
             if stage=='fine':
+                from .fine_cycles import validate_layer
+                candidate={**current,'segments':body.get('segments')}
+                if projection is not None:
+                    candidate.update(projection=projection,fine_profile=body.get('fine_profile'),fine_boundary_policy=body.get('fine_boundary_policy'))
+                validate_layer(self,ep,candidate)
                 from .actions import ACTION_LABELS
                 rows=validate_segments(body.get('segments'),ep.length,ep.fps)
                 if any(s['label'] not in ACTION_LABELS for s in rows):raise ValueError('仅保存主要细动作')
@@ -111,7 +244,16 @@ class Workspace:
                 if any(r['label']=='unknown' for r in rows):raise ValueError('请先选择所有分段的标签，再审核通过并保存')
                 rows=[{**r,'reviewed':True} for r in rows]
             saved={**current,'revision':current['revision']+1,'segments':rows,'note':note,'saved_at':time.time(),'inherited':False}
-            if projection is not None:saved['projection']=projection
+            if stage=='fine':
+                saved.pop('needs_fine_generation',None)
+                saved.pop('fine_policy_current',None)
+                saved.pop('fine_local_evidence',None)
+                saved.pop('fine_review_notes',None)
+            if projection is not None:
+                saved['projection']=projection
+                if stage=='fine' and body.get('fine_profile'):
+                    saved['fine_profile']=body['fine_profile']
+                    if body.get('fine_boundary_policy'):saved['fine_boundary_policy']=body['fine_boundary_policy']
             if stage=='fine':
                 for key in ('review_events','training_review','outcome'):
                     if key in doc:saved[key]=doc[key]
@@ -148,6 +290,8 @@ class Workspace:
             exclusions=read(self)['entries']
             from .organization import registry
             organized=registry(self)
+            from .processing_queue import active
+            last_batch=active(self) or {}
             groups={};episodes=[]
             for entry in self.store.entries.values():
                 if entry['id'] in organized['retired']:continue
@@ -167,10 +311,22 @@ class Workspace:
                 proposal_path=self.root/'coarse-proposals'/(entry['id']+'.json')
                 proposal=json.loads(proposal_path.read_text()) if proposal_path.exists() else None
                 rough_ready=bool(proposal and proposal.get('provenance',{}).get('method') not in {'doubao_coarse_overview_v1','doubao_coarse_source_frames_v2'} and ((doc and proposal['source']==doc['source'] and proposal['base_annotation_revision']==doc['revision']) or (not doc and proposal['base_annotation_revision']==0 and proposal['source']['dataset']==entry['dataset'] and proposal['source']['episode_index']==entry['episode_index'])))
-                fine_ready=ready or bool(explicit_fine and all(s['label']!='unknown' for s in explicit_fine['segments']))
+                fine_proposal_path=self.root/'fine-proposals'/(entry['id']+'.json')
+                fine_proposal=json.loads(fine_proposal_path.read_text()) if fine_proposal_path.exists() else None
+                fine_proposal_ready=False
+                if fine_proposal and ((doc and fine_proposal['source']==doc['source'] and fine_proposal['base_annotation_revision']==doc['revision']) or (not doc and fine_proposal['base_annotation_revision']==0 and fine_proposal['source']['dataset']==entry['dataset'] and fine_proposal['source']['episode_index']==entry['episode_index'])):
+                    from .fine_cycles import binding_matches,POLICY
+                    coarse_path=self.stage_path(entry['id'],'coarse')
+                    fine_proposal_ready=fine_proposal.get('provenance',{}).get('policy')==POLICY and coarse_path.exists() and binding_matches(json.loads(coarse_path.read_text()),fine_proposal['coarse_binding'])
+                fine_retired=(self.root/'fine-retired'/(entry['id']+'.json')).exists() and not fine_proposal
+                fine_ready=fine_proposal_ready or (ready and not fine_retired) or bool(explicit_fine and all(s['label']!='unknown' for s in explicit_fine['segments']))
                 coarse_ready=ready or saved['coarse'] or rough_ready
                 q=self.queue.get(entry['id'],{})
-                mode=q.get('mode') or ('fine' if fine_ready else 'coarse' if coarse_ready else 'fine')
+                mode=q.get('mode')
+                previous=last_batch.get('results',{}).get(entry['id'],{})
+                if not mode and previous and previous.get('state')==q.get('state') and previous.get('error')==q.get('error'):
+                    mode=last_batch.get('mode')
+                mode=mode or ('fine' if fine_ready else 'coarse' if coarse_ready else 'fine')
                 legacy_wait=q.get('error')=='请先处理同源normal，再处理speedup'
                 states={};dependencies={}
                 for stage,available in (('coarse',coarse_ready),('fine',fine_ready or saved['fine'])):
@@ -281,6 +437,9 @@ class Workspace:
                 source=sources[stage];target=targets[stage]
                 if not source['saved_at']:raise ValueError('请先保存normal的'+stage+'阶段')
                 if target['saved_at'] and not replace:raise ValueError('speedup这一层已有保存结果，未覆盖；如需更新请勾选替换并保留历史')
+                if stage=='fine':
+                    from .fine_cycles import validate_layer
+                    validate_layer(self,normal,source)
                 rows=source['segments']
                 if stage=='coarse':rows=[{**r,'label':coarse_labels[r['label']]} for r in rows]
                 annotation={**self.store.load(normal),'segments':rows,'revision':source['revision'],'status':'reviewed' if all(r['reviewed'] for r in rows) else 'draft'}
@@ -291,6 +450,10 @@ class Workspace:
                 projection={k:v for k,v in mapped.items() if k not in {'segments','source'}}
                 projection.update(normal_id=normal_id,normal_stage=stage,normal_stage_revision=source['revision'],normal_stage_inherited=source.get('inherited',False))
                 proposals.append((stage,{**target,'segments':rows},projection))
+            for stage,doc,_ in proposals:
+                if stage=='fine' and sources[stage].get('fine_profile'):
+                    doc['fine_profile']=sources[stage]['fine_profile']
+                    if sources[stage].get('fine_boundary_policy'):doc['fine_boundary_policy']=sources[stage]['fine_boundary_policy']
             saved={stage:self.save_stage(speedup,stage,doc,projection=projection) for stage,doc,projection in proposals}
             return {'normal_id':normal_id,'speedup_id':speedup_id,'stages':saved,'warning':'按实际来源帧同步，已审核阶段同时保留审核状态；请分别导出到服务器。'}
 
@@ -343,6 +506,7 @@ class Workspace:
                 if not path.exists():continue
                 if path==self.stage_path(key,'coarse') and entry['variant']!='normal':continue
                 proposal=json.loads(path.read_text());rows=proposal.get('segments',[])
+                if proposal.get('fine_profile'):continue  # legacy fine model uses its original action schema
                 if not rows or not all(s.get('reviewed') for s in rows):continue
                 if path==self.store.path(key) and proposal.get('status')!='reviewed':continue
                 chosen=(path,proposal,rows);break
@@ -436,7 +600,6 @@ class Workspace:
         from .doubao import Client
         from .style import transition_examples
         if provider not in {'doubao','qwen'}:raise ValueError('未知标注模型')
-        if provider=='qwen' and mode!='coarse':raise ValueError('Qwen 当前仅支持粗阶段，请选择豆包处理细阶段')
         if provider=='doubao' and not server.doubao_key:raise ValueError('豆包连接不可用，请检查启动凭据')
         results=[]
         ids=sorted(ids,key=lambda id_:self.store.entries[id_]['variant']=='speedup')
@@ -455,6 +618,12 @@ class Workspace:
                     with self.lock:
                         self.queue[id_]={'state':'ready','mode':'coarse'};self._checkpoint()
                     results.append({'id':id_,'state':status,'mode':'coarse'});continue
+                if provider=='qwen':
+                    from .fine_cycles import process
+                    status=process(self,ep,current,retry_namespace=retry_namespace,allow_network=not qwen_local_only)
+                    with self.lock:
+                        self.queue[id_]={'state':'ready','mode':'fine'};self._checkpoint()
+                    results.append({'id':id_,'state':status,'mode':'fine'});continue
                 with self.lock,self.store.lock:
                     if self.stage_path(id_,'fine').exists() or current['status']=='reviewed':
                         self.queue[id_]={'state':'ready'};self._checkpoint()
@@ -483,8 +652,8 @@ class Workspace:
                     self.store.save(ep,{**current,'segments':result['segments'],'review_events':events},origin=result['method'],provenance={k:v for k,v in result.items() if k!='segments'})
                     self.queue[id_]={'state':'ready'};self._checkpoint()
             except WaitingForNormal as exc:
-                with self.lock:self.queue[id_]={'state':'waiting_normal','error':str(exc)};self._checkpoint()
+                with self.lock:self.queue[id_]={'state':'waiting_normal','mode':mode,'error':str(exc)};self._checkpoint()
             except Exception as exc:
-                with self.lock:self.queue[id_]={'state':'failed','error':str(exc)};self._checkpoint()
+                with self.lock:self.queue[id_]={'state':'failed','mode':mode,'error':str(exc)};self._checkpoint()
             results.append({'id':id_,**self.queue[id_]})
         return {'episodes':results}

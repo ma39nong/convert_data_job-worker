@@ -275,6 +275,14 @@ def install(ws,state):
                         'base_annotation_revision':legacy['revision'],'segments':rough['segments'],
                         'warning':rough.get('processing_warning','粗阶段概览草稿，需人工复核'),
                         'created_at':time.time(),'reorganization':state['operation']})
+                fine=snap['stages']['fine']
+                if fine.get('fine_profile') and not fine['saved_at']:
+                    proposal=ws.root/'fine-proposals'/(old+'.json')
+                    if proposal.exists():
+                        value=json.loads(proposal.read_text())
+                        atomic_json(ws.root/'fine-proposals'/(new+'.json'),{**value,'source':identity,
+                            'base_annotation_revision':legacy['revision'],'segments':fine['segments'],
+                            'reorganization':state['operation']})
                 for stage,doc in snap['stages'].items():
                     if not doc['saved_at']:continue
                     updated=copy.deepcopy(doc);updated['source']=identity
@@ -292,7 +300,7 @@ def install(ws,state):
                     atomic_json(ws.root/'deliveries'/new/(stage+'.json'),record)
                 reg['retired'][old]=new
                 reg['entries'][new]={'directory_override':pack['review_directory'],'archived':pack['archived'],'original_episode_index':reg['entries'].get(old,{}).get('original_episode_index',row['source_episode_index']),'operation':state['operation']}
-                fine_ready=bool(snap['stages']['fine']['saved_at'] or all(r['label']!='unknown' for r in legacy['segments']))
+                fine_ready=bool((ws.root/'fine-proposals'/(new+'.json')).exists() or snap['stages']['fine']['saved_at'] or all(r['label']!='unknown' for r in legacy['segments']))
                 proposal=ws.root/'coarse-proposals'/(new+'.json')
                 proposal_ready=proposal.exists() and json.loads(proposal.read_text()).get('provenance',{}).get('method') not in {'doubao_coarse_overview_v1','doubao_coarse_source_frames_v2'}
                 coarse_ready=bool(rough['saved_at'] or proposal_ready)

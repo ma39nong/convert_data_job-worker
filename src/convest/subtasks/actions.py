@@ -2,6 +2,8 @@
 from .core import segment, validate_segments
 
 ACTION_LABELS = ('unknown','grasp_truss','lift_truss','grasp_fruit','pick_and_place','return_truss','rotate_stem','return_stem')
+CYCLE_LABELS = ('unknown','pickup','harvest','adjust','return')
+ACTION_LABELS += CYCLE_LABELS[1:]+('harvest_wait',)
 REMOVED = {'fruit_drop','harvest_retry','harvest_uncertain','stop','idle','retry'}
 
 

@@ -193,6 +193,9 @@ def publish(ws,ep,stage,*,target='dataset',root=None,kind='json',revision=None,p
             from .quarantine import assert_included
             assert_included(ws,ep.id)
         doc=ws.stages(ep)[stage]
+        if stage=='fine':
+            from .fine_cycles import validate_layer
+            validate_layer(ws,ep,doc)
         if not doc['saved_at'] or doc['revision']!=revision:raise ValueError('请先保存当前阶段，并刷新导出版本')
         if doc['source']!=ep.identity():raise ValueError('来源已变化，拒绝导出')
         doc=copy.deepcopy(doc)

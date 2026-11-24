@@ -20,6 +20,12 @@ CATALOG = {'profile': 'tomato-coarse-four-prompts-en-v5',
           'return_stem': 'After all tomatoes have been picked place the remaining stem back on the '
                          'right white plate with the right hand'},
  'numbers': {'unknown': 0, 'pickup': 1, 'harvest': 2, 'return': 4, 'adjust': 3}}
+FINE_CYCLE_PROFILE='tomato-single-fruit-cycles-v1'
+CATALOG['fine'].update(pickup=CATALOG['coarse']['pickup'],
+    harvest_wait='Hold the tomato truss steady with the right hand',
+    harvest='Left hand picks one tomato and places it in the left tray while right hand holds the truss steady',
+    adjust='Right hand adjusts tomato truss position and orientation at the center',
+    **{'return':CATALOG['coarse']['return']})
 DEFAULT_TASK_PROMPT=CATALOG['goal']
 PROMPT_PROFILE=CATALOG['profile']
 STAGE_PROMPTS={k:CATALOG[k] for k in ('coarse','fine')}
@@ -38,12 +44,13 @@ def english_document(document):
     Source identifiers/paths are provenance and must never be translated.
     """
     out={k:copy.deepcopy(v) for k,v in document.items() if k in
-         ('schema_version','stage','revision','source','saved_at','projection','inherited')}
+         ('schema_version','stage','revision','source','saved_at','projection','inherited','fine_boundary_policy')}
     if 'projection' in out:
         out['projection']={k:v for k,v in out['projection'].items() if k not in ('review_events','normal_review_events')}
     out['language']='en'
     from .workflow import in_hand_source,IN_HAND_PROFILE
     out['prompt_profile']=IN_HAND_PROFILE if in_hand_source(document.get('source',{})) else PROMPT_PROFILE
+    if document.get('fine_profile')==FINE_CYCLE_PROFILE:out['prompt_profile']=FINE_CYCLE_PROFILE
     out['task_prompt']=DEFAULT_TASK_PROMPT
     out['segments']=[]
     for i,row in enumerate(document['segments']):

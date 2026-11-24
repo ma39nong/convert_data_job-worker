@@ -36,4 +36,12 @@ assert.equal(c.directoryStats({id:'d'},[{...e,directory_id:'d',superseded:true}]
 console.log('workflow tabs isolate task queues and hide superseded media duplicates');
 
 for(const name of ['providerName','providerReady'])vm.runInContext(source.split('\n').find(l=>l.startsWith('function '+name+'(')),c);
-c.state.processProvider='qwen';c.state.qwenReady=true;c.state.workflow='without_return';c.state.processMode='coarse';assert(c.providerReady());c.state.processMode='fine';assert(!c.providerReady());c.state.processMode='coarse';c.state.workflow='with_return';assert(!c.providerReady());
+c.state.processProvider='qwen';c.state.qwenReady=true;c.state.workflow='without_return';c.state.processMode='coarse';assert(c.providerReady());c.state.processMode='fine';assert(c.providerReady());c.state.processMode='coarse';c.state.workflow='with_return';assert(!c.providerReady());
+
+const fineUI={state:{mode:'fine',selected:{fine:0},labels:{unknown:{text:'待确认'},pickup:{text:'右手拿起番茄'},harvest:{text:'单颗采摘投放'},adjust:{text:'调整番茄串'},return:{text:'放回番茄串'},grasp_fruit:{text:'旧抓握'}},coarseLabels:{},stages:{coarse:{source:{dataset:'/full-block-more/subtask-roi/A/pkg'}},fine:{segments:[{label:'harvest'},{label:'harvest'}]}}},copy:v=>JSON.parse(JSON.stringify(v))};
+vm.createContext(fineUI);vm.runInContext(source.slice(source.indexOf('const vocabulary='),source.indexOf('function stageColor(')),fineUI);
+assert.deepEqual(Array.from(fineUI.fineLabelKeys()),['unknown','pickup','harvest','adjust','return']);
+assert.equal(fineUI.englishLabel('harvest','fine',0),fineUI.englishLabel('harvest','fine',1));
+assert(fineUI.englishLabel('harvest','fine',0).includes('one tomato'));
+fineUI.state.stages.fine.segments.push({label:'grasp_fruit'});assert(fineUI.fineLabelKeys().includes('grasp_fruit'));
+console.log('single-fruit labels: four actions, unchanged per-fruit prompt, legacy labels only when present');

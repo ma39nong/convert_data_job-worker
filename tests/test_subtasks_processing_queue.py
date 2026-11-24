@@ -156,3 +156,39 @@ def test_invalid_worker_selection_does_not_create_batch(tmp_path,workers):
         with pytest.raises(ValueError,match='同时处理数量'):queue.create(ws,ids,'coarse',workers=workers)
         assert queue.active(ws) is None
     finally:ws.store.lockfile.close()
+
+
+def test_continuous_retry_unique_requests_until_success_skips_successes(tmp_path,monkeypatch):
+    ws,ids=workspace(tmp_path);calls=[];counts={}
+    monkeypatch.setattr(queue.time,'sleep',lambda *a:None)
+    clock=[0]
+    monkeypatch.setattr(queue.time,'monotonic',lambda:(clock.__setitem__(0,clock[0]+100) or clock[0]))
+    def process(selected,server,**kw):
+        id_=selected[0];counts[id_]=counts.get(id_,0)+1;calls.append((id_,kw['retry_namespace']))
+        return {'episodes':[{'id':id_,'state':'ready' if id_!=ids[0] or counts[id_]>=4 else 'failed','error':'bad format'}]}
+    monkeypatch.setattr(ws,'process',process)
+    try:
+        batch=queue.create(ws,ids,'fine',retry_policy='until_success')
+        result=queue.run(ws,None,batch['id'])
+        assert result['state']=='completed' and counts[ids[0]]==4
+        assert counts[ids[1]]==counts[ids[2]]==1
+        namespaces=[ns for i,ns in calls if i==ids[0] and ns]
+        assert len(namespaces)==len(set(namespaces))==3
+        assert queue.active(ws)['retry_round']==3
+    finally:ws.store.lockfile.close()
+
+
+def test_continuous_retry_can_stop_and_does_not_repeat_credential_failures(tmp_path,monkeypatch):
+    ws,ids=workspace(tmp_path);calls=[]
+    def stop(selected,server,**kw):
+        calls.append(selected[0]);queue.request_stop(ws,queue.active(ws)['id'])
+        return {'episodes':[{'id':selected[0],'state':'failed','error':'bad format'}]}
+    monkeypatch.setattr(ws,'process',stop)
+    try:
+        batch=queue.create(ws,ids,'fine',retry_policy='until_success');r=queue.run(ws,None,batch['id'])
+        assert r['state']=='stopped' and len(calls)==1
+        calls.clear()
+        monkeypatch.setattr(ws,'process',lambda selected,server,**kw:(calls.append(1) or {'episodes':[{'id':selected[0],'state':'failed','error':'Qwen HTTP 401'}]}))
+        batch=queue.create(ws,[ids[0]],'fine',retry_policy='until_success');r=queue.run(ws,None,batch['id'])
+        assert r['state']=='needs_attention' and len(calls)==2
+    finally:ws.store.lockfile.close()

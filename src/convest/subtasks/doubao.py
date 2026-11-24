@@ -61,7 +61,7 @@ def reference_style(store):
     return refs
 
 
-def make_montage(episode, path, start, end, sample_fps=5, panel_size=480):
+def make_montage(episode, path, start, end, sample_fps=5, panel_size=480, frame_labels=False):
     """One shared source-frame index per composite, no independently timed cameras.
 
     Grid: cam0 top-left, cam1 top-right, cam2 bottom-left; optional interaction ROI bottom-right.
@@ -103,6 +103,9 @@ def make_montage(episode, path, start, end, sample_fps=5, panel_size=480):
                     rgb = found.reformat(width=width, height=height, format='rgb24').to_ndarray()
                     x, y = (n%2)*pw+(pw-width)//2, (n//2)*ph+(ph-height)//2
                     canvas[y:y+height,x:x+width] = rgb
+                if frame_labels:
+                    from .source_frame_label import stamp
+                    stamp(canvas,len(cameras),pw,ph,idx,episode.fps)
                 for packet in stream.encode(av.VideoFrame.from_ndarray(canvas,format='rgb24')): output.mux(packet)
             for packet in stream.encode(None): output.mux(packet)
         temporary.replace(path)

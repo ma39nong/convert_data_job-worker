@@ -121,14 +121,35 @@ def annotate(ep,output,*,retry_namespace=None,allow_network=True):
     if not in_hand_episode(ep):raise ValueError('Qwen 当前仅支持无放回摘一串的粗阶段')
     identity=ep.identity();video=ep.cameras.get('observation.images.cam0')
     if video is None:raise ValueError('Qwen 需要原始主视频 cam0')
-    ep.validate_media(Path(output),identity)
-    if video.stat().st_size>45*1024*1024:raise ValueError('Qwen 原始主视频超过45MiB本机请求限制')
     prompt=Path(__file__).with_name('qwen_prompt.txt').read_text().replace('{duration_seconds}',format(ep.length/ep.fps,'.12g'))
     if retry_namespace is not None:
         prompt+='\n本次为失败项纠错：严格只输出一个符合上方结构的JSON对象，首字符为{，末字符为}。不要输出分析文字、描述列表或代码围栏。五段必须都有phase_index和label，四处边界复用同一数值。视频总时长不是动作边界估计，最后end_seconds直接使用给定时长。无法确认流程请输出sequence_supported=false并说明，不能虚构动作。'
-    request_id={'provider':'qwen','model':MODEL,'endpoint':ENDPOINT,'policy':POLICY,'source':identity,
+    raw,path,digest,cached,elapsed,identity=video_response(ep,output,prompt,POLICY,retry_namespace=retry_namespace,allow_network=allow_network)
+    doc,normalizations=decode_response(raw['choices'][0]['message'].get('content',''),ep)
+    rows=parse(doc,ep)
+    if ep.identity()!=identity:raise ValueError('Qwen 分析期间来源变化，未生成标注')
+    if not cached:atomic_json(path,raw)
+    return {'method':'qwen_main_event_boundaries_single_pass_v3','provider':'qwen','model':MODEL,'policy':POLICY,
+            'coarse_segments':rows,'warning':'Qwen 原始主视频单次粗阶段草稿，尚未经逐帧复核；请人工检查边界及投放计数。',
+            'boundary_audit':{'scope':'single_pass_main_video','all_boundaries_checked':False},
+            'unresolved_boundaries':[i for i,h in enumerate(doc['handoffs']) if h['needs_review']],
+            'model_analysis':doc,'local_normalizations':normalizations,'source':identity,'elapsed_seconds':elapsed,'cached':cached,
+            'requests':[{'key':digest,'cached':cached,'usage':raw.get('usage',{})}],
+            'network_requests':int(not cached)}
+
+def video_response(ep,output,prompt,policy,*,retry_namespace=None,allow_network=True,media_path=None,media_manifest=None):
+    """One paid request per source/prompt identity; retain raw output before parsing."""
+    identity=ep.identity();video=Path(media_path) if media_path is not None else ep.cameras.get('observation.images.cam0')
+    if video is None:raise ValueError('Qwen 需要原始主视频 cam0')
+    ep.validate_media(Path(output),identity)
+    if video.stat().st_size>45*1024*1024:raise ValueError('Qwen 原始主视频超过45MiB本机请求限制')
+    request_id={'provider':'qwen','model':MODEL,'endpoint':ENDPOINT,'policy':policy,'source':identity,
                 'video_sha256':sha(video),'prompt':prompt,'enable_thinking':False,'max_tokens':6000,
                 'sampling_fps_parameter':None,'retry_namespace':retry_namespace}
+    if media_path is not None:
+        if not isinstance(media_manifest,dict) or media_manifest.get('sha256')!=request_id['video_sha256']:
+            raise ValueError('多视角输入清单与视频不一致，未调用API')
+        request_id['input_media']=media_manifest
     digest=hashlib.sha256(json.dumps(request_id,sort_keys=True).encode()).hexdigest()
     root=Path(output)/'qwen';path=root/'responses'/(digest+'.json')
     raw_path=root/'raw'/(digest+'.json')
@@ -154,14 +175,4 @@ def annotate(ep,output,*,retry_namespace=None,allow_network=True):
         elapsed=time.monotonic()-start
         atomic_json(root/'raw'/(digest+'.json'),raw)
     if not raw.get('choices') or raw['choices'][0].get('finish_reason')!='stop':raise ValueError('Qwen 输出未完成，未生成标注')
-    doc,normalizations=decode_response(raw['choices'][0]['message'].get('content',''),ep)
-    rows=parse(doc,ep)
-    if ep.identity()!=identity:raise ValueError('Qwen 分析期间来源变化，未生成标注')
-    if not cached:atomic_json(path,raw)
-    return {'method':'qwen_main_event_boundaries_single_pass_v3','provider':'qwen','model':MODEL,'policy':POLICY,
-            'coarse_segments':rows,'warning':'Qwen 原始主视频单次粗阶段草稿，尚未经逐帧复核；请人工检查边界及投放计数。',
-            'boundary_audit':{'scope':'single_pass_main_video','all_boundaries_checked':False},
-            'unresolved_boundaries':[i for i,h in enumerate(doc['handoffs']) if h['needs_review']],
-            'model_analysis':doc,'local_normalizations':normalizations,'source':identity,'elapsed_seconds':elapsed,'cached':cached,
-            'requests':[{'key':digest,'cached':cached,'usage':raw.get('usage',{})}],
-            'network_requests':int(not cached)}
+    return raw,path,digest,cached,elapsed,identity

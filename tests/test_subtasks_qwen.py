@@ -71,7 +71,9 @@ def test_qwen_coarse_has_no_doubao_calls_and_preserves_saved_results(tmp_path,mo
         before=ws.stage_path(ep.id,'coarse').read_bytes()
         assert ws.process([ep.id],server,mode='coarse',provider='qwen')['episodes'][0]['state']=='preserved'
         assert calls==[ep.id] and ws.stage_path(ep.id,'coarse').read_bytes()==before
-        with pytest.raises(ValueError,match='粗阶段'):ws.process([ep.id],server,provider='qwen',mode='fine')
+        from convest.subtasks import fine_cycles
+        monkeypatch.setattr(fine_cycles,'process',lambda *a,**kw:'ready')
+        assert ws.process([ep.id],server,provider='qwen',mode='fine')['episodes'][0]['state']=='ready'
     finally:store.lockfile.close()
 
 def test_qwen_batch_retries_failures_once_and_completed_resume_does_not_recall(tmp_path,monkeypatch):
@@ -170,3 +172,28 @@ def test_conflicting_count_uses_valid_delivery_times_without_changing_cuts(tmp_p
     fixed,_=qwen.decode_response(malformed,ep)
     assert fixed['harvest_summary']['second_harvest']['successful_count']==4
     assert fixed['segments']==doc['segments']
+
+
+def test_multiview_input_has_own_cache_and_one_call(tmp_path,monkeypatch):
+    from convest.subtasks.core import sha
+    import base64
+    ep=dataset(tmp_path/'full-block-more'/'normal');key=tmp_path/'key';key.write_text('test-key')
+    monkeypatch.setattr(qwen,'KEY_PATH',key);monkeypatch.setattr(ep,'validate_media',lambda *a:None)
+    calls=[]
+    class Response:
+        def __enter__(self):return self
+        def __exit__(self,*a):pass
+        def read(self,*a):return json.dumps({'choices':[{'finish_reason':'stop','message':{'content':'{}'}}]}).encode()
+    class Opener:
+        def open(self,req,**kw):calls.append(json.loads(req.data));return Response()
+    monkeypatch.setattr(qwen.urllib.request,'build_opener',lambda *a:Opener())
+    media=tmp_path/'four.mp4';media.write_bytes(b'synchronized test media')
+    manifest={'sha256':sha(media),'source_frame_indices':[0,3,6],'camera_order':['cam0','cam1','cam2','interaction']}
+    a=qwen.video_response(ep,tmp_path/'out','release events','new',media_path=media,media_manifest=manifest)
+    b=qwen.video_response(ep,tmp_path/'out','release events','new',media_path=media,media_manifest=manifest)
+    assert len(calls)==1 and b[3] and not a[3]
+    assert base64.b64encode(media.read_bytes()).decode() in calls[0]['messages'][0]['content'][0]['video_url']['url']
+    records=list((tmp_path/'out'/'qwen'/'requests').glob('*.json'));doc=json.loads(records[0].read_text())
+    assert doc['input_media']==manifest and 'test-key' not in records[0].read_text()
+    with pytest.raises(ValueError,match='清单'):qwen.video_response(ep,tmp_path/'out','release events','new',media_path=media,media_manifest={})
+    assert len(calls)==1

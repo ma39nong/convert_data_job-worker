@@ -359,7 +359,7 @@ def test_review_ui_has_doubao_qwen_and_no_jev_web_configuration(pair,tmp_path,mo
         html=urllib.request.urlopen(base).read().decode()
         assert 'subtask阶段标注' in html and '审核通过并保存导出粗阶段' in html and '审核通过并保存导出细阶段' in html
         assert 'value="doubao"' in html and 'value="qwen"' in html and 'processProvider' in html
-        assert bootstrap['qwen']['modes']==['coarse'] and bootstrap['qwen']['workflows']==['without_return']
+        assert bootstrap['qwen']['modes']==['coarse','fine'] and bootstrap['qwen']['workflows']==['without_return']
         assert 'localCalibrateCurrent' in html and 'localCalibrateRemaining' in html
         assert 'JEV' not in html and '配置视觉模型' not in html and 'href="/quality"' not in html
         for path in ['/models','/models.js','/api/models/status']:

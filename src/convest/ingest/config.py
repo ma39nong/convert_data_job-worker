@@ -1,5 +1,6 @@
 """Validate all paths without creating them or touching a remote server."""
 from pathlib import Path
+from convest.recordings import EPISODE
 import yaml
 from convest.config import queue_identity, WORKSPACE,load_config,digest
 from convest.registry import get_target
@@ -13,7 +14,7 @@ def history_policy(value):
         raise ValueError('Explicit initial_history required: mode none, include or all')
     if set(value)-{'mode','episodes'}:raise ValueError('Unknown initial_history field')
     names=value.get('episodes',[])
-    if not isinstance(names,list) or any(not isinstance(n,str) or not re.fullmatch(r'episode[0-9]+',n) for n in names):
+    if not isinstance(names,list) or any(not isinstance(n,str) or not EPISODE.fullmatch(n) for n in names):
         raise ValueError('initial_history episodes must be exact episode directory names')
     if value['mode']!='include' and names:raise ValueError('episodes only allowed with initial_history mode include')
     return {'mode':value['mode'],'episodes':sorted(set(names))}

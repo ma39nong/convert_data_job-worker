@@ -20,7 +20,11 @@ def publisher(cfg,route):
 
 def payload_for(cfg,route,bag,proof,generation):
     batch=next(b for b in publisher(cfg,route).status() if bag.name in b.get('sources',[]))
-    return {'kind':'raw','route':route['id'],'robot':route['robot'],'group':route['group'],
+    extra={}
+    if proof.get('readiness',{}).get('input_format')=='mcap':
+        from convest.gui.mcap_assets import archive_assets
+        extra={'input_format':'mcap','mcap_assets':archive_assets(bag)}
+    return {**extra,'kind':'raw','route':route['id'],'robot':route['robot'],'group':route['group'],
             'episode':bag.name,'identity':proof['content_identity'],'recording_id':proof['recording_id'],
             'source':str(bag),'source_snapshot':proof['snapshot'],'raw_files':proof['files'],
             'quality_verified':True,'batch_id':batch['id'],'batch_name':batch['name'],'dataset':str(generation)}
@@ -143,6 +147,7 @@ def upload_once(cfg,queue):
         check_mount(cfg)
         update(state='uploading',attempts=row['attempts']+1,error=None)
         if kind=='raw':
+            if payload.get('mcap_assets'):raise ValueError('MCAP共享资产归档请使用GUI上传角色；原包保留')
             destination=Path(cfg['remote_raw_root'])/payload['robot']/payload['group']/payload['episode']
             receipt=Path(cfg['remote_raw_root'])/'.capture-transfer'/cfg['fingerprint']/(row['id']+'.json')
             if not row['raw_done']:

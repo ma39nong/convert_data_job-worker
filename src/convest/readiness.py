@@ -47,5 +47,8 @@ class ValidatedInput:
         return deepcopy(self.readiness), deepcopy(self.profile)
 
     def assert_unchanged(self):
+        if self.readiness.get('external_assets'):
+            from .mcap_input import check_assets
+            check_assets(self.readiness['external_assets'])
         if file_snapshot(self.root) != self.files:
             raise ValueError('Validated '+('source' if self.kind=='source' else 'working copy')+' changed')

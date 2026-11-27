@@ -39,6 +39,9 @@ def require_same(root,expected):
 
 def check_input(bag,route,expected,progress=None):
     bag=Path(bag);require_same(bag,expected)
+    if route.get('input_format'):
+        from convest.mcap_input import require_format
+        require_format(bag,route['input_format'])
     cfg=route['conversion'];contract=yaml.safe_load(Path(cfg['contract']).read_text());profile={}
     context=validation_context(cfg)
     ready=check_ready(bag,contract,cfg['schema_dir'],profile,progress)
@@ -50,7 +53,8 @@ def check_input(bag,route,expected,progress=None):
     files=[{'path':r['path'],'size':r['size'],'sha256':known.get(r['path']) or checksum(bag/r['path'])}
            for r in expected if not r['directory']]
     require_same(bag,expected)
-    identity=digest({'robot':route['robot'],'group':route['group'],'episode':bag.name,'files':files})
+    identity=digest({'robot':route['robot'],'group':route['group'],'episode':bag.name,'files':files,
+                     **({'mcap_assets':[{'relative':a['relative'],'files':a['files']} for a in ready.get('external_assets',[])]} if ready.get('input_format')=='mcap' else {})})
     return {'content_identity':identity,'recording_id':item['source_recording_id'],'input':str(bag),'snapshot':expected,'files':files,
             'validation_context':context,
             'readiness':ready,'input_profile':profile,'readiness_basis':'configured input directory discovery; observed stability and structural validation; no uploader protocol dependency'}
@@ -98,6 +102,9 @@ def stage_input(bag,target,proof,progress=None):
 def verify_input_content(bag,proof,progress=None):
     """Final full content check; do not repeat SQLite or stream decoding."""
     require_same(bag,proof['snapshot'])
+    if proof.get('readiness',{}).get('external_assets'):
+        from convest.mcap_input import check_assets
+        check_assets(proof['readiness']['external_assets'])
     for item in proof['files']:
         if checksum(Path(bag)/item['path'],progress)!=item['sha256']:
             raise InputChanged('Original content changed before publication')

@@ -13,3 +13,5 @@ pytest==9.1.1
 PyYAML==6.0.3
 rosbags==0.11.8
 ruamel.yaml==0.19.1
+mcap==1.6.0
+zstandard==0.25.0

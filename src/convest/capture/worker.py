@@ -7,7 +7,8 @@ import shutil
 import time
 from convest.config import atomic_json, digest
 from convest.jobs import run, complete_source_verification
-from convest.ingest.worker import own_directory, EPISODE
+from convest.ingest.worker import own_directory
+from convest.recordings import EPISODE,number
 from convest.ingest.queue import Queue
 from convest.ingest.inputs import snapshot, check_input, direct_input, monitor_input, verify_input_content, InputChanged
 from .transfer import enqueue, init_uploads, manifest
@@ -146,7 +147,7 @@ def scan(cfg, queue, now_ns=None, should_stop=lambda:False):
         if not source.is_dir() or source.is_symlink():
             errors[route['id']]='Input directory missing or symlink'
             continue
-        bags=sorted((p for p in source.iterdir() if EPISODE.fullmatch(p.name) and p.is_dir() and not p.is_symlink()),key=lambda p:int(p.name[7:]))
+        bags=sorted((p for p in source.iterdir() if EPISODE.fullmatch(p.name) and p.is_dir() and not p.is_symlink()),key=lambda p:number(p.name))
         skipped=queue.initialize_history(route['id'],[p.name for p in bags],route['history'],now)
         for bag in bags:
             if bag.name in skipped:
@@ -182,7 +183,7 @@ def scan(cfg, queue, now_ns=None, should_stop=lambda:False):
             stable=obs['stable_count']>=cfg['stable_scans'] and now-obs['stable_since_ns']>=cfg['stable_seconds']*10**9
             if not stable:
                 continue
-            candidates.append((old['updated_ns'],route['id'],int(bag.name[7:]),route,bag,snap))
+            candidates.append((old['updated_ns'],route['id'],number(bag.name),route,bag,snap))
     processed=0
     for *_,route,bag,snap in sorted(candidates,key=lambda x:x[:3]):
         if should_stop() or processed>=cfg['max_jobs_per_scan']:

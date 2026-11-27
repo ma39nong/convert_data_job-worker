@@ -35,7 +35,7 @@ def default_upload_paths(task):
     project, robot, scene = task['project'], task['robot'], task['scene']
     base = f'/data/data-demo/real/{project}/data'
     train = f'/mnt/data/train_platform/datasets/{project}_{robot}'
-    return {'raw_root': f'{base}/rosbag/{robot}/{scene}',
+    return {'raw_root': f'{base}/{task.get("input_format","rosbag")}/{robot}/{scene}',
             'lerobot_root': f'{base}/lerobot/{robot}/{scene}',
             'normal_root': f'{train}/normal/{scene}',
             'speedup_root': f'{train}/speedup/{scene}'}
@@ -44,9 +44,9 @@ def default_upload_paths(task):
 def new_task(index=1):
     tid = 'task-' + uuid.uuid4().hex[:12]
     return {'id': tid, 'name': f'任务 {index}', 'robot': 'sharpa',
-            'project': 'tomato', 'scene': 'full-block-more', 'enabled': True,
+            'input_format': 'mcap', 'project': 'tomato', 'scene': 'full-block-more', 'enabled': True,
             'source': str(ROOT / 'demo-input' / tid),
-            'raw_root': '/data/data-demo/real/tomato/data/rosbag/sharpa/full-block-more',
+            'raw_root': '/data/data-demo/real/tomato/data/mcap/sharpa/full-block-more',
             'lerobot_root': '/data/data-demo/real/tomato/data/lerobot/sharpa/full-block-more',
             'normal_root': '/mnt/data/train_platform/datasets/tomato_sharpa/normal/full-block-more',
             'speedup_root': '/mnt/data/train_platform/datasets/tomato_sharpa/speedup/full-block-more',
@@ -81,6 +81,8 @@ def validate(settings):
         ids.add(t['id'])
         t['name'] = component(t.get('name')); t['project'] = component(t.get('project')); t['scene'] = component(t.get('scene'))
         if t.get('robot') not in ('sharpa', 'wuji'): raise ValueError('当前仅支持 Sharpa 和 Wuji')
+        t.setdefault('input_format','rosbag')  # Historical tasks keep their queues and targets.
+        if t['input_format'] not in ('rosbag','mcap'):raise ValueError('原包格式须为ROSbag或MCAP')
         generated = default_upload_paths(t)
         # Older custom destinations remain manual; never silently redirect old data.
         t.setdefault('auto_upload_paths', all(t.get(k) == v for k, v in generated.items()))
@@ -128,6 +130,7 @@ def runtime(settings, task):
             if not Path(task[variant + '_root']).is_relative_to(delivery['final_root']):
                 raise ValueError('OSS 中转模式下训练目录须位于 ' + delivery['final_root'])
     semantic = {k: v for k, v in task.items() if k not in ('name', 'enabled', 'auto_upload_paths', 'delete_lerobot', 'batch_group_size')}
+    if semantic.get('input_format')=='rosbag':semantic.pop('input_format')  # Preserve old version identities.
     version = digest({'task': semantic, 'data_server': settings['data_server'], 'training_server': settings['training_server'],
                       'protocol': 'gui-workflow-v1'})[:20]
     root = ROOT / 'runs' / task['id'] / version
@@ -147,9 +150,12 @@ def runtime(settings, task):
            'routes': routes,
            'route_targets': {f'{task["robot"]}-{g}': {'raw': str(Path(task['raw_root'])/g),
                            'dataset': str(Path(task['lerobot_root'])/g)} for g in groups}}
+    if task.get('input_format','rosbag')=='mcap':cfg['input_format']='mcap'
     file = root/'capture.yaml'
     if not file.exists(): file.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
     capture = load_capture(file)
+    # Selection is runtime admission metadata for old ROSbag queues.
+    for route in capture['routes']:route['input_format']=task.get('input_format','rosbag')
     # Naming is prospective metadata, not a new input/transfer queue. Existing
     # catalogued batches keep their own format; only newly opened batches opt in.
     # Prospective boundary upgrade: retain queue/store identities and existing sealed batches.

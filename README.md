@@ -14,6 +14,8 @@
 
 ## 工作站 GUI：首次配置与日常使用
 
+新任务默认选择 **MCAP**，左侧可切换 ROSbag（SQLite3）；202 原包自动路径分别使用 `data/mcap` 或 `data/rosbag`。历史任务保持原格式和队列。MCAP 输入适配仍生成现有 30Hz LeRobot，normal/speedup 不变；新版原生采样发布规范留待下一阶段。话题映射、共享资产和首批验收边界见 [MCAP 输入说明](docs/mcap-input.md)。
+
 工作站界面入口是“工作站清洗与上传控制台”，代码位于 `src/convest/gui/`，开发分支为 `auto-convert-transfer-ui`。GUI 统一管理本机读取、数据服务器备份、A+B 合计 100 条完整 LeRobot 批次和训练服务器 normal/speedup 上传。它使用独立于旧命令行服务的任务配置和运行目录；完整操作说明见 [GUI 使用说明](docs/gui.md)。
 
 ### 启动界面

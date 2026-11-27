@@ -4,6 +4,7 @@ Only persisted capture batch membership and owned job/output paths are accepted.
 Legacy C/D runs must hold all worker locks; their unused training tasks are retired.
 """
 import json
+from convest.recordings import EPISODE
 from pathlib import Path
 import re
 import sqlite3
@@ -39,7 +40,7 @@ def members(spec, src):
             p=json.loads(row['payload'])
             if (p['route'],p['group'],p['batch_id'],p['source'])!=(src['route'],src['group'],src['batch_id'],str(Path(route['source'])/row['episode'])):
                 raise ValueError('原包来源证明不匹配')
-            if not re.fullmatch(r'episode[0-9]+',row['episode']) or not re.fullmatch('[a-f0-9]{64}',p['identity']):
+            if not EPISODE.fullmatch(row['episode']) or not re.fullmatch('[a-f0-9]{64}',p['identity']):
                 raise ValueError('原包作业标识无效')
             result.append(p)
     return route,result
@@ -48,6 +49,9 @@ def members(spec, src):
 def raw_receipt(spec, p, fresh=False):
     """Resolve a legacy raw receipt or a matching new ABCD archival receipt."""
     cap=spec['capture'];dest=str(Path(spec['task']['raw_root'])/p['group']/p['episode'])
+    if p.get('mcap_assets'):
+        from .mcap_assets import deliver
+        deliver(spec,p['source'],dest,p['mcap_assets'],verify_only=True)
     def checked(receipt, identity):
         token=digest({'destination':dest,'identity':identity,'files':p['raw_files']})
         if receipt.get('status')!='completed' or receipt.get('destination')!=dest or receipt.get('token')!=token:
@@ -87,7 +91,7 @@ def raw_receipt(spec, p, fresh=False):
 def work_paths(spec, route, recordings, require_complete=True):
     allowed=set()
     for p in recordings:
-        if (not re.fullmatch('episode[0-9]+',p['episode']) or not re.fullmatch('[a-f0-9]{64}',p['identity'])
+        if (not EPISODE.fullmatch(p['episode']) or not re.fullmatch('[a-f0-9]{64}',p['identity'])
                 or p['route']!=route['id'] or p['source']!=str(Path(route['source'])/p['episode'])):
             raise ValueError('Invalid work source identity')
         root=Path(spec['capture']['work_root'])/route['id']/p['episode']/p['identity']
@@ -171,7 +175,7 @@ def unbatched_cd(spec):
             if row['route'] not in routes or not row['proof']:continue
             proof=json.loads(row['proof']);route=routes[row['route']]
             if proof.get('content_identity')!=row['identity'] or not proof.get('files') or not proof.get('snapshot'):continue
-            if not re.fullmatch('episode[0-9]+',row['episode']) or not re.fullmatch('[a-f0-9]{64}',row['identity'] or ''):continue
+            if not EPISODE.fullmatch(row['episode']) or not re.fullmatch('[a-f0-9]{64}',row['identity'] or ''):continue
             p={'route':route['id'],'robot':route['robot'],'group':route['group'],'episode':row['episode'],
                'source':str(Path(route['source'])/row['episode']),'identity':row['identity'],'raw_files':proof['files']}
             tid=digest(['cd-unbatched',spec['capture']['fingerprint'],p])

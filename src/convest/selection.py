@@ -1,5 +1,6 @@
 """User-maintained episode lists, separate from immutable conversion settings."""
 from collections import defaultdict
+from .recordings import EPISODE,number as recording_number
 from pathlib import Path
 import hashlib
 import re
@@ -13,6 +14,11 @@ def read_episode_list(path):
         content = line.split("#", 1)[0].strip()
         for token in re.split(r"[\s,，]+", content):
             if not token:
+                continue
+            if token.startswith(('ep_','ep-')) or (token.startswith('ep') and not token.startswith('episode')):
+                if not EPISODE.fullmatch(token):raise ValueError(f'Invalid recording name: {token!r}')
+                if token in seen:raise ValueError(f'duplicate {token}')
+                names.append(token);seen[token]=line_number
                 continue
             match = re.fullmatch(r"(?:episode)?([0-9]+)(?:-(?:episode)?([0-9]+))?", token)
             if not match:
@@ -55,7 +61,7 @@ def select_episodes(candidates, list_path, skip_ineligible=False):
         details = "\n".join(f"{s['episode']}: {s['reason']}" for s in skipped)
         raise ValueError("Listed bags failed collection validation:\n" + details
                          + "\nFix the list or wait for eligible capture data; use check-list to inspect the selection. Freshness rules stay unchanged.")
-    selected.sort(key=lambda item: int(Path(item["path"]).name.removeprefix("episode")))
+    selected.sort(key=lambda item: recording_number(Path(item["path"]).name))
     selection.update(selected_episodes=[Path(item["path"]).name for item in selected],
                      skipped=skipped, skip_ineligible=skip_ineligible)
     return selected, selection

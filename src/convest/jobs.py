@@ -32,6 +32,11 @@ def checksum(path, progress=None):
 def check_raw_ready(path,progress=None):
     """Read-only finalized SQLite bag integrity, independent of conversion eligibility."""
     path=Path(path).resolve();before=snapshot(path)
+    from .mcap_input import is_mcap,integrity
+    if is_mcap(path):
+        ready=integrity(path,progress)
+        if snapshot(path)!=before:raise ValueError('MCAP changed during integrity check')
+        return ready
     if any(p.name.endswith(('.partial','.tmp','-wal','-shm')) for p in path.iterdir()):
         raise ValueError('Input has transfer/SQLite temporary files')
     state=json.loads((path/'collection_state.json').read_text())
@@ -68,6 +73,13 @@ def check_ready(path,contract,schema_dir,profile=None,progress=None):
     """Full conversion readiness; raw archival does not require sensor/robot contracts."""
     ready=check_raw_ready(path,progress)
     path=Path(ready['source']);before=ready['snapshot']
+    if ready.get('input_format')=='mcap':
+        from .mcap_input import processing_view,check_assets
+        with processing_view(path,contract,schema_dir) as view:
+            check_ready(view,contract,schema_dir,profile,progress)
+        check_assets(ready['external_assets'])
+        if snapshot(path)!=before:raise ValueError('MCAP changed during readiness check')
+        return ready
     # Decode low-dimensional streams and inspect all required sensor headers before trimming.
     if progress:progress('required_streams')
     with Bag(path,schema_dir) as bag:
@@ -158,9 +170,9 @@ def run(config,run_root,episodes=None,resume=False,workers=1,episode_list=None,*
                 else:
                     transition('trimming')
                     if image_time_basis == 'capture':
-                        report=trim_bag(source/name,target,image_time_basis='capture')
+                        report=trim_bag(source/name,target,image_time_basis='capture',**({'mcap_contract':contract,'mcap_schema_dir':config['schema_dir']} if ready.get('input_format')=='mcap' else {}))
                     else:
-                        report=trim_bag(source/name,target,image_time_basis='receive')
+                        report=trim_bag(source/name,target,image_time_basis='receive',**({'mcap_contract':contract,'mcap_schema_dir':config['schema_dir']} if ready.get('input_format')=='mcap' else {}))
                 transition('trimmed',cleaned=str(target),cleaned_snapshot=snapshot(target),
                            deleted_seconds=report['deleted_seconds'])
                 results.append(job.copy())

@@ -1,5 +1,6 @@
 """Immutable route batches with timed or coordinated source-count boundaries."""
 from contextlib import contextmanager
+from convest.recordings import number as recording_number
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -94,7 +95,7 @@ class BatchPublisher:
                 raise ValueError(f'Batch range name already occupied: {name}')
 
     def _range(self,names,completed_ns=None,name_format=None):
-        numbers=[int(n[7:]) for n in names]
+        numbers=[recording_number(n) for n in names]
         stem=f'{min(numbers)}_{max(numbers)}_data_lerobot'
         if (name_format or self.route.get('batch_name_format')) in ('completion-mmdd-v1','seal-mmdd-v1'):
             stamp=time.time_ns() if completed_ns is None else completed_ns
@@ -107,7 +108,7 @@ class BatchPublisher:
         for batch in catalog['batches']:
             pub=self._publisher(batch);root=pub.current()
             if root is None:continue
-            index=pub.published();names=sorted(index,key=lambda n:(int(n[7:]),n))
+            index=pub.published();names=sorted(index,key=lambda n:(recording_number(n),n))
             if not names:raise ValueError('Empty committed batch')
             for name,record in index.items():
                 if name in published:raise ValueError('Source present in multiple batches')

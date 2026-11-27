@@ -15,7 +15,8 @@ from convest.config import digest
 from convest.ingest.batches import durable_json
 from convest.ingest.inputs import snapshot, require_same
 from convest.ingest.queue import Queue
-from convest.ingest.worker import own_directory, EPISODE
+from convest.ingest.worker import own_directory
+from convest.recordings import EPISODE,number
 from convest.jobs import check_raw_ready
 from convest.capture.retention import check_remaining
 from convest.capture.transfer import ensure_real_path, manifest
@@ -67,6 +68,9 @@ def delete(spec,queue,row,remote_verified=False):
     # Only resumed/deferred deletion needs another full remote read-back.
     if not remote_verified:
         verify_backup(spec['data_server'],proof['destination'],proof['files'],taskid)
+    if proof.get('mcap_assets'):
+        from .mcap_assets import deliver
+        deliver(spec,source,proof['destination'],proof['mcap_assets'],verify_only=True)
     if row['state']!='deleting':
         require_same(source,proof['snapshot'])
         if quarantine.exists():raise ValueError('Unowned quarantine; retained')
@@ -124,7 +128,7 @@ def scan(spec,queue,capture,now_ns=None,should_stop=lambda:False):
         if not saved or not saved['raw_deleted_ns']:continue
         p=json.loads(saved['payload']);old=json.loads(row['proof'] or '{}')
         if old.get('files') is not None and old['files']!=p['raw_files']:continue
-        proof={**old,'source':p['source'],'group':p['group'],'files':p['raw_files'],
+        proof={**old,**({'mcap_assets':p['mcap_assets']} if p.get('mcap_assets') else {}),'source':p['source'],'group':p['group'],'files':p['raw_files'],
                'snapshot':p['source_snapshot'],'deleted_ns':saved['raw_deleted_ns'],'deleted_by':'capture'}
         queue.put(row['route'],row['episode'],digest(p['raw_files']),'deleted',proof=proof,error=None,next_ns=0)
     for group,source in groups(spec).items():
@@ -133,7 +137,7 @@ def scan(spec,queue,capture,now_ns=None,should_stop=lambda:False):
             progress(spec,group,'',phase='retry',error=str(exc));continue
         if not source.is_dir():continue
         rid=robot+'-'+group
-        bags=sorted((p for p in source.iterdir() if EPISODE.fullmatch(p.name) and p.is_dir() and not p.is_symlink()),key=lambda p:int(p.name[7:]))
+        bags=sorted((p for p in source.iterdir() if EPISODE.fullmatch(p.name) and p.is_dir() and not p.is_symlink()),key=lambda p:number(p.name))
         history={'mode':'all' if spec['task'].get('include_existing',True) else 'none','episodes':[]}
         skipped=queue.initialize_history(rid,[p.name for p in bags],history,now)
         for bag in bags:
@@ -147,7 +151,7 @@ def scan(spec,queue,capture,now_ns=None,should_stop=lambda:False):
             obs=queue.observe(rid,bag.name,sig,now,cfg['poll_seconds']*10**9)
             if old['next_ns']>now:continue
             if obs['stable_count']<cfg['stable_scans'] or now-obs['stable_since_ns']<cfg['stable_seconds']*10**9:continue
-            candidates.append((old['updated_ns'],rid,int(bag.name[7:]),group,bag,snap))
+            candidates.append((old['updated_ns'],rid,number(bag.name),group,bag,snap))
     for row in queue.rows():
         if row['state']=='deleted':
             proof=json.loads(row['proof'])
@@ -168,10 +172,13 @@ def scan(spec,queue,capture,now_ns=None,should_stop=lambda:False):
         require_same(bag,snap)
         # C/D are archive-only: no bag decoding, metadata/SQLite/topic counts,
         # required streams, idle detection or conversion-quality checks.
+        from convest.mcap_input import require_format,is_mcap,lifecycle
+        require_format(bag,spec['task'].get('input_format','rosbag'))
+        if is_mcap(bag):lifecycle(bag)  # lifecycle only for C/D, no payload decoding
         ready=check_raw_ready(bag,report) if group in ('A','B') else None
         if group in ('C','D') and (bag/'collection_state.json').exists():
-            lifecycle=json.loads((bag/'collection_state.json').read_text())
-            if lifecycle.get('state')!='finalized' or lifecycle.get('finalized') is not True:
+            state=json.loads((bag/'collection_state.json').read_text())
+            if state.get('state')!='finalized' or state.get('finalized') is not True:
                 raise ValueError('录制尚未结束，等待后直接上传原文件')
         require_same(bag,snap)
         # Include every original file, not only metadata-listed SQLite volumes.
@@ -181,12 +188,20 @@ def scan(spec,queue,capture,now_ns=None,should_stop=lambda:False):
         dest=Path(spec['task']['raw_root'])/group/bag.name
         taskid=digest([settings(spec)['fingerprint'],rid,bag.name,identity])
         if should_stop():return
-        guard=lambda:require_same(bag,snap)
+        shared=[]
+        if is_mcap(bag):
+            from .mcap_assets import deliver
+            shared=deliver(spec,bag,dest)
+        def guard():
+            require_same(bag,snap)
+            if shared:
+                from convest.mcap_input import check_assets
+                check_assets(shared)
         receipt=transfer(spec['data_server'],bag,dest,files,taskid,
                          lambda **kw:progress(spec,group,bag.name,**kw),guard)
         guard()
         proof={'source':str(bag),'group':group,'snapshot':snap,'files':files,
-               'destination':str(dest),'receipt':receipt,'raw_integrity_verified':ready is not None,
+               'mcap_assets':shared,'destination':str(dest),'receipt':receipt,'raw_integrity_verified':ready is not None,
                'content_validation':'raw_integrity' if ready is not None else 'skipped_archive_only',
                'messages':ready['messages'] if ready else None}
         durable_json(Path(settings(spec)['state_root'])/'receipts'/(taskid+'.json'),proof)

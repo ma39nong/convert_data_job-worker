@@ -183,7 +183,21 @@ def inspect_bag(bag: Bag, config=None):
     return report
 
 
-def trim_bag(source, output, config=None, custom_dir=None, progress=lambda **kw: None, *, image_time_basis='capture'):
+def trim_bag(source, output, config=None, custom_dir=None, progress=lambda **kw: None, *, image_time_basis='capture', mcap_contract=None, mcap_schema_dir=None):
+    from convest.mcap_input import is_mcap,processing_view,assets,check_assets
+    if is_mcap(source):
+        if mcap_contract is None or mcap_schema_dir is None:
+            raise ValueError('MCAP清洗需要明确机型转换配置，请从工作流UI启动')
+        shared=assets(source)
+        with processing_view(source,mcap_contract,mcap_schema_dir) as view:
+            report=trim_bag(view,output,config,custom_dir,progress,image_time_basis=image_time_basis)
+        check_assets(shared)
+        import json
+        target=Path(output)/'trim_report.json'
+        saved=json.loads(target.read_text());saved.update(source=str(Path(source).resolve()),input_storage='mcap',processing_view='decoded_sqlite_compatibility_v1')
+        from convest.ingest.batches import durable_json
+        durable_json(target,saved)
+        return saved
     bag = Bag(source, custom_dir)
     if (bag.root/'trim_report.json').exists():
         raise ValueError('输入已经裁剪；请使用原始 bag，避免重复压缩及来源映射歧义')

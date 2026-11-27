@@ -75,6 +75,9 @@ def capture_upload(spec, queue):
         if kind == 'raw':
             dest = Path(task['raw_root'])/p['group']/p['episode']
             def guard(): require_same(p['source'],p['source_snapshot'])
+            if p.get('input_format')=='mcap':
+                from .mcap_assets import deliver
+                deliver(spec,p['source'],dest,p.get('mcap_assets',[]),verify_only=bool(row['raw_done']))
             if not row['raw_done']:
                 receipt = transfer(spec['data_server'],p['source'],dest,p['raw_files'],identity,progress,guard)
                 durable_json(Path(cfg['state_root'])/'receipts'/(row['id']+'.json'), receipt)
@@ -85,7 +88,7 @@ def capture_upload(spec, queue):
             ledger.export(cfg,queue)
             if cfg['delete_raw_after_upload']:
                 progress(phase='deleting_verified_original')
-                delete_original(cfg,queue,p,row['id'])
+                delete_original(cfg,queue,p,row['id'],verify_assets=(lambda:deliver(spec,p['source'],dest,p['mcap_assets'],verify_only=True)) if p.get('mcap_assets') else None)
             with db: db.execute('UPDATE capture_schedule SET raw_streak=raw_streak+1 WHERE id=1')
             update(state='completed', next_ns=0, error=None)
         else:

@@ -249,3 +249,14 @@ test('ABCD archive telemetry uses its own queue and counts independent retries',
   assert.equal(elements.get('workflow-error').textContent,'');
   assert.doesNotMatch(elements.get('transfer-grid').innerHTML,/archive unavailable/);
 });
+
+test('MCAP format selection changes only original archive path and keeps derived roots', () => {
+  const source=fs.readFileSync(path.join(__dirname,'../src/convest/gui/static/app.js'),'utf8');
+  const context=vm.createContext({});
+  vm.runInContext(source.replace(/init\(\);\s*$/, ''),context);
+  const roots=vm.runInContext(`var task={project:'tomato',robot:'sharpa',scene:'no-block-one',input_format:'rosbag'};
+    generateUploadPaths(task);var old={...task};task.input_format='mcap';generateUploadPaths(task);({old,current:task});`,context);
+  assert.match(roots.current.raw_root,/\/mcap\/sharpa\/no-block-one$/);
+  assert.match(roots.old.raw_root,/\/rosbag\/sharpa\/no-block-one$/);
+  for(const key of ['lerobot_root','normal_root','speedup_root'])assert.equal(roots.old[key],roots.current[key]);
+});

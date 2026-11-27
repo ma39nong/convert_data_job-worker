@@ -56,8 +56,10 @@ def load(path):
         if conversion['robot'] != robot:
             raise ValueError('Conversion robot mismatch')
         conversion.update(source_root=source, repo_id=raw.get('repo_id', f'fr3_{robot}/capture_{group.lower()}'))
+        if cfg.get('input_format') not in (None,'rosbag','mcap'):raise ValueError('Invalid input_format')
         routes.append({'id': rid, 'robot': robot, 'group': group, 'source': source,
                        'conversion': conversion, 'history': history_policy(raw.get('initial_history', cfg.get('initial_history')))})
+        if cfg.get('input_format'):routes[-1]['input_format']=cfg['input_format']
         if mode=='daily':
             routes[-1].update(output=str(Path(cfg['local_batch_root'])/robot/group),batch_hours=cfg['batch_hours'])
             if 'batch_name_format' in cfg:routes[-1]['batch_name_format']=cfg['batch_name_format']

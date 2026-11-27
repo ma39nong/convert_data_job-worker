@@ -117,6 +117,9 @@ def load_collection_state(path, time_map=None):
     path = Path(path)
     time_map = time_map if time_map is not None else load_compact_time_map(path)
     state_path = path / "collection_state.json"
+    from convest.mcap_input import is_mcap,lifecycle
+    if is_mcap(path):
+        return lifecycle(path),time_map,'episode.json' if not state_path.exists() else state_path.name
     if state_path.is_file():
         return json.loads(state_path.read_text()), time_map, state_path.name
     source_state_path = path / "source_collection_state.json"
@@ -239,7 +242,7 @@ def discover(root):
                         "subtasks": subtasks, "subtask_annotation_file": subtask_annotation_file,
                         "eligibility_source": eligibility_source,
                         "source_time_adapter": source_time_adapter,
-                        "bytes": sum(p.stat().st_size for p in path.glob("*.db3"))})
+                        "bytes": sum(p.stat().st_size for p in path.glob("*.mcap" if (path/"episode.json").exists() or any(path.glob("*.mcap")) else "*.db3"))})
     if not results:
         raise ValueError(f"No ROS2 bag metadata found under {root}")
     return results

@@ -1,5 +1,6 @@
 """Read-only source/list preflight, including incomplete episode directories."""
 from pathlib import Path
+from .recordings import EPISODE
 import yaml
 from .sources.gello_rosbag2 import discover, snapshot, natural_key
 from .selection import read_episode_list
@@ -10,7 +11,7 @@ def select_names(source,episodes=None,episode_list=None):
     source=Path(source).resolve()
     if episodes and episode_list:raise ValueError('Use --episode or --episode-list, not both')
     candidates=([source] if (source/'metadata.yaml').exists() else
-                sorted((p for p in source.iterdir() if p.is_dir() and p.name.startswith('episode')),key=natural_key))
+                sorted((p for p in source.iterdir() if p.is_dir() and EPISODE.fullmatch(p.name)),key=natural_key))
     by_name={p.name:p for p in candidates}
     requested=read_episode_list(episode_list)['requested_episodes'] if episode_list else episodes
     names=list(requested) if requested else list(by_name)

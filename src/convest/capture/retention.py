@@ -21,7 +21,7 @@ def check_remaining(root,expected):
             raise InputChanged('Quarantined original was replaced or changed; preserved')
 
 
-def delete_original(cfg,queue,payload,task_id):
+def delete_original(cfg,queue,payload,task_id,verify_assets=None):
     row=queue.db.execute('SELECT * FROM recordings WHERE route=? AND episode=?',(payload['route'],payload['episode'])).fetchone()
     row=dict(row)
     if row['raw_deleted_ns']:
@@ -29,6 +29,9 @@ def delete_original(cfg,queue,payload,task_id):
     upload=queue.db.execute('SELECT raw_done FROM uploads WHERE id=?',(task_id,)).fetchone()
     if not upload or not upload[0] or not row['raw_uploaded_ns'] or not row['raw_receipt']:
         raise ValueError('Deletion requires durable verified remote upload and ledger receipt')
+    if payload.get('mcap_assets'):
+        if verify_assets is None:raise ValueError('MCAP共享资产尚未确认远端备份，保留本机原包')
+        verify_assets()
     route=next(r for r in cfg['routes'] if r['id']==payload['route'])
     source=Path(payload['source'])
     if source!=Path(route['source'])/payload['episode'] or not payload.get('quality_verified'):

@@ -161,7 +161,7 @@ function generateUploadPaths(t) {
     "_" +
     t.robot +
     "/";
-  t.raw_root = base + "rosbag/" + suffix;
+  t.raw_root = base + (t.input_format || "rosbag") + "/" + suffix;
   t.lerobot_root = base + "lerobot/" + suffix;
   t.normal_root = train + "normal/" + t.scene.trim();
   t.speedup_root = train + "speedup/" + t.scene.trim();
@@ -504,7 +504,7 @@ function renderProgress() {
   $("current-phase").textContent = phase;
   $("transfer-grid").innerHTML =
     transferCard(
-      "A/B/C/D 原始 ROSbag → 202",
+      "A/B/C/D 原始 " + (t?.input_format === "mcap" ? "MCAP" : "ROSbag") + " → 202",
       rawUpload,
       false,
       backed + " 包备份完成",
@@ -976,7 +976,7 @@ async function init() {
             el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value;
           if (
             current().auto_upload_paths &&
-            ["project", "robot", "scene", "auto_upload_paths"].includes(
+            ["project", "robot", "scene", "auto_upload_paths", "input_format"].includes(
               el.dataset.task,
             )
           ) {

@@ -32,6 +32,11 @@
           </div>
           <div id="task-list" class="task-list"></div>
           <div class="task-editor">
+            <label>采集原包格式<select id="input_format" data-task="input_format">
+              <option value="mcap">MCAP（新采集默认）</option>
+              <option value="rosbag">ROSbag（SQLite3 历史格式）</option>
+            </select></label>
+            <p class="hint">原包格式决定读取及202备份目录；本轮仍生成现有30Hz LeRobot，normal/speedup流程不变。旧任务保留原格式，修改后保存并重新开始。</p>
             <div class="two-fields">
               <label>项目<input id="project" data-task="project" /></label
               ><label
@@ -120,7 +125,7 @@
           <div class="destination-first">
             <div class="destination-content">
               <label
-                >原始 ROSbag 存储父目录
+                >原始 MCAP / ROSbag 存储父目录
                 <div class="path-field">
                   <input id="raw_root" data-task="raw_root" /><button
                     data-browse="raw_root"
@@ -133,7 +138,7 @@
                 按 A/B/C/D 保存原包。C/D 不清洗、不转换；确认上传完整后按开关释放本机原包。A/B 先确保转换安全入批。
               </p>
               <details class="destination-preview" open>
-                <summary aria-label="原始 ROSbag目录预览">
+                <summary aria-label="原始 MCAP / ROSbag目录预览">
                   完整目录<span class="preview-arrow" aria-hidden="true"
                     >▸</span
                   >
@@ -171,7 +176,7 @@
               </details>
               <label class="checkbox release-option"
                 ><input type="checkbox" data-task="delete_raw" />202
-                备份校验后释放本机原始 ROSbag</label
+                备份校验后释放本机原始文件</label
               >
             </div>
           </div>
